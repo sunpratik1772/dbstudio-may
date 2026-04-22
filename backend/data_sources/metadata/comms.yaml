@@ -1,0 +1,24 @@
+id: comms
+description: Communication messages from the Oculus feed — chat, email snippets.
+sources:
+  - oculus
+columns:
+  - name: user
+    type: string
+    semantic: trader
+    description: Author of the message.
+  - name: timestamp
+    type: datetime
+    semantic: time
+  - name: display_post
+    type: string
+    description: Normalised message text scanned for keywords.
+  - name: event_type
+    type: string
+    description: Channel / system tag (chat, email, voice-transcript, …).
+  - name: _keyword_hit
+    type: boolean
+    description: Added by COMMS_COLLECTOR. True if any keyword matched.
+  - name: _matched_keywords
+    type: object
+    description: Added by COMMS_COLLECTOR. List[str] of matched terms.

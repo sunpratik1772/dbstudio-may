@@ -1,0 +1,35 @@
+# Build hygiene — keep the image small and free of local noise.
+
+# Virtualenvs / python build cruft
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local state that must not be baked into the image (runtime-written
+# on Cloud Run via DBSHERPA_* env vars). Ship the seed workflow/draft
+# files by keeping them *in* the repo but excluding any that users
+# created locally from the layer cache; explicit allow-list below.
+output/
+*.xlsx
+
+# Dev-only fixtures / notebooks
+*.ipynb
+.ipynb_checkpoints/
+
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Tests — we run them in CI, not inside the deployed image.
+tests/
+test_*.py
+*_test.py
+
+# Docs / misc
+*.md

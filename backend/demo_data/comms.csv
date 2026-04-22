@@ -1,0 +1,31 @@
+user,timestamp,display_post,event_type
+T001,2024-01-15 07:30:00,"all clear, clean execution",BLOOMBERG_MSG
+T001,2024-01-15 07:38:00,quarterly rebalancing flow expected,VOICE
+T001,2024-01-15 07:46:00,"WM fix approaching, check your position",BLOOMBERG_MSG
+T001,2024-01-15 07:54:00,client order in line with their mandate,BLOOMBERG_MSG
+T001,2024-01-15 08:02:00,don't show this order yet — wait for my signal,EMAIL
+T001,2024-01-15 08:10:00,quarterly rebalancing flow expected,VOICE
+T001,2024-01-15 08:18:00,step-out to avoid detection,EMAIL
+T001,2024-01-15 08:26:00,"all clear, clean execution",BLOOMBERG_MSG
+T001,2024-01-15 08:34:00,"all clear, clean execution",BLOOMBERG_MSG
+T001,2024-01-15 08:42:00,standard hedging activity for the desk,CHAT
+T001,2024-01-15 08:50:00,rotate through the accounts as discussed,CHAT
+T001,2024-01-15 08:58:00,client order in line with their mandate,VOICE
+T001,2024-01-15 09:06:00,standard hedging activity for the desk,VOICE
+T001,2024-01-15 09:14:00,cover the position quickly before announcement,EMAIL
+T001,2024-01-15 09:22:00,"all clear, clean execution",CHAT
+T001,2024-01-15 09:30:00,client order in line with their mandate,VOICE
+T001,2024-01-15 09:38:00,"market moving, grab liquidity now",BLOOMBERG_MSG
+T001,2024-01-15 09:46:00,"normal execution, nothing unusual here",BLOOMBERG_MSG
+T001,2024-01-15 09:54:00,"layering the book now, be ready to pull",CHAT
+T001,2024-01-15 10:02:00,standard hedging activity for the desk,VOICE
+T001,2024-01-15 10:10:00,rotate through the accounts as discussed,VOICE
+T001,2024-01-15 10:18:00,step-out to avoid detection,EMAIL
+T001,2024-01-15 10:26:00,rotate through the accounts as discussed,BLOOMBERG_MSG
+T001,2024-01-15 10:34:00,"the benchmark is at 1.0890, let's push through",EMAIL
+T001,2024-01-15 10:42:00,standard hedging activity for the desk,EMAIL
+T001,2024-01-15 10:50:00,rotate through the accounts as discussed,EMAIL
+T001,2024-01-15 10:58:00,rotate through the accounts as discussed,VOICE
+T001,2024-01-15 11:06:00,"market moving, grab liquidity now",EMAIL
+T001,2024-01-15 11:14:00,confirmed execution at market,CHAT
+T001,2024-01-15 11:22:00,cover the position quickly before announcement,EMAIL

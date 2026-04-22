@@ -1,0 +1,99 @@
+# Cloud Build pipeline: build → push → deploy.
+#
+# One command drives the whole thing:
+#
+#   gcloud builds submit \
+#       --config backend/deploy/cloudbuild.yaml \
+#       --substitutions=_REGION=us-central1,_REPO=dbsherpa \
+#       backend
+#
+# The trailing `backend` is the build context. Substitutions (variables
+# starting with `_`) can be overridden per-environment so the same
+# pipeline promotes to dev / staging / prod.
+#
+# Prereqs (one-time per project):
+#   1. Enable APIs:
+#        gcloud services enable run.googleapis.com \
+#            artifactregistry.googleapis.com cloudbuild.googleapis.com \
+#            secretmanager.googleapis.com
+#   2. Create Artifact Registry repo:
+#        gcloud artifacts repositories create dbsherpa \
+#            --repository-format=docker --location=us-central1
+#   3. Create the GEMINI_API_KEY secret (see service.yaml comments).
+#   4. Grant Cloud Build's service account `roles/run.admin` and
+#      `roles/iam.serviceAccountUser` on the runtime SA.
+#
+substitutions:
+  _REGION: us-central1
+  _REPO: dbsherpa
+  _SERVICE: dbsherpa-backend
+
+images:
+  - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/backend:${SHORT_SHA}"
+  - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/backend:latest"
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8
+
+steps:
+  # 1. Build the image, tagged with the commit SHA + `latest`.
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --file=Dockerfile
+      - --tag=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/backend:${SHORT_SHA}
+      - --tag=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/backend:latest
+      - .
+
+  # 2. Push both tags.
+  - id: push-sha
+    name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/backend:${SHORT_SHA}
+  - id: push-latest
+    name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/backend:latest
+
+  # 3. Render the service manifest with the freshly built image and
+  #    project-specific placeholders, then reconcile Cloud Run to it.
+  #    Keeping deploy declarative means the state lives in git, not in
+  #    `gcloud run deploy` flags sprinkled across shell history.
+  - id: deploy
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        sed \
+          -e "s|PROJECT_ID|${PROJECT_ID}|g" \
+          -e "s|REGION|${_REGION}|g" \
+          -e "s|:IMAGE_TAG|:${SHORT_SHA}|g" \
+          deploy/service.yaml > /tmp/service.rendered.yaml
+        gcloud run services replace /tmp/service.rendered.yaml \
+          --region=${_REGION} \
+          --platform=managed
+        # Make the service publicly callable. Skip this step (or replace
+        # with an allow-list) for production deployments behind IAP.
+        gcloud run services add-iam-policy-binding ${_SERVICE} \
+          --region=${_REGION} \
+          --member=allUsers \
+          --role=roles/run.invoker
+
+  # 4. Quick smoke — hit `/` on the newly deployed revision.
+  - id: smoke
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        URL=$(gcloud run services describe ${_SERVICE} \
+          --region=${_REGION} --format='value(status.url)')
+        echo "Deployed at: $URL"
+        curl -fsS "$URL/" | tee /dev/stderr

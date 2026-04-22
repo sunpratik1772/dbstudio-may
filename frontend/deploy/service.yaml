@@ -1,0 +1,64 @@
+# Cloud Run service manifest for the dbSherpa frontend.
+#
+#   gcloud run services replace frontend/deploy/service.yaml --region us-central1
+#
+# Placeholders rendered by cloudbuild.yaml:
+#   PROJECT_ID   — your GCP project
+#   REGION       — e.g. us-central1
+#   IMAGE_TAG    — commit SHA of the pushed image
+#   BACKEND_URL  — Cloud Run URL of the dbSherpa backend service
+#                 (e.g. https://dbsherpa-backend-xxxxx-uc.a.run.app)
+#
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: dbsherpa-frontend
+  labels:
+    app: dbsherpa
+    component: frontend
+  annotations:
+    run.googleapis.com/ingress: all
+    run.googleapis.com/description: "dbSherpa SPA + /api reverse proxy."
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/maxScale: "5"
+        run.googleapis.com/cpu-throttling: "true"
+    spec:
+      # nginx is cheap — plenty of headroom per instance.
+      containerConcurrency: 80
+      timeoutSeconds: 600
+      containers:
+        - name: frontend
+          image: REGION-docker.pkg.dev/PROJECT_ID/dbsherpa/frontend:IMAGE_TAG
+          ports:
+            - name: http1
+              containerPort: 8080
+          resources:
+            limits:
+              cpu: "1"
+              memory: "256Mi"
+          env:
+            # The only config the frontend needs at runtime: where to
+            # reverse-proxy /api/* to. Swap environments by changing
+            # this value — no rebuild required.
+            - name: BACKEND_URL
+              value: BACKEND_URL_PLACEHOLDER
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 1
+            periodSeconds: 2
+            failureThreshold: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 30
+            timeoutSeconds: 3
+  traffic:
+    - percent: 100
+      latestRevision: true

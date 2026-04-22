@@ -1,0 +1,194 @@
+{
+  "schema_version": "1.0",
+  "workflow_id": "fi_wash_trade_minimal",
+  "name": "FI Wash Trade Minimal Workflow",
+  "version": "1.0",
+  "description": "Minimal workflow to detect Fixed Income Wash Trades with one built-in signal and report generation.",
+  "nodes": [
+    {
+      "id": "n01",
+      "type": "ALERT_TRIGGER",
+      "label": "Alert Trigger",
+      "config": {
+        "alert_fields": {
+          "trader_id": "string",
+          "book": "string",
+          "alert_date": "date",
+          "currency_pair": "string",
+          "entity": "string",
+          "alert_id": "string"
+        }
+      }
+    },
+    {
+      "id": "n02",
+      "type": "TRADE_DATA_COLLECTOR",
+      "label": "Collect Client Orders",
+      "config": {
+        "source": "hs_client_order",
+        "query_template": "trader_id:{context.trader_id} AND book:\"{context.book}\" AND currency_pair:\"{context.currency_pair}\" AND order_time:[{context.alert_date}T00:00:00Z TO {context.alert_date}T23:59:59Z]",
+        "output_name": "client_orders_raw"
+      }
+    },
+    {
+      "id": "n03",
+      "type": "TRADE_DATA_COLLECTOR",
+      "label": "Collect Executions",
+      "config": {
+        "source": "hs_execution",
+        "query_template": "trader_id:{context.trader_id} AND trade_version:1 AND book:\"{context.book}\" AND currency_pair:\"{context.currency_pair}\" AND exec_time:[{context.alert_date}T00:00:00Z TO {context.alert_date}T23:59:59Z]",
+        "output_name": "executions_raw"
+      }
+    },
+    {
+      "id": "n04",
+      "type": "NORMALISE_ENRICH",
+      "label": "Enrich Client Orders",
+      "config": {
+        "input_name": "client_orders_raw",
+        "output_name": "client_orders_enriched",
+        "track_lifecycle": true,
+        "compute_signed_notional": true,
+        "field_renames": {}
+      }
+    },
+    {
+      "id": "n05",
+      "type": "NORMALISE_ENRICH",
+      "label": "Enrich Executions",
+      "config": {
+        "input_name": "executions_raw",
+        "output_name": "executions_enriched",
+        "track_lifecycle": true,
+        "compute_signed_notional": true,
+        "field_renames": {}
+      }
+    },
+    {
+      "id": "n06",
+      "type": "SIGNAL_CALCULATOR",
+      "label": "Wash Trade Detection",
+      "config": {
+        "mode": "configure",
+        "signal_type": "WASH_TRADE",
+        "input_name": "executions_enriched",
+        "output_name": "wash_trade_signals",
+        "params": {
+          "window_minutes": 10,
+          "ratio_threshold": 0.8
+        }
+      }
+    },
+    {
+      "id": "n07",
+      "type": "DATA_HIGHLIGHTER",
+      "label": "Highlight Wash Trade Signals",
+      "config": {
+        "input_name": "wash_trade_signals",
+        "output_name": "wash_trade_signals_highlighted",
+        "rules": [
+          {
+            "condition": "_signal_flag == True",
+            "colour": "#FF4444",
+            "label": "WASH SIGNAL"
+          },
+          {
+            "condition": "side == 'BUY'",
+            "colour": "#90EE90",
+            "label": "BUY"
+          },
+          {
+            "condition": "side == 'SELL'",
+            "colour": "#87CEEB",
+            "label": "SELL"
+          }
+        ]
+      },
+      "position": {
+        "x": 1260,
+        "y": 60
+      }
+    },
+    {
+      "id": "n08",
+      "type": "DECISION_RULE",
+      "label": "Wash Trade Disposition",
+      "config": {
+        "input_name": "wash_trade_signals",
+        "escalate_threshold": 3,
+        "review_threshold": 1
+      }
+    },
+    {
+      "id": "n09",
+      "type": "REPORT_OUTPUT",
+      "label": "Generate Wash Trade Report",
+      "config": {
+        "output_path": "output/fi_wash_trade_report_{context.alert_id}.xlsx",
+        "tabs": [
+          {
+            "name": "Client Orders",
+            "dataset": "client_orders_enriched",
+            "include_highlights": false
+          },
+          {
+            "name": "Executions",
+            "dataset": "executions_enriched",
+            "include_highlights": false
+          },
+          {
+            "name": "Wash Signals",
+            "dataset": "wash_trade_signals",
+            "include_highlights": true
+          }
+        ]
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "n01",
+      "to": "n02"
+    },
+    {
+      "from": "n01",
+      "to": "n03"
+    },
+    {
+      "from": "n02",
+      "to": "n04"
+    },
+    {
+      "from": "n03",
+      "to": "n05"
+    },
+    {
+      "from": "n04",
+      "to": "n09"
+    },
+    {
+      "from": "n05",
+      "to": "n06"
+    },
+    {
+      "from": "n06",
+      "to": "n07"
+    },
+    {
+      "from": "n06",
+      "to": "n08"
+    },
+    {
+      "from": "n06",
+      "to": "n09"
+    },
+    {
+      "from": "n07",
+      "to": "n09"
+    },
+    {
+      "from": "n08",
+      "to": "n09"
+    }
+  ]
+}

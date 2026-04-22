@@ -1,0 +1,832 @@
+{
+  "version": "1.0",
+  "description": "I/O contracts for all dbSherpa node types. All datasets are pandas DataFrames passed by name through the shared RunContext.",
+  "nodes": {
+    "ALERT_TRIGGER": {
+      "description": "Entry point \u2014 binds alert payload to context",
+      "inputs": {
+        "alert_payload": "JSON object passed at workflow invocation time."
+      },
+      "outputs": {
+        "context_keys": "One context key per declared alert_field, e.g. trader_id, book, alert_date, currency_pair, alert_id."
+      },
+      "config_schema": {
+        "alert_fields": "Map of field_name \u2192 type (string|date|number). Binds standard fields trader_id, book, alert_date, currency_pair, alert_id, entity, desk."
+      },
+      "constraints": [
+        "Must be the first node (id=n01).",
+        "No dataset inputs or outputs."
+      ],
+      "ports": {
+        "inputs": [
+          {
+            "name": "alert_payload",
+            "type": "object",
+            "description": "JSON object passed at workflow invocation time.",
+            "optional": false
+          }
+        ],
+        "outputs": [
+          {
+            "name": "context_keys",
+            "type": "object",
+            "description": "One context key per declared alert_field, e.g. trader_id, book, alert_date, currency_pair, alert_id.",
+            "optional": false
+          }
+        ]
+      },
+      "params": [
+        {
+          "name": "alert_fields",
+          "type": "object",
+          "description": "Map of field_name \u2192 type (string|date|number). Binds standard fields trader_id, book, alert_date, currency_pair, alert_id, entity, desk.",
+          "required": false,
+          "widget": "json",
+          "default": {}
+        }
+      ]
+    },
+    "COMMS_COLLECTOR": {
+      "description": "Query Oculus comms with keyword scanning",
+      "inputs": {
+        "context": "Context keys referenced in query_template as {context.xxx}."
+      },
+      "outputs": {
+        "comms": "DataFrame with columns: user, timestamp, display_post, event_type, _keyword_hit, _matched_keywords. Stored under ctx.datasets[output_name].",
+        "keyword_hit_count": "Total keyword hit count (int). Stored as {output_name}_keyword_hits."
+      },
+      "config_schema": {
+        "query_template": "Oculus query with {context.xxx} placeholders.",
+        "keywords": "Terms to scan in display_post.",
+        "output_name": "Dataset name in ctx.datasets."
+      },
+      "constraints": [
+        "Always adds _keyword_hit (boolean) and _matched_keywords (list[str]) columns.",
+        "Scans display_post field only."
+      ],
+      "ports": {
+        "inputs": [
+          {
+            "name": "context",
+            "type": "object",
+            "description": "Context keys referenced in query_template as {context.xxx}.",
+            "optional": true
+          }
+        ],
+        "outputs": [
+          {
+            "name": "comms",
+            "type": "dataframe",
+            "description": "DataFrame with columns: user, timestamp, display_post, event_type, _keyword_hit, _matched_keywords. Stored under ctx.datasets[output_name].",
+            "optional": false
+          },
+          {
+            "name": "keyword_hit_count",
+            "type": "scalar",
+            "description": "Total keyword hit count (int). Stored as {output_name}_keyword_hits.",
+            "optional": true
+          }
+        ]
+      },
+      "params": [
+        {
+          "name": "query_template",
+          "type": "string",
+          "description": "Oculus query with {context.xxx} placeholders.",
+          "required": true,
+          "widget": "textarea"
+        },
+        {
+          "name": "keywords",
+          "type": "string_list",
+          "description": "Terms to scan in display_post.",
+          "required": false,
+          "widget": "chips",
+          "default": []
+        },
+        {
+          "name": "output_name",
+          "type": "string",
+          "description": "Dataset name in ctx.datasets.",
+          "required": true,
+          "widget": "text",
+          "default": "comms"
+        }
+      ]
+    },
+    "CONSOLIDATED_SUMMARY": {
+      "description": "LLM executive summary across all sections",
+      "inputs": {
+        "sections": "All section objects produced by upstream SECTION_SUMMARY nodes (context.sections)."
+      },
+      "outputs": {
+        "executive_summary": "Multi-paragraph executive summary. Stored as context.executive_summary."
+      },
+      "config_schema": {
+        "llm_prompt_template": "Custom prompt with {section_text}, {trader_id}, {currency_pair}, {disposition}, {flag_count} placeholders. Falls back to the built-in template when empty."
+      },
+      "constraints": [
+        "LLM model: claude-sonnet-4-6, max_tokens: 1000.",
+        "Must run after all SECTION_SUMMARY nodes."
+      ],
+      "ports": {
+        "inputs": [
+          {
+            "name": "sections",
+            "type": "object",
+            "description": "All section objects produced by upstream SECTION_SUMMARY nodes (context.sections).",
+            "optional": false
+          }
+        ],
+        "outputs": [
+          {
+            "name": "executive_summary",
+            "type": "text",
+            "description": "Multi-paragraph executive summary. Stored as context.executive_summary.",
+            "optional": false
+          }
+        ]
+      },
+      "params": [
+        {
+          "name": "llm_prompt_template",
+          "type": "string",
+          "description": "Custom prompt with {section_text}, {trader_id}, {currency_pair}, {disposition}, {flag_count} placeholders. Falls back to the built-in template when empty.",
+          "required": false,
+          "widget": "textarea"
+        }
+      ]
+    },
+    "DATA_HIGHLIGHTER": {
+      "description": "Apply colour rules to dataset rows",
+      "inputs": {
+        "dataset": "Any DataFrame referenced by input_name."
+      },
+      "outputs": {
+        "highlighted": "Input DataFrame + _highlight_colour (hex) + _highlight_label (str). Stored under ctx.datasets[output_name]."
+      },
+      "config_schema": {
+        "input_name": "Source dataset.",
+        "output_name": "Highlighted dataset name (convention: input_name + '_highlighted').",
+        "rules": "Array of {condition: string (pandas eval expression), colour: string (hex #RRGGBB), label: string}."
+      },
+      "constraints": [
+        "Conditions are evaluated with pandas DataFrame.eval().",
+        "Rules are applied in order \u2014 last matching rule wins.",
+        "Rows with no matching rule get colour #FFFFFF and empty label."
+      ],
+      "ports": {
+        "inputs": [
+          {
+            "name": "dataset",
+            "type": "dataframe",
+            "description": "Any DataFrame referenced by input_name.",
+            "optional": false
+          }
+        ],
+        "outputs": [
+          {
+            "name": "highlighted",
+            "type": "dataframe",
+            "description": "Input DataFrame + _highlight_colour (hex) + _highlight_label (str). Stored under ctx.datasets[output_name].",
+            "optional": false
+          }
+        ]
+      },
+      "params": [
+        {
+          "name": "input_name",
+          "type": "input_ref",
+          "description": "Source dataset.",
+          "required": true,
+          "widget": "input_ref"
+        },
+        {
+          "name": "output_name",
+          "type": "string",
+          "description": "Highlighted dataset name (convention: input_name + '_highlighted').",
+          "required": true,
+          "widget": "text"
+        },
+        {
+          "name": "rules",
+          "type": "array",
+          "description": "Array of {condition: string (pandas eval expression), colour: string (hex #RRGGBB), label: string}.",
+          "required": false,
+          "widget": "json",
+          "default": []
+        }
+      ]
+    },
+    "DECISION_RULE": {
+      "description": "Evaluate flag_count \u2192 ESCALATE/REVIEW/DISMISS",
+      "inputs": {
+        "dataset": "Signal DataFrame with _signal_flag column.",
+        "flag_count": "Flag count from SIGNAL_CALCULATOR (read from ctx.values[{input_name}_flag_count] if the dataset isn't available)."
+      },
+      "outputs": {
+        "disposition": "'ESCALATE' | 'REVIEW' | 'DISMISS'. Stored as context.disposition.",
+        "flag_count": "Total signal hits (int). Stored as context.flag_count.",
+        "output_branch": "Branch name to route to. Stored as context.output_branch."
+      },
+      "config_schema": {
+        "input_name": "Signal dataset name.",
+        "flag_count_expr": "Python expression using 'flag_count' variable, e.g. 'flag_count > 0'. Overrides escalate/review thresholds when supplied.",
+        "escalate_threshold": "flag_count >= this \u2192 ESCALATE.",
+        "review_threshold": "flag_count >= this \u2192 REVIEW, else DISMISS.",
+        "output_branches": "Map of disposition \u2192 branch_name string."
+      },
+      "ports": {
+        "inputs": [
+          {
+            "name": "dataset",
+            "type": "dataframe",
+            "description": "Signal DataFrame with _signal_flag column.",
+            "optional": false
+          },
+          {
+            "name": "flag_count",
+            "type": "scalar",
+            "description": "Flag count from SIGNAL_CALCULATOR (read from ctx.values[{input_name}_flag_count] if the dataset isn't available).",
+            "optional": true
+          }
+        ],
+        "outputs": [
+          {
+            "name": "disposition",
+            "type": "text",
+            "description": "'ESCALATE' | 'REVIEW' | 'DISMISS'. Stored as context.disposition.",
+            "optional": false
+          },
+          {
+            "name": "flag_count",
+            "type": "scalar",
+            "description": "Total signal hits (int). Stored as context.flag_count.",
+            "optional": false
+          },
+          {
+            "name": "output_branch",
+            "type": "text",
+            "description": "Branch name to route to. Stored as context.output_branch.",
+            "optional": false
+          }
+        ]
+      },
+      "params": [
+        {
+          "name": "input_name",
+          "type": "input_ref",
+          "description": "Signal dataset name.",
+          "required": true,
+          "widget": "input_ref"
+        },
+        {
+          "name": "flag_count_expr",
+          "type": "string",
+          "description": "Python expression using 'flag_count' variable, e.g. 'flag_count > 0'. Overrides escalate/review thresholds when supplied.",
+          "required": false,
+          "widget": "text"
+        },
+        {
+          "name": "escalate_threshold",
+          "type": "integer",
+          "description": "flag_count >= this \u2192 ESCALATE.",
+          "required": false,
+          "widget": "number",
+          "default": 1
+        },
+        {
+          "name": "review_threshold",
+          "type": "integer",
+          "description": "flag_count >= this \u2192 REVIEW, else DISMISS.",
+          "required": false,
+          "widget": "number",
+          "default": 1
+        },
+        {
+          "name": "output_branches",
+          "type": "object",
+          "description": "Map of disposition \u2192 branch_name string.",
+          "required": false,
+          "widget": "json",
+          "default": {}
+        }
+      ]
+    },
+    "MARKET_DATA_COLLECTOR": {
+      "description": "Query EBS/Mercury tick data, normalise timestamps",
+      "inputs": {
+        "context": "Context keys referenced in query_template as {context.xxx}."
+      },
+      "outputs": {
+        "ticks": "DataFrame with columns: timestamp (ISO str), symbol (str), bid, ask, mid, spread_pips, bid_size, ask_size, venue_name, seq_no. Stored under ctx.datasets[output_name].",
+        "tick_count": "Tick count (int). Stored as {output_name}_tick_count."
+      },
+      "config_schema": {
+        "source": "Which tick feed to query.",
+        "query_template": "Query with {context.xxx} placeholders.",
+        "output_name": "Dataset name in ctx.datasets."
+      },
+      "constraints": [
+        "Normalises raw_timestamp (nanosecond int) \u2192 ISO-8601 string.",
+        "Normalises byte-string fields (raw_symbol, venue) \u2192 plain str."
+      ],
+      "ports": {
+        "inputs": [
+          {
+            "name": "context",
+            "type": "object",
+            "description": "Context keys referenced in query_template as {context.xxx}.",
+            "optional": true
+          }
+        ],
+        "outputs": [
+          {
+            "name": "ticks",
+            "type": "dataframe",
+            "description": "DataFrame with columns: timestamp (ISO str), symbol (str), bid, ask, mid, spread_pips, bid_size, ask_size, venue_name, seq_no. Stored under ctx.datasets[output_name].",
+            "optional": false
+          },
+          {
+            "name": "tick_count",
+            "type": "scalar",
+            "description": "Tick count (int). Stored as {output_name}_tick_count.",
+            "optional": true
+          }
+        ]
+      },
+      "params": [
+        {
+          "name": "source",
+          "type": "enum",
+          "description": "Which tick feed to query.",
+          "required": true,
+          "widget": "select",
+          "default": "EBS",
+          "enum": [
+            "EBS",
+            "Mercury"
+          ]
+        },
+        {
+          "name": "query_template",
+          "type": "string",
+          "description": "Query with {context.xxx} placeholders.",
+          "required": true,
+          "widget": "textarea"
+        },
+        {
+          "name": "output_name",
+          "type": "string",
+          "description": "Dataset name in ctx.datasets.",
+          "required": true,
+          "widget": "text",
+          "default": "market_data"
+        }
+      ]
+    },
+    "NORMALISE_ENRICH": {
+      "description": "Rename fields, lifecycle tracking, signed_notional",
+      "inputs": {
+        "dataset": "Any trade DataFrame referenced by input_name."
+      },
+      "outputs": {
+        "enriched": "Enriched DataFrame. May add: _prev_status, _status_changed, _lifecycle_event, signed_notional."
+      },
+      "config_schema": {
+        "input_name": "Source dataset name (an upstream output_name).",
+        "output_name": "Enriched dataset name.",
+        "field_renames": "Map of old_col_name \u2192 new_col_name.",
+        "track_lifecycle": "Adds _prev_status, _status_changed, _lifecycle_event (requires order_id, status columns).",
+        "compute_signed_notional": "Adds signed_notional = qty * price * \u00b11 based on side (BUY=+1, SELL=-1)."
+      },
+      "ports": {
+        "inputs": [
+          {
+            "name": "dataset",
+            "type": "dataframe",
+            "description": "Any trade DataFrame referenced by input_name.",
+            "optional": false
+          }
+        ],
+        "outputs": [
+          {
+            "name": "enriched",
+            "type": "dataframe",
+            "description": "Enriched DataFrame. May add: _prev_status, _status_changed, _lifecycle_event, signed_notional.",
+            "optional": false
+          }
+        ]
+      },
+      "params": [
+        {
+          "name": "input_name",
+          "type": "input_ref",
+          "description": "Source dataset name (an upstream output_name).",
+          "required": true,
+          "widget": "input_ref"
+        },
+        {
+          "name": "output_name",
+          "type": "string",
+          "description": "Enriched dataset name.",
+          "required": true,
+          "widget": "text"
+        },
+        {
+          "name": "field_renames",
+          "type": "object",
+          "description": "Map of old_col_name \u2192 new_col_name.",
+          "required": false,
+          "widget": "json",
+          "default": {}
+        },
+        {
+          "name": "track_lifecycle",
+          "type": "boolean",
+          "description": "Adds _prev_status, _status_changed, _lifecycle_event (requires order_id, status columns).",
+          "required": false,
+          "widget": "checkbox",
+          "default": false
+        },
+        {
+          "name": "compute_signed_notional",
+          "type": "boolean",
+          "description": "Adds signed_notional = qty * price * \u00b11 based on side (BUY=+1, SELL=-1).",
+          "required": false,
+          "widget": "checkbox",
+          "default": false
+        }
+      ]
+    },
+    "REPORT_OUTPUT": {
+      "description": "Generate Excel report with tabs & highlights",
+      "inputs": {
+        "datasets": "All DataFrames to include as tabs (ctx.datasets).",
+        "sections": "Section narratives for the Section Summaries sheet.",
+        "executive_summary": "Executive summary text.",
+        "context": "disposition, trader_id, currency_pair etc. used on the cover page."
+      },
+      "outputs": {
+        "report_path": "Absolute path to the written .xlsx file. Stored as context.report_path."
+      },
+      "config_schema": {
+        "output_path": "File path for the Excel output (e.g. 'output/report.xlsx').",
+        "tabs": "Array of {name: string (max 31 chars), dataset: string, include_highlights: boolean}. When empty, all context.datasets are included."
+      },
+      "constraints": [
+        "Tab names truncated to 31 characters (Excel limit).",
+        "Datetime columns converted to strings automatically.",
+        "List/dict cell values stringified automatically.",
+        "If include_highlights=true, uses dataset_name + '_highlighted' if it exists.",
+        "Must be the final node in the workflow."
+      ],
+      "ports": {
+        "inputs": [
+          {
+            "name": "datasets",
+            "type": "object",
+            "description": "All DataFrames to include as tabs (ctx.datasets).",
+            "optional": false
+          },
+          {
+            "name": "sections",
+            "type": "object",
+            "description": "Section narratives for the Section Summaries sheet.",
+            "optional": true
+          },
+          {
+            "name": "executive_summary",
+            "type": "text",
+            "description": "Executive summary text.",
+            "optional": true
+          },
+          {
+            "name": "context",
+            "type": "object",
+            "description": "disposition, trader_id, currency_pair etc. used on the cover page.",
+            "optional": true
+          }
+        ],
+        "outputs": [
+          {
+            "name": "report_path",
+            "type": "text",
+            "description": "Absolute path to the written .xlsx file. Stored as context.report_path.",
+            "optional": false
+          }
+        ]
+      },
+      "params": [
+        {
+          "name": "output_path",
+          "type": "string",
+          "description": "File path for the Excel output (e.g. 'output/report.xlsx').",
+          "required": true,
+          "widget": "text"
+        },
+        {
+          "name": "tabs",
+          "type": "array",
+          "description": "Array of {name: string (max 31 chars), dataset: string, include_highlights: boolean}. When empty, all context.datasets are included.",
+          "required": false,
+          "widget": "json",
+          "default": []
+        }
+      ]
+    },
+    "SECTION_SUMMARY": {
+      "description": "Aggregate stats + LLM narrative section",
+      "inputs": {
+        "dataset": "Any DataFrame referenced by input_name.",
+        "context": "trader_id, currency_pair, disposition consumed by the prompt template."
+      },
+      "outputs": {
+        "section": "{name, stats, narrative, dataset}. Stored under context.sections[section_name]."
+      },
+      "config_schema": {
+        "section_name": "Unique section identifier.",
+        "input_name": "Source dataset.",
+        "field_bindings": "Array of {field: string, agg: 'count'|'sum'|'mean'|'nunique'|'max'|'min'}.",
+        "llm_prompt_template": "Prompt with {stats}, {section}, {disposition}, {trader_id}, {currency_pair} placeholders."
+      },
+      "constraints": [
+        "LLM model: claude-sonnet-4-6, max_tokens: 600."
+      ],
+      "ports": {
+        "inputs": [
+          {
+            "name": "dataset",
+            "type": "dataframe",
+            "description": "Any DataFrame referenced by input_name.",
+            "optional": false
+          },
+          {
+            "name": "context",
+            "type": "object",
+            "description": "trader_id, currency_pair, disposition consumed by the prompt template.",
+            "optional": true
+          }
+        ],
+        "outputs": [
+          {
+            "name": "section",
+            "type": "object",
+            "description": "{name, stats, narrative, dataset}. Stored under context.sections[section_name].",
+            "optional": false
+          }
+        ]
+      },
+      "params": [
+        {
+          "name": "section_name",
+          "type": "string",
+          "description": "Unique section identifier.",
+          "required": true,
+          "widget": "text"
+        },
+        {
+          "name": "input_name",
+          "type": "input_ref",
+          "description": "Source dataset.",
+          "required": true,
+          "widget": "input_ref"
+        },
+        {
+          "name": "field_bindings",
+          "type": "array",
+          "description": "Array of {field: string, agg: 'count'|'sum'|'mean'|'nunique'|'max'|'min'}.",
+          "required": false,
+          "widget": "json",
+          "default": []
+        },
+        {
+          "name": "llm_prompt_template",
+          "type": "string",
+          "description": "Prompt with {stats}, {section}, {disposition}, {trader_id}, {currency_pair} placeholders.",
+          "required": false,
+          "widget": "textarea"
+        }
+      ]
+    },
+    "SIGNAL_CALCULATOR": {
+      "description": "Compute signals \u2014 always outputs 5 columns",
+      "inputs": {
+        "dataset": "Trade/execution DataFrame (typically after NORMALISE_ENRICH)."
+      },
+      "outputs": {
+        "signals": "Input DataFrame + exactly 5 signal columns: _signal_flag (bool), _signal_score (float 0-10), _signal_reason (str), _signal_type (str), _signal_window (str).",
+        "flag_count": "Number of rows where _signal_flag == True. Stored as {output_name}_flag_count."
+      },
+      "config_schema": {
+        "mode": "How the signal is computed.",
+        "signal_type": "Built-in signal family (configure mode only).",
+        "input_name": "Source dataset name (an upstream output_name).",
+        "output_name": "Output dataset name.",
+        "params": "Signal-specific parameters (overrides built-in defaults).",
+        "script_path": "Path to custom Python script (upload_script mode).",
+        "script_content": "Inline Python snippet operating on local variable `df` (upload_script mode)."
+      },
+      "constraints": [
+        "ALWAYS outputs exactly these 5 columns: _signal_flag, _signal_score, _signal_reason, _signal_type, _signal_window.",
+        "Missing signal columns are auto-filled with defaults (False, 0.0, '', '', '').",
+        "Custom scripts must operate on local variable 'df' and leave result in 'df'."
+      ],
+      "built_in_signal_params": {
+        "FRONT_RUNNING": {
+          "window_minutes": 5,
+          "price_move_threshold": 0.0003
+        },
+        "WASH_TRADE": {
+          "window_minutes": 10,
+          "ratio_threshold": 0.8
+        },
+        "SPOOFING": {
+          "cancel_ratio_threshold": 0.7,
+          "window": "1d"
+        },
+        "LAYERING": {
+          "min_layers": 5,
+          "window": "30m"
+        }
+      },
+      "ports": {
+        "inputs": [
+          {
+            "name": "dataset",
+            "type": "dataframe",
+            "description": "Trade/execution DataFrame (typically after NORMALISE_ENRICH).",
+            "optional": false
+          }
+        ],
+        "outputs": [
+          {
+            "name": "signals",
+            "type": "dataframe",
+            "description": "Input DataFrame + exactly 5 signal columns: _signal_flag (bool), _signal_score (float 0-10), _signal_reason (str), _signal_type (str), _signal_window (str).",
+            "optional": false
+          },
+          {
+            "name": "flag_count",
+            "type": "scalar",
+            "description": "Number of rows where _signal_flag == True. Stored as {output_name}_flag_count.",
+            "optional": true
+          }
+        ]
+      },
+      "params": [
+        {
+          "name": "mode",
+          "type": "enum",
+          "description": "How the signal is computed.",
+          "required": true,
+          "widget": "select",
+          "default": "configure",
+          "enum": [
+            "configure",
+            "upload_script"
+          ]
+        },
+        {
+          "name": "signal_type",
+          "type": "enum",
+          "description": "Built-in signal family (configure mode only).",
+          "required": false,
+          "widget": "select",
+          "enum": [
+            "FRONT_RUNNING",
+            "WASH_TRADE",
+            "SPOOFING",
+            "LAYERING"
+          ]
+        },
+        {
+          "name": "input_name",
+          "type": "input_ref",
+          "description": "Source dataset name (an upstream output_name).",
+          "required": true,
+          "widget": "input_ref"
+        },
+        {
+          "name": "output_name",
+          "type": "string",
+          "description": "Output dataset name.",
+          "required": true,
+          "widget": "text"
+        },
+        {
+          "name": "params",
+          "type": "object",
+          "description": "Signal-specific parameters (overrides built-in defaults).",
+          "required": false,
+          "widget": "json",
+          "default": {}
+        },
+        {
+          "name": "script_path",
+          "type": "string",
+          "description": "Path to custom Python script (upload_script mode).",
+          "required": false,
+          "widget": "text"
+        },
+        {
+          "name": "script_content",
+          "type": "code",
+          "description": "Inline Python snippet operating on local variable `df` (upload_script mode).",
+          "required": false,
+          "widget": "code"
+        }
+      ]
+    },
+    "TRADE_DATA_COLLECTOR": {
+      "description": "Query Solr trade data (orders/executions)",
+      "inputs": {
+        "context": "Context keys referenced in query_template as {context.xxx}"
+      },
+      "outputs": {
+        "trades": "Order / execution rows. Stored in ctx.datasets under the configured output_name.",
+        "row_count": "Integer row count. Stored in ctx.values as {output_name}_count."
+      },
+      "config_schema": {
+        "source": "Which Solr collection to query.",
+        "query_template": "Solr query; use {context.xxx} placeholders for alert fields.",
+        "output_name": "Dataset name in ctx.datasets.",
+        "loop_over_books": "Repeat the query for each book in the books list.",
+        "books": "Book names when loop_over_books=true."
+      },
+      "constraints": [
+        "When source='hs_execution', trade_version:1 MUST be hard-coded in query_template \u2014 never from context.",
+        "Output DataFrame will always include trade_version=1 column for hs_execution."
+      ],
+      "ports": {
+        "inputs": [
+          {
+            "name": "context",
+            "type": "object",
+            "description": "Context keys referenced in query_template as {context.xxx}",
+            "optional": true
+          }
+        ],
+        "outputs": [
+          {
+            "name": "trades",
+            "type": "dataframe",
+            "description": "Order / execution rows. Stored in ctx.datasets under the configured output_name.",
+            "optional": false
+          },
+          {
+            "name": "row_count",
+            "type": "scalar",
+            "description": "Integer row count. Stored in ctx.values as {output_name}_count.",
+            "optional": true
+          }
+        ]
+      },
+      "params": [
+        {
+          "name": "source",
+          "type": "enum",
+          "description": "Which Solr collection to query.",
+          "required": true,
+          "widget": "select",
+          "default": "hs_client_order",
+          "enum": [
+            "hs_client_order",
+            "hs_execution"
+          ]
+        },
+        {
+          "name": "query_template",
+          "type": "string",
+          "description": "Solr query; use {context.xxx} placeholders for alert fields.",
+          "required": true,
+          "widget": "textarea"
+        },
+        {
+          "name": "output_name",
+          "type": "string",
+          "description": "Dataset name in ctx.datasets.",
+          "required": true,
+          "widget": "text",
+          "default": "trade_data"
+        },
+        {
+          "name": "loop_over_books",
+          "type": "boolean",
+          "description": "Repeat the query for each book in the books list.",
+          "required": false,
+          "widget": "checkbox",
+          "default": false
+        },
+        {
+          "name": "books",
+          "type": "string_list",
+          "description": "Book names when loop_over_books=true.",
+          "required": false,
+          "widget": "chips",
+          "default": []
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,46 @@
+id: trades
+description: Trade / order rows from Solr (hs_client_order and hs_execution collections).
+sources:
+  - hs_client_order
+  - hs_execution
+columns:
+  - name: trader_id
+    type: string
+    semantic: trader
+    description: Desk-scoped trader identifier (alert-bound in ALERT_TRIGGER).
+  - name: order_id
+    type: string
+    description: Unique order/execution id.
+  - name: timestamp
+    type: datetime
+    semantic: time
+    description: Event wall-clock time.
+  - name: currency_pair
+    type: string
+    description: Instrument traded (e.g. EUR/USD).
+  - name: side
+    type: string
+    description: BUY or SELL.
+  - name: qty
+    type: number
+    semantic: size
+    description: Quantity in base currency units.
+  - name: price
+    type: number
+    semantic: price
+    description: Execution / order price.
+  - name: book
+    type: string
+    description: Trading book the order belongs to.
+  - name: status
+    type: string
+    description: Order lifecycle status (NEW, FILLED, CANCELED, …).
+  - name: trade_version
+    type: integer
+    description: Required 1 for hs_execution reads; absent on hs_client_order.
+    optional: true
+  - name: signed_notional
+    type: number
+    semantic: notional
+    description: Added by NORMALISE_ENRICH when compute_signed_notional=true.
+    optional: true

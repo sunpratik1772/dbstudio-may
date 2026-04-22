@@ -1,0 +1,443 @@
+{
+  "schema_version": "1.0",
+  "workflow_id": "fx_front_running_eur_usd_concise",
+  "name": "FX Front-Running (EUR/USD) - Concise",
+  "version": "1.0",
+  "description": "A concise workflow to detect FX Front-Running for EUR/USD, including client orders, prop executions, comms, and market data.",
+  "nodes": [
+    {
+      "id": "n01",
+      "type": "ALERT_TRIGGER",
+      "label": "Alert Trigger",
+      "config": {
+        "alert_fields": {
+          "trader_id": "string",
+          "book": "string",
+          "alert_date": "date",
+          "currency_pair": "string",
+          "alert_id": "string"
+        }
+      }
+    },
+    {
+      "id": "n02",
+      "type": "TRADE_DATA_COLLECTOR",
+      "label": "Collect Client Orders",
+      "config": {
+        "source": "hs_client_order",
+        "query_template": "trader_id:{context.trader_id} AND book:{context.book} AND currency_pair:{context.currency_pair} AND order_time:[{context.alert_date}T00:00:00Z TO {context.alert_date}T23:59:59Z]",
+        "output_name": "client_orders"
+      }
+    },
+    {
+      "id": "n03",
+      "type": "TRADE_DATA_COLLECTOR",
+      "label": "Collect Proprietary Executions",
+      "config": {
+        "source": "hs_execution",
+        "query_template": "trader_id:{context.trader_id} AND trade_version:1 AND book:{context.book} AND currency_pair:{context.currency_pair} AND exec_time:[{context.alert_date}T00:00:00Z TO {context.alert_date}T23:59:59Z]",
+        "output_name": "prop_executions"
+      }
+    },
+    {
+      "id": "n04",
+      "type": "COMMS_COLLECTOR",
+      "label": "Collect Communications",
+      "config": {
+        "query_template": "user:{context.trader_id} AND timestamp:[{context.alert_date}T00:00:00Z TO {context.alert_date}T23:59:59Z]",
+        "keywords": [
+          "fix",
+          "benchmark",
+          "front-run",
+          "ahead",
+          "before the move",
+          "WM fix",
+          "cover",
+          "rotate",
+          "push through",
+          "client order",
+          "step-out",
+          "pull"
+        ],
+        "output_name": "comms_data"
+      }
+    },
+    {
+      "id": "n05",
+      "type": "MARKET_DATA_COLLECTOR",
+      "label": "Collect Market Data (EBS)",
+      "config": {
+        "source": "EBS",
+        "query_template": "symbol:{context.currency_pair} AND timestamp:[{context.alert_date}T00:00:00Z TO {context.alert_date}T23:59:59Z]",
+        "output_name": "market_data"
+      }
+    },
+    {
+      "id": "n06",
+      "type": "NORMALISE_ENRICH",
+      "label": "Enrich Client Orders",
+      "config": {
+        "input_name": "client_orders",
+        "output_name": "enriched_client_orders",
+        "track_lifecycle": true,
+        "compute_signed_notional": true,
+        "field_renames": {}
+      }
+    },
+    {
+      "id": "n07",
+      "type": "NORMALISE_ENRICH",
+      "label": "Enrich Prop Executions",
+      "config": {
+        "input_name": "prop_executions",
+        "output_name": "enriched_prop_executions",
+        "track_lifecycle": false,
+        "compute_signed_notional": true,
+        "field_renames": {}
+      }
+    },
+    {
+      "id": "n08",
+      "type": "SIGNAL_CALCULATOR",
+      "label": "Detect Front-Running (Built-in)",
+      "config": {
+        "mode": "configure",
+        "signal_type": "FRONT_RUNNING",
+        "input_name": "enriched_prop_executions",
+        "output_name": "fro_signals",
+        "params": {
+          "window_minutes": 5,
+          "price_move_threshold": 0.0003
+        }
+      }
+    },
+    {
+      "id": "n09",
+      "type": "SIGNAL_CALCULATOR",
+      "label": "Detect Timing Correlation",
+      "config": {
+        "mode": "upload_script",
+        "input_name": "enriched_prop_executions",
+        "output_name": "timing_correlation_signals",
+        "script_content": "import pandas as pd\nif all(c in df.columns for c in ['exec_time']) and 'order_time' in df.columns:\n    # Assuming 'order_time' might be available through a join or specific data model for prop executions\n    # For direct execution data, this part might need adjustment to look up related client orders.\n    # For this script, we apply this script to prop_executions and assume lookup capability if order_time is not directly present.\n    df['exec_time'] = pd.to_datetime(df['exec_time'])\n    # Placeholder: if order_time is not directly in df, we'd need to fetch it from context/other dataset\n    # For now, let's assume 'order_time' here refers to a derived client order time for this prop trade.\n    if 'order_time' in df.columns:\n        df['order_time'] = pd.to_datetime(df['order_time'])\n        df['_time_delta_mins'] = (\n            df['exec_time'] - df['order_time']\n        ).dt.total_seconds() / 60\n        df['_signal_flag'] = df['_time_delta_mins'].abs() < 3\n        df['_signal_score'] = (3 - df['_time_delta_mins'].clip(0, 3)).clip(0, 10).round(2)\n        df['_signal_reason'] = df.apply(\n            lambda r: f\"Prop trade {abs(r['_time_delta_mins']):.1f}m before client order\" if r['_signal_flag'] else \"\", axis=1\n        )\n    else:\n        df['_signal_flag'] = False\n        df['_signal_score'] = 0.0\n        df['_signal_reason'] = 'Missing order_time for timing correlation'\nelse:\n    df['_signal_flag'] = False\n    df['_signal_score'] = 0.0\n    df['_signal_reason'] = 'Required columns (exec_time, order_time) for timing correlation not found'\ndf['_signal_type'] = 'TIMING_CORRELATION'\ndf['_signal_window'] = '3m'\n"
+      }
+    },
+    {
+      "id": "n10",
+      "type": "DATA_HIGHLIGHTER",
+      "label": "Highlight Front-Running Signals",
+      "config": {
+        "input_name": "fro_signals",
+        "output_name": "fro_signals_highlighted",
+        "rules": [
+          {
+            "condition": "_signal_flag == True",
+            "colour": "#FF4444",
+            "label": "FRO SIGNAL"
+          },
+          {
+            "condition": "side == 'BUY'",
+            "colour": "#90EE90",
+            "label": "BUY"
+          },
+          {
+            "condition": "side == 'SELL'",
+            "colour": "#87CEEB",
+            "label": "SELL"
+          }
+        ]
+      }
+    },
+    {
+      "id": "n11",
+      "type": "DATA_HIGHLIGHTER",
+      "label": "Highlight Timing Correlation Signals",
+      "config": {
+        "input_name": "timing_correlation_signals",
+        "output_name": "timing_correlation_signals_highlighted",
+        "rules": [
+          {
+            "condition": "_signal_flag == True",
+            "colour": "#FF4444",
+            "label": "FRO SIGNAL"
+          },
+          {
+            "condition": "side == 'BUY'",
+            "colour": "#90EE90",
+            "label": "BUY"
+          },
+          {
+            "condition": "side == 'SELL'",
+            "colour": "#87CEEB",
+            "label": "SELL"
+          }
+        ]
+      }
+    },
+    {
+      "id": "n12",
+      "type": "DATA_HIGHLIGHTER",
+      "label": "Highlight Communications",
+      "config": {
+        "input_name": "comms_data",
+        "output_name": "comms_data_highlighted",
+        "rules": [
+          {
+            "condition": "_keyword_hit == True",
+            "colour": "#FF8C00",
+            "label": "COMM ALERT"
+          }
+        ]
+      }
+    },
+    {
+      "id": "n13",
+      "type": "SECTION_SUMMARY",
+      "label": "Client Order Analysis",
+      "config": {
+        "section_name": "client_order_analysis",
+        "input_name": "enriched_client_orders",
+        "field_bindings": [
+          {
+            "field": "order_id",
+            "agg": "count"
+          },
+          {
+            "field": "quantity",
+            "agg": "sum"
+          },
+          {
+            "field": "side",
+            "agg": "nunique"
+          }
+        ],
+        "llm_prompt_template": "Summarize client orders for {trader_id} in {currency_pair} related to {section_name}. Key stats: {stats}."
+      }
+    },
+    {
+      "id": "n14",
+      "type": "SECTION_SUMMARY",
+      "label": "Trade Analysis",
+      "config": {
+        "section_name": "trade_analysis",
+        "input_name": "fro_signals_highlighted",
+        "field_bindings": [
+          {
+            "field": "exec_id",
+            "agg": "count"
+          },
+          {
+            "field": "signed_notional",
+            "agg": "sum"
+          },
+          {
+            "field": "_signal_flag",
+            "agg": "sum"
+          }
+        ],
+        "llm_prompt_template": "Analyze proprietary trades for {trader_id} in {currency_pair}, focusing on potential front-running. Key stats: {stats}. Disposition: {disposition}."
+      }
+    },
+    {
+      "id": "n15",
+      "type": "SECTION_SUMMARY",
+      "label": "Comms Analysis",
+      "config": {
+        "section_name": "comms_analysis",
+        "input_name": "comms_data_highlighted",
+        "field_bindings": [
+          {
+            "field": "display_post",
+            "agg": "count"
+          },
+          {
+            "field": "_keyword_hit",
+            "agg": "sum"
+          }
+        ],
+        "llm_prompt_template": "Review communications for {trader_id} in {currency_pair}, noting any keyword hits related to market manipulation. Key stats: {stats}. Disposition: {disposition}."
+      }
+    },
+    {
+      "id": "n16",
+      "type": "SECTION_SUMMARY",
+      "label": "Market Analysis",
+      "config": {
+        "section_name": "market_analysis",
+        "input_name": "market_data",
+        "field_bindings": [
+          {
+            "field": "timestamp",
+            "agg": "count"
+          },
+          {
+            "field": "spread_pips",
+            "agg": "mean"
+          }
+        ],
+        "llm_prompt_template": "Analyze market data for {currency_pair} around the alert time, focusing on price movements and liquidity changes. Key stats: {stats}."
+      }
+    },
+    {
+      "id": "n17",
+      "type": "DECISION_RULE",
+      "label": "Evaluate Front-Running Signals",
+      "config": {
+        "input_name": "fro_signals",
+        "escalate_threshold": 5,
+        "review_threshold": 1
+      }
+    },
+    {
+      "id": "n18",
+      "type": "CONSOLIDATED_SUMMARY",
+      "label": "Generate Executive Summary",
+      "config": {}
+    },
+    {
+      "id": "n19",
+      "type": "REPORT_OUTPUT",
+      "label": "Generate Excel Report",
+      "config": {
+        "output_path": "output/fx_fro_report_{context.alert_id}.xlsx",
+        "tabs": [
+          {
+            "name": "Client Orders",
+            "dataset": "enriched_client_orders",
+            "include_highlights": false
+          },
+          {
+            "name": "Prop Execs FRO Signals",
+            "dataset": "fro_signals",
+            "include_highlights": true
+          },
+          {
+            "name": "Prop Execs Timing Sig",
+            "dataset": "timing_correlation_signals",
+            "include_highlights": true
+          },
+          {
+            "name": "Communications",
+            "dataset": "comms_data",
+            "include_highlights": true
+          },
+          {
+            "name": "Market Data",
+            "dataset": "market_data",
+            "include_highlights": false
+          }
+        ]
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "n01",
+      "to": "n02"
+    },
+    {
+      "from": "n01",
+      "to": "n03"
+    },
+    {
+      "from": "n01",
+      "to": "n04"
+    },
+    {
+      "from": "n01",
+      "to": "n05"
+    },
+    {
+      "from": "n01",
+      "to": "n17"
+    },
+    {
+      "from": "n02",
+      "to": "n06"
+    },
+    {
+      "from": "n03",
+      "to": "n07"
+    },
+    {
+      "from": "n04",
+      "to": "n12"
+    },
+    {
+      "from": "n05",
+      "to": "n16"
+    },
+    {
+      "from": "n06",
+      "to": "n13"
+    },
+    {
+      "from": "n07",
+      "to": "n08"
+    },
+    {
+      "from": "n07",
+      "to": "n09"
+    },
+    {
+      "from": "n08",
+      "to": "n10"
+    },
+    {
+      "from": "n08",
+      "to": "n17"
+    },
+    {
+      "from": "n09",
+      "to": "n11"
+    },
+    {
+      "from": "n10",
+      "to": "n14"
+    },
+    {
+      "from": "n10",
+      "to": "n19"
+    },
+    {
+      "from": "n11",
+      "to": "n19"
+    },
+    {
+      "from": "n12",
+      "to": "n15"
+    },
+    {
+      "from": "n12",
+      "to": "n19"
+    },
+    {
+      "from": "n13",
+      "to": "n18"
+    },
+    {
+      "from": "n14",
+      "to": "n18"
+    },
+    {
+      "from": "n15",
+      "to": "n18"
+    },
+    {
+      "from": "n16",
+      "to": "n18"
+    },
+    {
+      "from": "n17",
+      "to": "n18"
+    },
+    {
+      "from": "n17",
+      "to": "n19"
+    },
+    {
+      "from": "n18",
+      "to": "n19"
+    }
+  ]
+}

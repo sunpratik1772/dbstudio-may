@@ -1,0 +1,15 @@
+# Keep the builder layer small and deterministic.
+
+node_modules/
+dist/
+.vite/
+.cache/
+
+# Dev / IDE / OS cruft
+.DS_Store
+.idea/
+.vscode/
+*.log
+
+# Tests + config-only docs aren't needed for a production build.
+*.md

@@ -1,0 +1,81 @@
+# Build → push → deploy pipeline for the dbSherpa frontend.
+#
+#   gcloud builds submit \
+#       --config frontend/deploy/cloudbuild.yaml \
+#       --substitutions=_REGION=us-central1,_BACKEND_URL=https://dbsherpa-backend-xxx-uc.a.run.app \
+#       frontend
+#
+# The trailing `frontend` is the build context. `_BACKEND_URL` is the
+# deployed backend Cloud Run URL — pass it in so the nginx proxy
+# target is environment-specific without touching the image.
+
+substitutions:
+  _REGION: us-central1
+  _REPO: dbsherpa
+  _SERVICE: dbsherpa-frontend
+  # Override per environment:
+  _BACKEND_URL: http://localhost:8000
+
+images:
+  - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/frontend:${SHORT_SHA}"
+  - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/frontend:latest"
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8
+
+steps:
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --file=Dockerfile
+      - --tag=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/frontend:${SHORT_SHA}
+      - --tag=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/frontend:latest
+      - .
+
+  - id: push-sha
+    name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/frontend:${SHORT_SHA}
+  - id: push-latest
+    name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/frontend:latest
+
+  - id: deploy
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        sed \
+          -e "s|PROJECT_ID|${PROJECT_ID}|g" \
+          -e "s|REGION|${_REGION}|g" \
+          -e "s|:IMAGE_TAG|:${SHORT_SHA}|g" \
+          -e "s|BACKEND_URL_PLACEHOLDER|${_BACKEND_URL}|g" \
+          deploy/service.yaml > /tmp/service.rendered.yaml
+        gcloud run services replace /tmp/service.rendered.yaml \
+          --region=${_REGION} \
+          --platform=managed
+        gcloud run services add-iam-policy-binding ${_SERVICE} \
+          --region=${_REGION} \
+          --member=allUsers \
+          --role=roles/run.invoker
+
+  - id: smoke
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        URL=$(gcloud run services describe ${_SERVICE} \
+          --region=${_REGION} --format='value(status.url)')
+        echo "Deployed at: $URL"
+        # /healthz is served by nginx directly; / is the SPA entry.
+        curl -fsS "$URL/healthz"
+        curl -fsSI "$URL/" | head -1

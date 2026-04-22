@@ -1,0 +1,503 @@
+{
+  "workflow_id": "fi_spoofing_workflow",
+  "name": "FI Spoofing Surveillance Workflow",
+  "schema_version": "1.0",
+  "description": "Detects Fixed Income spoofing activity using multiple signals and generates a comprehensive report.",
+  "nodes": [
+    {
+      "id": "n01",
+      "type": "ALERT_TRIGGER",
+      "label": "Alert Trigger",
+      "config": {
+        "alert_fields": {
+          "trader_id": "string",
+          "book": "string",
+          "alert_date": "date",
+          "instrument": "string",
+          "cusip": "string",
+          "alert_id": "string"
+        }
+      }
+    },
+    {
+      "id": "n02",
+      "type": "TRADE_DATA_COLLECTOR",
+      "label": "Collect Client Orders",
+      "config": {
+        "source": "hs_client_order",
+        "query_template": "trader_id:{context.trader_id} AND book:{context.book} AND order_time:[{context.alert_date}T00:00:00Z TO {context.alert_date}T23:59:59Z] AND instrument:{context.instrument}",
+        "output_name": "client_orders"
+      }
+    },
+    {
+      "id": "n03",
+      "type": "TRADE_DATA_COLLECTOR",
+      "label": "Collect Executions",
+      "config": {
+        "source": "hs_execution",
+        "query_template": "trader_id:{context.trader_id} AND book:{context.book} AND exec_time:[{context.alert_date}T00:00:00Z TO {context.alert_date}T23:59:59Z] AND instrument:{context.instrument} AND trade_version:1",
+        "output_name": "executions"
+      }
+    },
+    {
+      "id": "n04",
+      "type": "COMMS_COLLECTOR",
+      "label": "Collect Communications",
+      "config": {
+        "query_template": "user:{context.trader_id} AND timestamp:[{context.alert_date}T00:00:00Z TO {context.alert_date}T23:59:59Z]",
+        "keywords": [
+          "spoof",
+          "pull orders",
+          "layer",
+          "fake order",
+          "manipulate",
+          "depth",
+          "pull the bid",
+          "pull the offer",
+          "flood the book",
+          "step-out"
+        ],
+        "output_name": "comms"
+      }
+    },
+    {
+      "id": "n05",
+      "type": "MARKET_DATA_COLLECTOR",
+      "label": "Collect Market Data",
+      "config": {
+        "source": "EBS",
+        "query_template": "symbol:{context.instrument} AND timestamp:[{context.alert_date}T00:00:00Z TO {context.alert_date}T23:59:59Z]",
+        "output_name": "market_data"
+      }
+    },
+    {
+      "id": "n06",
+      "type": "NORMALISE_ENRICH",
+      "label": "Enrich Client Orders",
+      "config": {
+        "input_name": "client_orders",
+        "output_name": "client_orders_enriched",
+        "track_lifecycle": true,
+        "compute_signed_notional": false,
+        "field_renames": {}
+      }
+    },
+    {
+      "id": "n07",
+      "type": "NORMALISE_ENRICH",
+      "label": "Enrich Executions",
+      "config": {
+        "input_name": "executions",
+        "output_name": "executions_enriched",
+        "track_lifecycle": false,
+        "compute_signed_notional": true,
+        "field_renames": {}
+      }
+    },
+    {
+      "id": "n08",
+      "type": "SIGNAL_CALCULATOR",
+      "label": "SPOOFING Signal",
+      "config": {
+        "mode": "configure",
+        "signal_type": "SPOOFING",
+        "input_name": "client_orders_enriched",
+        "output_name": "spoofing_signals",
+        "params": {
+          "cancel_ratio_threshold": 0.7,
+          "window": "1d"
+        }
+      }
+    },
+    {
+      "id": "n09",
+      "type": "SIGNAL_CALCULATOR",
+      "label": "Order Size Anomaly Signal",
+      "config": {
+        "mode": "upload_script",
+        "input_name": "client_orders_enriched",
+        "output_name": "order_size_anomaly_signals",
+        "script_content": "import pandas as pd\nif 'quantity' in df.columns and 'status' in df.columns:\n    avg_exec = df[df['status'] == 'FILLED']['quantity'].mean() if (df['status'] == 'FILLED').any() else 1\n    df['_size_ratio'] = df['quantity'] / avg_exec if avg_exec > 0 else 0\n    df['_signal_flag'] = (df['_size_ratio'] > 5) & (df['status'] == 'CANCELLED')\n    df['_signal_score'] = df['_size_ratio'].clip(0, 10).round(2)\n    df['_signal_reason'] = df.apply(\n        lambda r: f\"Cancelled order {r['_size_ratio']:.1f}x larger than avg execution\" if r['_signal_flag'] else \"\", axis=1\n    )\nelse:\n    df['_signal_flag'] = False\n    df['_signal_score'] = 0.0\n    df['_signal_reason'] = ''\ndf['_signal_type'] = 'ORDER_SIZE_ANOMALY'\ndf['_signal_window'] = '1d'"
+      }
+    },
+    {
+      "id": "n10",
+      "type": "SIGNAL_CALCULATOR",
+      "label": "Rapid Cancel Pattern Signal",
+      "config": {
+        "mode": "upload_script",
+        "input_name": "client_orders_enriched",
+        "output_name": "rapid_cancel_signals",
+        "script_content": "import pandas as pd\nif 'order_time' in df.columns and 'status' in df.columns:\n    df['order_time'] = pd.to_datetime(df['order_time'])\n    df_sorted = df.sort_values('order_time')\n    df_sorted['_next_time'] = df_sorted['order_time'].shift(-1)\n    df_sorted['_life_secs'] = (df_sorted['_next_time'] - df_sorted['order_time']).dt.total_seconds().fillna(999)\n    df = df_sorted\n    df['_signal_flag'] = (df['_life_secs'] < 30) & (df['status'] == 'CANCELLED')\n    df['_signal_score'] = (30 - df['_life_secs'].clip(0, 30)).clip(0, 10).round(2)\n    df['_signal_reason'] = df.apply(\n        lambda r: f\"Order cancelled after {r['_life_secs']:.0f}s\" if r['_signal_flag'] else \"\", axis=1\n    )\nelse:\n    df['_signal_flag'] = False\n    df['_signal_score'] = 0.0\n    df['_signal_reason'] = ''\ndf['_signal_type'] = 'RAPID_CANCEL'\ndf['_signal_window'] = '30s'"
+      }
+    },
+    {
+      "id": "n11",
+      "type": "DATA_HIGHLIGHTER",
+      "label": "Highlight Spoofing Signals",
+      "config": {
+        "input_name": "spoofing_signals",
+        "output_name": "spoofing_signals_highlighted",
+        "rules": [
+          {
+            "condition": "_signal_flag == True",
+            "colour": "#FF4444",
+            "label": "SPOOF SIGNAL"
+          }
+        ]
+      }
+    },
+    {
+      "id": "n12",
+      "type": "DATA_HIGHLIGHTER",
+      "label": "Highlight Order Size Anomaly Signals",
+      "config": {
+        "input_name": "order_size_anomaly_signals",
+        "output_name": "order_size_anomaly_signals_highlighted",
+        "rules": [
+          {
+            "condition": "_signal_flag == True",
+            "colour": "#FF4444",
+            "label": "SPOOF SIGNAL"
+          }
+        ]
+      }
+    },
+    {
+      "id": "n13",
+      "type": "DATA_HIGHLIGHTER",
+      "label": "Highlight Rapid Cancel Signals",
+      "config": {
+        "input_name": "rapid_cancel_signals",
+        "output_name": "rapid_cancel_signals_highlighted",
+        "rules": [
+          {
+            "condition": "_signal_flag == True",
+            "colour": "#FF4444",
+            "label": "SPOOF SIGNAL"
+          }
+        ]
+      }
+    },
+    {
+      "id": "n14",
+      "type": "DATA_HIGHLIGHTER",
+      "label": "Highlight Communications",
+      "config": {
+        "input_name": "comms",
+        "output_name": "comms_highlighted",
+        "rules": [
+          {
+            "condition": "_keyword_hit == True",
+            "colour": "#FF8C00",
+            "label": "COMM ALERT"
+          }
+        ]
+      }
+    },
+    {
+      "id": "n15",
+      "type": "DATA_HIGHLIGHTER",
+      "label": "Highlight Client Orders",
+      "config": {
+        "input_name": "client_orders_enriched",
+        "output_name": "client_orders_highlighted",
+        "rules": [
+          {
+            "condition": "status == 'CANCELLED'",
+            "colour": "#FFD700",
+            "label": "CANCELLED"
+          },
+          {
+            "condition": "order_type == 'LIMIT'",
+            "colour": "#DDA0DD",
+            "label": "LIMIT ORDER"
+          }
+        ]
+      }
+    },
+    {
+      "id": "n16",
+      "type": "DECISION_RULE",
+      "label": "Decision Rule",
+      "config": {
+        "input_name": "spoofing_signals",
+        "escalate_threshold": 5,
+        "review_threshold": 2
+      }
+    },
+    {
+      "id": "n17",
+      "type": "SECTION_SUMMARY",
+      "label": "Order Analysis Summary",
+      "config": {
+        "section_name": "order_analysis",
+        "input_name": "client_orders_highlighted",
+        "field_bindings": [
+          {
+            "field": "order_id",
+            "agg": "count"
+          },
+          {
+            "field": "status",
+            "agg": "nunique"
+          }
+        ],
+        "llm_prompt_template": "Summarize the key findings from the order analysis for trader {context.trader_id} related to spoofing. Focus on cancel ratio, order size distribution, and order lifecycle events. Disposition: {context.disposition}."
+      }
+    },
+    {
+      "id": "n18",
+      "type": "SECTION_SUMMARY",
+      "label": "Execution Analysis Summary",
+      "config": {
+        "section_name": "execution_analysis",
+        "input_name": "executions_enriched",
+        "field_bindings": [
+          {
+            "field": "exec_id",
+            "agg": "count"
+          },
+          {
+            "field": "signed_notional",
+            "agg": "sum"
+          }
+        ],
+        "llm_prompt_template": "Summarize the execution analysis for trader {context.trader_id}. Highlight any genuine trades executed opposite to the spoof side. Disposition: {context.disposition}."
+      }
+    },
+    {
+      "id": "n19",
+      "type": "SECTION_SUMMARY",
+      "label": "Comms Analysis Summary",
+      "config": {
+        "section_name": "comms_analysis",
+        "input_name": "comms_highlighted",
+        "field_bindings": [
+          {
+            "field": "_keyword_hit",
+            "agg": "sum"
+          }
+        ],
+        "llm_prompt_template": "Summarize the communications analysis for trader {context.trader_id}. Note any keyword hits indicating intent related to spoofing. Disposition: {context.disposition}."
+      }
+    },
+    {
+      "id": "n20",
+      "type": "SECTION_SUMMARY",
+      "label": "Market Analysis Summary",
+      "config": {
+        "section_name": "market_analysis",
+        "input_name": "market_data",
+        "field_bindings": [
+          {
+            "field": "mid",
+            "agg": "mean"
+          },
+          {
+            "field": "spread_pips",
+            "agg": "mean"
+          }
+        ],
+        "llm_prompt_template": "Summarize the market data analysis for instrument {context.instrument}. Describe any price movements observed during suspected spoofing episodes. Disposition: {context.disposition}."
+      }
+    },
+    {
+      "id": "n21",
+      "type": "CONSOLIDATED_SUMMARY",
+      "label": "Consolidated Executive Summary",
+      "config": {}
+    },
+    {
+      "id": "n22",
+      "type": "REPORT_OUTPUT",
+      "label": "Generate Excel Report",
+      "config": {
+        "output_path": "output/fi_spoofing_report_{context.alert_id}.xlsx",
+        "tabs": [
+          {
+            "name": "Client Orders",
+            "dataset": "client_orders_highlighted",
+            "include_highlights": true
+          },
+          {
+            "name": "Executions",
+            "dataset": "executions_enriched",
+            "include_highlights": false
+          },
+          {
+            "name": "Spoofing Signals",
+            "dataset": "spoofing_signals_highlighted",
+            "include_highlights": true
+          },
+          {
+            "name": "Order Size Anomaly",
+            "dataset": "order_size_anomaly_signals_highlighted",
+            "include_highlights": true
+          },
+          {
+            "name": "Rapid Cancel",
+            "dataset": "rapid_cancel_signals_highlighted",
+            "include_highlights": true
+          },
+          {
+            "name": "Communications",
+            "dataset": "comms_highlighted",
+            "include_highlights": true
+          },
+          {
+            "name": "Market Data",
+            "dataset": "market_data",
+            "include_highlights": false
+          }
+        ]
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "n01",
+      "to": "n02"
+    },
+    {
+      "from": "n01",
+      "to": "n03"
+    },
+    {
+      "from": "n01",
+      "to": "n04"
+    },
+    {
+      "from": "n01",
+      "to": "n05"
+    },
+    {
+      "from": "n02",
+      "to": "n06"
+    },
+    {
+      "from": "n03",
+      "to": "n07"
+    },
+    {
+      "from": "n06",
+      "to": "n08"
+    },
+    {
+      "from": "n06",
+      "to": "n09"
+    },
+    {
+      "from": "n06",
+      "to": "n10"
+    },
+    {
+      "from": "n08",
+      "to": "n11"
+    },
+    {
+      "from": "n09",
+      "to": "n12"
+    },
+    {
+      "from": "n10",
+      "to": "n13"
+    },
+    {
+      "from": "n04",
+      "to": "n14"
+    },
+    {
+      "from": "n06",
+      "to": "n15"
+    },
+    {
+      "from": "n08",
+      "to": "n16"
+    },
+    {
+      "from": "n15",
+      "to": "n17"
+    },
+    {
+      "from": "n16",
+      "to": "n17"
+    },
+    {
+      "from": "n07",
+      "to": "n18"
+    },
+    {
+      "from": "n16",
+      "to": "n18"
+    },
+    {
+      "from": "n14",
+      "to": "n19"
+    },
+    {
+      "from": "n16",
+      "to": "n19"
+    },
+    {
+      "from": "n05",
+      "to": "n20"
+    },
+    {
+      "from": "n16",
+      "to": "n20"
+    },
+    {
+      "from": "n17",
+      "to": "n21"
+    },
+    {
+      "from": "n18",
+      "to": "n21"
+    },
+    {
+      "from": "n19",
+      "to": "n21"
+    },
+    {
+      "from": "n20",
+      "to": "n21"
+    },
+    {
+      "from": "n21",
+      "to": "n22"
+    },
+    {
+      "from": "n16",
+      "to": "n22"
+    },
+    {
+      "from": "n15",
+      "to": "n22"
+    },
+    {
+      "from": "n07",
+      "to": "n22"
+    },
+    {
+      "from": "n11",
+      "to": "n22"
+    },
+    {
+      "from": "n12",
+      "to": "n22"
+    },
+    {
+      "from": "n13",
+      "to": "n22"
+    },
+    {
+      "from": "n14",
+      "to": "n22"
+    },
+    {
+      "from": "n05",
+      "to": "n22"
+    }
+  ]
+}

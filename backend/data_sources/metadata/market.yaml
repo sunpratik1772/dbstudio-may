@@ -1,0 +1,40 @@
+id: market
+description: Market tick data from EBS or Mercury feeds, normalised into a common shape.
+sources:
+  - EBS
+  - Mercury
+columns:
+  - name: timestamp
+    type: datetime
+    semantic: time
+    description: ISO-8601 string; raw ns epoch converted by MARKET_DATA_COLLECTOR.
+  - name: symbol
+    type: string
+    description: Instrument symbol (e.g. EURUSD).
+  - name: bid
+    type: number
+    semantic: price
+    description: Best bid price.
+  - name: ask
+    type: number
+    semantic: price
+    description: Best ask price.
+  - name: mid
+    type: number
+    semantic: price
+    description: (bid + ask) / 2.
+  - name: spread_pips
+    type: number
+    description: ask - bid in pips.
+  - name: bid_size
+    type: number
+    semantic: size
+  - name: ask_size
+    type: number
+    semantic: size
+  - name: venue_name
+    type: string
+    description: Originating venue (EBS, Mercury, etc.).
+  - name: seq_no
+    type: integer
+    description: Venue sequence number.

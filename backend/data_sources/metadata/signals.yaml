@@ -1,0 +1,24 @@
+id: signals
+description: |
+  Output shape of SIGNAL_CALCULATOR. Every signal node must produce
+  exactly these 5 columns regardless of the signal type
+  (FRONT_RUNNING, WASH_TRADE, …). Missing columns are auto-filled
+  with defaults by the handler.
+sources:
+  - SIGNAL_CALCULATOR
+columns:
+  - name: _signal_flag
+    type: boolean
+    description: True = this row is a hit.
+  - name: _signal_score
+    type: number
+    description: Strength of the hit, 0–10.
+  - name: _signal_reason
+    type: string
+    description: Human-readable reason string.
+  - name: _signal_type
+    type: string
+    description: Signal family identifier (FRONT_RUNNING, WASH_TRADE, …).
+  - name: _signal_window
+    type: string
+    description: Window descriptor the signal was computed over.

@@ -1,0 +1,313 @@
+{
+  "schema_version": "1.0",
+  "workflow_id": "fi_wash_trade_workflow",
+  "name": "FI Wash Trade Surveillance",
+  "version": "1.0",
+  "description": "Detects Fixed Income wash trading using built-in, counterparty circularity, and price neutrality signals.",
+  "nodes": [
+    {
+      "id": "n01",
+      "type": "ALERT_TRIGGER",
+      "label": "Alert Trigger",
+      "config": {
+        "alert_fields": {
+          "trader_id": "string",
+          "book": "string",
+          "alert_date": "date",
+          "currency_pair": "string",
+          "entity": "string",
+          "alert_id": "string",
+          "instrument": "string"
+        }
+      }
+    },
+    {
+      "id": "n02",
+      "type": "TRADE_DATA_COLLECTOR",
+      "label": "Collect Executions",
+      "config": {
+        "source": "hs_execution",
+        "query_template": "trader_id:\"{context.trader_id}\" AND book:\"{context.book}\" AND exec_time:[{context.alert_date}T00:00:00Z TO {context.alert_date}T23:59:59Z] AND trade_version:1 AND instrument:\"{context.instrument}\"",
+        "output_name": "raw_executions"
+      }
+    },
+    {
+      "id": "n03",
+      "type": "NORMALISE_ENRICH",
+      "label": "Enrich Executions",
+      "config": {
+        "input_name": "raw_executions",
+        "output_name": "enriched_executions",
+        "track_lifecycle": false,
+        "compute_signed_notional": true,
+        "field_renames": {}
+      }
+    },
+    {
+      "id": "n04",
+      "type": "COMMS_COLLECTOR",
+      "label": "Collect Comms Data",
+      "config": {
+        "query_template": "user:\"{context.trader_id}\" AND timestamp:[{context.alert_date}T00:00:00Z TO {context.alert_date}T23:59:59Z]",
+        "keywords": [
+          "wash",
+          "offset",
+          "back-to-back",
+          "round-trip",
+          "artificial volume",
+          "related account",
+          "step-out",
+          "rotate",
+          "coordinated",
+          "internal"
+        ],
+        "output_name": "comms_data"
+      }
+    },
+    {
+      "id": "n05",
+      "type": "SIGNAL_CALCULATOR",
+      "label": "Signal: Wash Trade Ratio",
+      "config": {
+        "mode": "configure",
+        "signal_type": "WASH_TRADE",
+        "input_name": "enriched_executions",
+        "output_name": "signal_wash_trade",
+        "params": {
+          "window_minutes": 10,
+          "ratio_threshold": 0.8
+        }
+      }
+    },
+    {
+      "id": "n06",
+      "type": "SIGNAL_CALCULATOR",
+      "label": "Signal: Counterparty Circularity",
+      "config": {
+        "mode": "upload_script",
+        "input_name": "signal_wash_trade",
+        "output_name": "signal_counterparty_circ",
+        "script_content": "import pandas as pd\nif all(c in df.columns for c in ['counterparty', 'trader_id']):\n    # Assuming trader_id is constant for the whole df for this workflow\n    current_trader_id = df['trader_id'].iloc[0]\n    related = df['counterparty'].isin(['INTERNAL', 'RELATED', current_trader_id])\n    df['_signal_flag'] = related\n    df['_signal_score'] = related.astype(float) * 10\n    df['_signal_reason'] = df.apply(\n        lambda r: f\"Trade with related/internal counterparty: {r['counterparty']}\" if r['_signal_flag'] else \"\", axis=1\n    )\nelse:\n    df['_signal_flag'] = False\n    df['_signal_score'] = 0.0\n    df['_signal_reason'] = ''\ndf['_signal_type'] = 'COUNTERPARTY_CIRCULARITY'\ndf['_signal_window'] = '1d'"
+      }
+    },
+    {
+      "id": "n07",
+      "type": "SIGNAL_CALCULATOR",
+      "label": "Signal: Price Neutrality",
+      "config": {
+        "mode": "upload_script",
+        "input_name": "signal_counterparty_circ",
+        "output_name": "signal_price_neutrality",
+        "script_content": "import pandas as pd\nif 'signed_notional' in df.columns:\n    # Calculate for the entire dataset as wash trades often occur across multiple rows\n    net_notional = df['signed_notional'].sum()\n    total_notional = df['signed_notional'].abs().sum()\n    neutrality = 1 - (abs(net_notional) / total_notional) if total_notional > 0 else 0\n    \n    # Apply signal flag to all rows if the overall pattern suggests neutrality\n    is_neutral = neutrality > 0.9\n    df['_signal_flag'] = is_neutral\n    df['_signal_score'] = round(neutrality * 10, 2)\n    df['_signal_reason'] = f\"Overall net notional neutrality: {neutrality:.2%}\" if is_neutral else ''\nelse:\n    df['_signal_flag'] = False\n    df['_signal_score'] = 0.0\n    df['_signal_reason'] = ''\ndf['_signal_type'] = 'PRICE_NEUTRALITY'\ndf['_signal_window'] = '1d'"
+      }
+    },
+    {
+      "id": "n08",
+      "type": "DATA_HIGHLIGHTER",
+      "label": "Highlight Signals & Trades",
+      "config": {
+        "input_name": "signal_price_neutrality",
+        "output_name": "final_flagged_executions_highlighted",
+        "rules": [
+          {
+            "condition": "_signal_flag == True",
+            "colour": "#FF4444",
+            "label": "WASH SIGNAL"
+          },
+          {
+            "condition": "side == 'BUY'",
+            "colour": "#90EE90",
+            "label": "BUY"
+          },
+          {
+            "condition": "side == 'SELL'",
+            "colour": "#87CEEB",
+            "label": "SELL"
+          }
+        ]
+      }
+    },
+    {
+      "id": "n09",
+      "type": "DATA_HIGHLIGHTER",
+      "label": "Highlight Comms",
+      "config": {
+        "input_name": "comms_data",
+        "output_name": "comms_data_highlighted",
+        "rules": [
+          {
+            "condition": "_keyword_hit == True",
+            "colour": "#FF8C00",
+            "label": "COMM ALERT"
+          }
+        ]
+      }
+    },
+    {
+      "id": "n10",
+      "type": "DECISION_RULE",
+      "label": "Determine Disposition",
+      "config": {
+        "input_name": "signal_price_neutrality",
+        "flag_count_expr": "flag_count > 0",
+        "escalate_threshold": 3,
+        "review_threshold": 1,
+        "output_branches": {
+          "ESCALATE": "escalate_branch",
+          "REVIEW": "review_branch",
+          "DISMISS": "dismiss_branch"
+        }
+      }
+    },
+    {
+      "id": "n11",
+      "type": "SECTION_SUMMARY",
+      "label": "Execution Analysis Summary",
+      "config": {
+        "section_name": "execution_analysis",
+        "input_name": "final_flagged_executions_highlighted",
+        "field_bindings": [
+          {
+            "field": "exec_quantity",
+            "agg": "sum"
+          },
+          {
+            "field": "exec_id",
+            "agg": "count"
+          },
+          {
+            "field": "counterparty",
+            "agg": "nunique"
+          },
+          {
+            "field": "_signal_flag",
+            "agg": "sum"
+          }
+        ],
+        "llm_prompt_template": "Summarize the execution activity for trader {context.trader_id} in {context.instrument} on {context.alert_date}. Focus on the buy/sell ratio, unique counterparties, and any wash trade signal flags. Stats: {stats}. Disposition: {context.disposition}."
+      }
+    },
+    {
+      "id": "n12",
+      "type": "SECTION_SUMMARY",
+      "label": "Comms Analysis Summary",
+      "config": {
+        "section_name": "comms_analysis",
+        "input_name": "comms_data_highlighted",
+        "field_bindings": [
+          {
+            "field": "display_post",
+            "agg": "count"
+          },
+          {
+            "field": "_keyword_hit",
+            "agg": "sum"
+          }
+        ],
+        "llm_prompt_template": "Analyze the communications for trader {context.trader_id} on {context.alert_date}. Highlight any keyword hits related to wash trading and their context. Stats: {stats}. Disposition: {context.disposition}."
+      }
+    },
+    {
+      "id": "n13",
+      "type": "CONSOLIDATED_SUMMARY",
+      "label": "Executive Summary",
+      "config": {
+        "llm_prompt_template": "Generate an executive summary for the wash trade alert for trader {context.trader_id} in {context.instrument}. Consolidate insights from the following sections:\n{section_text}\nBased on the overall assessment and {context.flag_count} signal flags, the recommended disposition is {context.disposition}."
+      }
+    },
+    {
+      "id": "n14",
+      "type": "REPORT_OUTPUT",
+      "label": "Generate Report",
+      "config": {
+        "output_path": "reports/FI_WashTrade_Report_{context.trader_id}_{context.alert_date}_{context.alert_id}.xlsx",
+        "tabs": [
+          {
+            "name": "Executions",
+            "dataset": "final_flagged_executions_highlighted",
+            "include_highlights": true
+          },
+          {
+            "name": "Communications",
+            "dataset": "comms_data_highlighted",
+            "include_highlights": true
+          }
+        ]
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "n01",
+      "to": "n02"
+    },
+    {
+      "from": "n01",
+      "to": "n04"
+    },
+    {
+      "from": "n02",
+      "to": "n03"
+    },
+    {
+      "from": "n03",
+      "to": "n05"
+    },
+    {
+      "from": "n05",
+      "to": "n06"
+    },
+    {
+      "from": "n06",
+      "to": "n07"
+    },
+    {
+      "from": "n07",
+      "to": "n08"
+    },
+    {
+      "from": "n08",
+      "to": "n10"
+    },
+    {
+      "from": "n08",
+      "to": "n11"
+    },
+    {
+      "from": "n04",
+      "to": "n09"
+    },
+    {
+      "from": "n09",
+      "to": "n12"
+    },
+    {
+      "from": "n10",
+      "to": "n13"
+    },
+    {
+      "from": "n11",
+      "to": "n13"
+    },
+    {
+      "from": "n12",
+      "to": "n13"
+    },
+    {
+      "from": "n10",
+      "to": "n14"
+    },
+    {
+      "from": "n11",
+      "to": "n14"
+    },
+    {
+      "from": "n12",
+      "to": "n14"
+    },
+    {
+      "from": "n13",
+      "to": "n14"
+    }
+  ]
+}

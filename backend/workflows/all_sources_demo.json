@@ -1,0 +1,399 @@
+{
+  "schema_version": "1.0",
+  "workflow_id": "all_sources_demo",
+  "name": "All Data Sources Demo",
+  "version": "1.0",
+  "description": "Pulls mock data from all 4 data sources, highlights each, and produces a single Excel report with a summary tab at the end.",
+  "nodes": [
+    {
+      "id": "n01",
+      "type": "ALERT_TRIGGER",
+      "label": "Alert Trigger",
+      "config": {
+        "alert_fields": {
+          "trader_id": "string",
+          "book": "string",
+          "alert_date": "date",
+          "currency_pair": "string",
+          "alert_id": "string"
+        }
+      }
+    },
+    {
+      "id": "n02",
+      "type": "TRADE_DATA_COLLECTOR",
+      "label": "Collect Client Orders",
+      "config": {
+        "source": "hs_client_order",
+        "query_template": "trader_id:{context.trader_id} AND book:{context.book} AND order_time:[{context.alert_date}T00:00:00Z TO {context.alert_date}T23:59:59Z]",
+        "output_name": "orders",
+        "loop_over_books": false
+      }
+    },
+    {
+      "id": "n03",
+      "type": "TRADE_DATA_COLLECTOR",
+      "label": "Collect Executions",
+      "config": {
+        "source": "hs_execution",
+        "query_template": "trader_id:{context.trader_id} AND book:{context.book} AND exec_time:[{context.alert_date}T00:00:00Z TO {context.alert_date}T23:59:59Z] AND trade_version:1",
+        "output_name": "executions",
+        "loop_over_books": false
+      }
+    },
+    {
+      "id": "n04",
+      "type": "COMMS_COLLECTOR",
+      "label": "Collect Communications",
+      "config": {
+        "query_template": "user:{context.trader_id} AND timestamp:[{context.alert_date}T00:00:00Z TO {context.alert_date}T23:59:59Z]",
+        "keywords": [
+          "fix",
+          "benchmark",
+          "front",
+          "layer",
+          "spoof",
+          "push",
+          "rotate",
+          "cover",
+          "WM",
+          "step-out"
+        ],
+        "output_name": "comms"
+      }
+    },
+    {
+      "id": "n05",
+      "type": "MARKET_DATA_COLLECTOR",
+      "label": "Collect Market Data",
+      "config": {
+        "source": "EBS",
+        "query_template": "symbol:{context.currency_pair} AND timestamp:[{context.alert_date}T00:00:00Z TO {context.alert_date}T23:59:59Z]",
+        "output_name": "market_data"
+      }
+    },
+    {
+      "id": "n06",
+      "type": "DATA_HIGHLIGHTER",
+      "label": "Highlight Orders",
+      "config": {
+        "input_name": "orders",
+        "output_name": "orders_highlighted",
+        "rules": [
+          {
+            "condition": "status == 'CANCELLED'",
+            "colour": "#FCA5A5",
+            "label": "CANCELLED"
+          },
+          {
+            "condition": "status == 'PARTIAL'",
+            "colour": "#FCD34D",
+            "label": "PARTIAL"
+          },
+          {
+            "condition": "status == 'PENDING'",
+            "colour": "#E5E7EB",
+            "label": "PENDING"
+          },
+          {
+            "condition": "side == 'BUY'",
+            "colour": "#86EFAC",
+            "label": "BUY"
+          },
+          {
+            "condition": "side == 'SELL'",
+            "colour": "#93C5FD",
+            "label": "SELL"
+          }
+        ]
+      }
+    },
+    {
+      "id": "n07",
+      "type": "DATA_HIGHLIGHTER",
+      "label": "Highlight Executions",
+      "config": {
+        "input_name": "executions",
+        "output_name": "executions_highlighted",
+        "rules": [
+          {
+            "condition": "side == 'BUY'",
+            "colour": "#86EFAC",
+            "label": "BUY"
+          },
+          {
+            "condition": "side == 'SELL'",
+            "colour": "#93C5FD",
+            "label": "SELL"
+          }
+        ]
+      }
+    },
+    {
+      "id": "n08",
+      "type": "DATA_HIGHLIGHTER",
+      "label": "Highlight Communications",
+      "config": {
+        "input_name": "comms",
+        "output_name": "comms_highlighted",
+        "rules": [
+          {
+            "condition": "_keyword_hit == True",
+            "colour": "#FCA5A5",
+            "label": "KEYWORD HIT"
+          }
+        ]
+      }
+    },
+    {
+      "id": "n09",
+      "type": "DATA_HIGHLIGHTER",
+      "label": "Highlight Market Data",
+      "config": {
+        "input_name": "market_data",
+        "output_name": "market_data_highlighted",
+        "rules": [
+          {
+            "condition": "spread_pips > 3.0",
+            "colour": "#FCD34D",
+            "label": "WIDE SPREAD"
+          },
+          {
+            "condition": "spread_pips <= 3.0",
+            "colour": "#D1FAE5",
+            "label": "TIGHT SPREAD"
+          }
+        ]
+      }
+    },
+    {
+      "id": "n10",
+      "type": "SECTION_SUMMARY",
+      "label": "Orders Section",
+      "config": {
+        "section_name": "orders",
+        "input_name": "orders",
+        "field_bindings": [
+          {
+            "field": "order_id",
+            "agg": "count"
+          },
+          {
+            "field": "side",
+            "agg": "nunique"
+          },
+          {
+            "field": "venue",
+            "agg": "nunique"
+          },
+          {
+            "field": "quantity",
+            "agg": "sum"
+          }
+        ],
+        "llm_prompt_template": "You are a trade surveillance analyst. In 2-3 sentences, summarise the client orders activity for trader {trader_id} on {currency_pair}. Stats:\n{stats}"
+      }
+    },
+    {
+      "id": "n11",
+      "type": "SECTION_SUMMARY",
+      "label": "Executions Section",
+      "config": {
+        "section_name": "executions",
+        "input_name": "executions",
+        "field_bindings": [
+          {
+            "field": "exec_id",
+            "agg": "count"
+          },
+          {
+            "field": "exec_quantity",
+            "agg": "sum"
+          },
+          {
+            "field": "notional_usd",
+            "agg": "sum"
+          },
+          {
+            "field": "counterparty",
+            "agg": "nunique"
+          }
+        ],
+        "llm_prompt_template": "Summarise the execution activity in 2-3 sentences. Stats:\n{stats}"
+      }
+    },
+    {
+      "id": "n12",
+      "type": "SECTION_SUMMARY",
+      "label": "Communications Section",
+      "config": {
+        "section_name": "communications",
+        "input_name": "comms",
+        "field_bindings": [
+          {
+            "field": "display_post",
+            "agg": "count"
+          },
+          {
+            "field": "_keyword_hit",
+            "agg": "sum"
+          }
+        ],
+        "llm_prompt_template": "Summarise the communications traffic in 2-3 sentences, flagging any keyword hits. Stats:\n{stats}"
+      }
+    },
+    {
+      "id": "n13",
+      "type": "SECTION_SUMMARY",
+      "label": "Market Data Section",
+      "config": {
+        "section_name": "market_data",
+        "input_name": "market_data",
+        "field_bindings": [
+          {
+            "field": "timestamp",
+            "agg": "count"
+          },
+          {
+            "field": "spread_pips",
+            "agg": "mean"
+          },
+          {
+            "field": "spread_pips",
+            "agg": "max"
+          },
+          {
+            "field": "venue_name",
+            "agg": "nunique"
+          }
+        ],
+        "llm_prompt_template": "Summarise the market data conditions for {currency_pair} in 2-3 sentences. Stats:\n{stats}"
+      }
+    },
+    {
+      "id": "n14",
+      "type": "CONSOLIDATED_SUMMARY",
+      "label": "Consolidated Summary",
+      "config": {
+        "llm_prompt_template": "You are preparing the final summary tab of a trade surveillance report. Trader {trader_id} on {currency_pair}, alert date {alert_date}. Here are the section findings:\n\n{section_text}\n\nIn 4-6 short paragraphs, produce: (1) overview of activity across orders, executions, communications and market data; (2) cross-source observations; (3) notable risk indicators if any; (4) recommended next steps."
+      }
+    },
+    {
+      "id": "n15",
+      "type": "REPORT_OUTPUT",
+      "label": "Single Excel \u2014 Summary Last",
+      "config": {
+        "output_path": "output/all_sources_demo_{context.alert_id}.xlsx",
+        "summary_position": "last",
+        "tabs": [
+          {
+            "name": "Orders",
+            "dataset": "orders",
+            "include_highlights": true
+          },
+          {
+            "name": "Executions",
+            "dataset": "executions",
+            "include_highlights": true
+          },
+          {
+            "name": "Communications",
+            "dataset": "comms",
+            "include_highlights": true
+          },
+          {
+            "name": "Market Data",
+            "dataset": "market_data",
+            "include_highlights": true
+          }
+        ]
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "n01",
+      "to": "n02"
+    },
+    {
+      "from": "n01",
+      "to": "n03"
+    },
+    {
+      "from": "n01",
+      "to": "n04"
+    },
+    {
+      "from": "n01",
+      "to": "n05"
+    },
+    {
+      "from": "n02",
+      "to": "n06"
+    },
+    {
+      "from": "n03",
+      "to": "n07"
+    },
+    {
+      "from": "n04",
+      "to": "n08"
+    },
+    {
+      "from": "n05",
+      "to": "n09"
+    },
+    {
+      "from": "n02",
+      "to": "n10"
+    },
+    {
+      "from": "n03",
+      "to": "n11"
+    },
+    {
+      "from": "n04",
+      "to": "n12"
+    },
+    {
+      "from": "n05",
+      "to": "n13"
+    },
+    {
+      "from": "n10",
+      "to": "n14"
+    },
+    {
+      "from": "n11",
+      "to": "n14"
+    },
+    {
+      "from": "n12",
+      "to": "n14"
+    },
+    {
+      "from": "n13",
+      "to": "n14"
+    },
+    {
+      "from": "n06",
+      "to": "n15"
+    },
+    {
+      "from": "n07",
+      "to": "n15"
+    },
+    {
+      "from": "n08",
+      "to": "n15"
+    },
+    {
+      "from": "n09",
+      "to": "n15"
+    },
+    {
+      "from": "n14",
+      "to": "n15"
+    }
+  ]
+}
