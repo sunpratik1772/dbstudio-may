@@ -119,8 +119,26 @@ columns:
 ```
 
 That's it — the `DataSourceRegistry` picks this file up on next import.
-See [BACKEND_ARCHITECTURE.md §DataSources](BACKEND_ARCHITECTURE.md#data-source-registry)
-for the full loader and the `semantic` field's purpose.
+See [BACKEND_ARCHITECTURE.md §3.9](BACKEND_ARCHITECTURE.md#39-data-source-registry)
+for the full loader.
+
+**Semantic tags matter.** Any column with a `semantic` tag (`trader`,
+`size`, `price`, `time`, `notional`) is automatically:
+
+- injected into the Copilot's system prompt so the LLM writes the
+  correct physical column name instead of an alias, and
+- checked by the `_validate_field_bindings()` validator, which emits
+  an `UNKNOWN_COLUMN` warning when a generated workflow references a
+  column that doesn't exist in the registry.
+
+Tag generously — it directly improves the quality of Copilot-generated
+workflows for your new dataset.
+
+If your collector should participate in the field-binding check, add one
+entry to `_COLLECTOR_SOURCE` in `engine/validator.py`:
+```python
+"POSITIONS_COLLECTOR": "positions",   # node type → data source id
+```
 
 ### 4.2 Create the collector node
 
@@ -493,7 +511,9 @@ Before opening a PR:
 - [ ] `cd frontend && ./node_modules/.bin/tsc --noEmit` — no errors.
 - [ ] `POST /validate` on the new workflow returns `{"valid": true, ...}`.
 - [ ] If you added a scenario, there's a skills markdown file.
-- [ ] If you added a dataset, there's a metadata YAML file.
+- [ ] If you added a dataset, there's a metadata YAML file with `semantic`
+      tags on columns where applicable, and the collector is listed in
+      `_COLLECTOR_SOURCE` in `engine/validator.py`.
 - [ ] If you added a signal, there's at least one unit test for the
       signal function itself (decoupled from the node handler).
 
@@ -517,11 +537,14 @@ workflow JSON files checked into `backend/workflows/` (worked examples).
 
 **Q. My dataset has different column names than the existing scenarios —
 do I need to rewrite all the signal handlers?**
-Short-term: yes — you'd add branches that check for your column names.
-Medium-term: we have an approved plan to land a semantic resolver so
-handlers look up `price` / `size` / `time` by role instead of physical
-name. See the "Semantic Column Resolver" plan in
-`.cursor/plans/` (or ask the project lead for the latest link).
+No. Add `semantic` tags to your columns in the YAML (`semantic: price`,
+`semantic: size`, etc.). The Copilot's system prompt is automatically
+rebuilt from the registry at startup, so the LLM will use your physical
+column names when generating workflows for your dataset. Existing signal
+handlers that reference trades or market data are unaffected — they
+operate on their own collector outputs, not yours. If you need a handler
+to work across multiple datasets by role, use `DataSource.semantic_map()`
+to look up the physical column at runtime.
 
 **Q. My node needs to call an external service / LLM. How?**
 Import `from llm import get_default_adapter` and call `chat_turn(...)` or

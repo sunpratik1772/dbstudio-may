@@ -302,13 +302,23 @@ touch real data:
 | Param typing           | Declared type matches `ParamType`                                |
 | Param values           | `ParamType.ENUM` values are in the allowed set                   |
 | Port wiring            | Upstream output names referenced downstream via `input_name`     |
+| Field bindings         | `SECTION_SUMMARY.field_bindings[].field` names exist in the resolved `DataSource` |
 | Hard rules             | Node-specific invariants registered via `@register_hard_rule`    |
 
 Every issue is a frozen `ValidationIssue(code, message, severity,
 node_id, field)`. `code` is a `ValidationErrorCode` — see
-`engine/validation_codes.py` for the canonical 29-entry inventory. The
+`engine/validation_codes.py` for the canonical 30-entry inventory. The
 enum is `str`-based so JSON serialises cleanly and equality `issue.code
 == "UNKNOWN_TYPE"` works for old call sites.
+
+**Field-binding column validation** — `_validate_field_bindings()` maps
+collector node types to their `DataSource` ID via the `_COLLECTOR_SOURCE`
+table in `validator.py` (`TRADE_DATA_COLLECTOR → "trades"`, etc.), then
+checks each `field_bindings[].field` against `DataSource.column_names()`.
+Issues are warnings, not errors, because `NORMALISE_ENRICH` and
+`SIGNAL_CALCULATOR` may append columns that aren't in the base registry.
+If the dataset's lineage can't be resolved to a collector, the check is
+skipped to avoid false positives.
 
 ### 3.5 Hard rules — the Open/Closed extension point
 
@@ -444,10 +454,19 @@ class DataSource:
     columns: tuple[ColumnSpec, ...]
 ```
 
-Lookup via `from data_sources.registry import get_registry`. The
-`semantic` field is the seam for the upcoming semantic resolver — today
-we consume it as human-readable metadata; tomorrow handlers will resolve
-"give me the price column" by semantic tag rather than hardcoded name.
+Lookup via `from data_sources.registry import get_registry`.
+
+**Semantic resolver (live).** `ColumnSpec.semantic` drives two runtime behaviours:
+
+1. **LLM system prompt injection.** `DataSourceRegistry.schema_hints_for_prompt()` serialises every source into a compact block that `PromptBuilder.system_prompt()` injects under `## Data Source Column Schemas`. The LLM sees exact column names and their semantic tags, so it writes `field: "qty"` rather than the alias `"size"`.
+
+   ```python
+   ds.semantic_map()          # {"size": ["qty"], "price": ["price"], ...}
+   ds.schema_hint()           # per-source markdown block for the prompt
+   registry.schema_hints_for_prompt()   # all sources in one block
+   ```
+
+2. **Field-binding validator.** `_validate_field_bindings()` in `validator.py` checks every `SECTION_SUMMARY.field_bindings[].field` against the columns of the resolved `DataSource`. Mismatches emit `UNKNOWN_COLUMN` **warnings** (not errors) because `NORMALISE_ENRICH` and `SIGNAL_CALCULATOR` may append columns not in the base registry. The `_COLLECTOR_SOURCE` map in `validator.py` (`TRADE_DATA_COLLECTOR → "trades"`, `MARKET_DATA_COLLECTOR → "market"`, etc.) resolves the lineage. If lineage can't be traced, the check is silently skipped to avoid false positives.
 
 ### 3.10 HTTP layer
 
@@ -536,8 +555,14 @@ without changing the route handlers.
 ### 5.2 Add a dataset
 
 1. Create `data_sources/metadata/<id>.yaml` with `id`, `description`,
-   `sources`, and `columns` (with `semantic` tags where possible).
-2. Add/extend a collector node that emits that dataset.
+   `sources`, and `columns`. Add `semantic` tags (`trader`, `size`,
+   `price`, `time`, `notional`) to every column where applicable — these
+   tags are injected into the LLM system prompt and checked by the
+   field-binding validator at validation time.
+2. Add/extend a collector node that emits that dataset. If the new
+   collector should participate in `_validate_field_bindings()`, add an
+   entry to `_COLLECTOR_SOURCE` in `engine/validator.py`
+   (`"MY_COLLECTOR": "my_source_id"`).
 3. Done. `get_registry()` picks it up on next import.
 
 ### 5.3 Add a validation rule
@@ -586,6 +611,7 @@ without changing the route handlers.
 | LLM seam         | `tests/test_gemini_adapter.py`     | Determinism pins, role translation, caching         |
 | Validation codes | `tests/test_validation_codes.py`   | Wire-compat; every emitted code is a known member   |
 | Copilot edit mode| `tests/test_copilot_edit_mode.py`  | Selected-node context is piped into the prompt      |
+| Data sources     | `tests/test_data_sources.py`       | Semantic map, schema hint, prompt injection coverage|
 | Golden path      | `tests/test_golden_path.py`        | Full DAG run produces expected disposition          |
 | Demo run         | `tests/test_run_demo.py`           | `/run/demo` returns a valid xlsx                    |
 
@@ -603,7 +629,7 @@ without changing the route handlers.
 ```bash
 cd backend
 source .venv/bin/activate           # or use .venv/bin/pytest directly
-pytest tests/ -v                    # full suite (~66 tests today)
+pytest tests/ -v                    # full suite (69 tests)
 pytest tests/test_validator.py -v   # targeted
 pytest -k "hard_rule" -v            # pattern match
 ```

@@ -145,6 +145,9 @@ def validate_dag(dag: dict) -> ValidationResult:
     # --- Wiring: input_name params must reference upstream outputs. ---
     _validate_wiring(nodes_by_id, edges, result)
 
+    # --- Column names: field_bindings must reference real columns. ---
+    _validate_field_bindings(nodes_by_id, result)
+
     # --- Node-specific hard rules we can enforce programmatically. ---
     # Rules register themselves via `@register_hard_rule` in
     # `engine/hard_rules.py`. Adding a new rule is a decorator call,
@@ -496,6 +499,77 @@ def _validate_wiring(
                 node_id=nid,
                 field="config.input_name",
             )
+
+
+# ---------------------------------------------------------------------------
+# Field-binding column validation
+# ---------------------------------------------------------------------------
+# Maps the node type that *produces* a dataset to its DataSource ID in the
+# registry.  Only collector nodes are listed because transformers (NORMALISE_
+# ENRICH, SIGNAL_CALCULATOR) pass the dataset through under the same name —
+# the base schema is still the collector's schema plus appended columns.
+_COLLECTOR_SOURCE: dict[str, str] = {
+    "TRADE_DATA_COLLECTOR": "trades",
+    "MARKET_DATA_COLLECTOR": "market",
+    "COMMS_COLLECTOR": "comms",
+    "SIGNAL_CALCULATOR": "signals",
+}
+
+
+def _validate_field_bindings(
+    nodes_by_id: dict[str, dict],
+    result: ValidationResult,
+) -> None:
+    """Warn when a SECTION_SUMMARY field_bindings entry names a column that
+    doesn't exist in the resolved DataSource.
+
+    The check is intentionally a *warning* (not an error) because:
+      * NORMALISE_ENRICH can add columns (e.g. signed_notional) that aren't
+        in the base registry entry.
+      * SIGNAL_CALCULATOR appends 5 _signal_* columns to any input dataset.
+      * We only resolve datasets that trace directly to a collector node —
+        if the lineage is ambiguous we skip silently to avoid false positives.
+    """
+    from data_sources import get_registry
+    reg = get_registry()
+
+    # Build output_name → DataSource from collector nodes only.
+    output_to_source: dict[str, Any] = {}
+    for node in nodes_by_id.values():
+        source_id = _COLLECTOR_SOURCE.get(node.get("type", ""))
+        if not source_id:
+            continue
+        ds = reg.get(source_id)
+        if ds is None:
+            continue
+        output_name = (node.get("config") or {}).get("output_name")
+        if output_name:
+            output_to_source[output_name] = ds
+
+    # Check field_bindings on every SECTION_SUMMARY node.
+    for nid, node in nodes_by_id.items():
+        if node.get("type") != "SECTION_SUMMARY":
+            continue
+        cfg = node.get("config") or {}
+        input_name = cfg.get("input_name")
+        ds = output_to_source.get(input_name) if input_name else None
+        if ds is None:
+            continue  # can't resolve source — skip rather than false-positive
+
+        known = set(ds.column_names())
+        for i, binding in enumerate(cfg.get("field_bindings") or []):
+            if not isinstance(binding, dict):
+                continue
+            field = binding.get("field")
+            if field and field not in known:
+                result.add(
+                    _VC.UNKNOWN_COLUMN,
+                    f"Node '{nid}' field_bindings[{i}].field='{field}' is not a known "
+                    f"column of '{ds.id}'. Known: {sorted(known)}.",
+                    severity="warning",
+                    node_id=nid,
+                    field=f"config.field_bindings[{i}].field",
+                )
 
 
 # ---------------------------------------------------------------------------

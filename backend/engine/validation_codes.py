@@ -114,6 +114,10 @@ class ValidationErrorCode(str, Enum):
     EXIT_HAS_OUTPUT = "EXIT_HAS_OUTPUT"
     """Exit node has an outgoing edge — it must be terminal."""
 
+    # ── Column / schema validation ─────────────────────────────
+    UNKNOWN_COLUMN = "UNKNOWN_COLUMN"
+    """`field_bindings[].field` references a column not in the resolved DataSource."""
+
     # ── Surveillance hard rules ────────────────────────────────
     MISSING_TRADE_VERSION = "MISSING_TRADE_VERSION"
     """`hs_execution` query_template missing the hardcoded `trade_version:1`."""

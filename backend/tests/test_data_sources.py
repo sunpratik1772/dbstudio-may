@@ -40,3 +40,52 @@ def test_registry_endpoint_shape():
         assert {"id", "description", "sources", "columns"} <= set(s.keys())
         for c in s["columns"]:
             assert {"name", "type", "description", "semantic", "optional"} <= set(c.keys())
+
+
+# ---------------------------------------------------------------------------
+# semantic_map
+# ---------------------------------------------------------------------------
+
+def test_semantic_map_returns_correct_columns():
+    trades = get_registry().get("trades")
+    sm = trades.semantic_map()
+    assert sm["trader"] == ["trader_id"]
+    assert sm["size"] == ["qty"]
+    assert sm["price"] == ["price"]
+    assert sm["time"] == ["timestamp"]
+
+
+def test_semantic_map_multi_column():
+    """market.price maps to bid, ask, mid — all three in order."""
+    market = get_registry().get("market")
+    sm = market.semantic_map()
+    assert set(sm["price"]) == {"bid", "ask", "mid"}
+
+
+def test_semantic_map_empty_when_no_tags():
+    """signals dataset has no semantic tags — map should be empty."""
+    signals = get_registry().get("signals")
+    assert signals.semantic_map() == {}
+
+
+# ---------------------------------------------------------------------------
+# schema_hint / schema_hints_for_prompt
+# ---------------------------------------------------------------------------
+
+def test_schema_hint_contains_column_names():
+    hint = get_registry().get("trades").schema_hint()
+    assert "trader_id" in hint
+    assert "qty" in hint
+    assert "semantic: size" in hint
+
+
+def test_schema_hints_for_prompt_covers_all_sources():
+    hints = get_registry().schema_hints_for_prompt()
+    for source_id in ("trades", "comms", "market", "signals"):
+        assert source_id in hints
+
+
+def test_schema_hints_for_prompt_warns_against_aliases():
+    """The instruction block must tell the LLM to use exact column names."""
+    hints = get_registry().schema_hints_for_prompt()
+    assert "exact column names" in hints.lower() or "ONLY" in hints

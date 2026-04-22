@@ -168,3 +168,72 @@ class TestAcyclicity:
         )
         assert not result.valid
         assert any(i.code == "CYCLE" for i in result.errors)
+
+
+# ---------------------------------------------------------------------------
+# field_bindings column validation
+# ---------------------------------------------------------------------------
+def _dag_with_section_summary(field: str, collector_output: str = "trades") -> dict:
+    """Minimal valid DAG: trigger → trade collector → section summary."""
+    return {
+        "schema_version": "1.0",
+        "nodes": [
+            {"id": "n01", "type": "ALERT_TRIGGER", "label": "Alert", "config": {}},
+            {
+                "id": "n02",
+                "type": "TRADE_DATA_COLLECTOR",
+                "label": "Trades",
+                "config": {
+                    "source": "hs_client_order",
+                    "query_template": "*:*",
+                    "output_name": collector_output,
+                },
+            },
+            {
+                "id": "n03",
+                "type": "SECTION_SUMMARY",
+                "label": "Summary",
+                "config": {
+                    "section_name": "trades",
+                    "input_name": collector_output,
+                    "field_bindings": [{"field": field, "agg": "nunique"}],
+                },
+            },
+        ],
+        "edges": [{"from": "n01", "to": "n02"}, {"from": "n02", "to": "n03"}],
+    }
+
+
+class TestFieldBindings:
+    def test_valid_column_passes(self):
+        result = validate_dag(_dag_with_section_summary("trader_id"))
+        assert not any(i.code == "UNKNOWN_COLUMN" for i in result.issues)
+
+    def test_semantic_alias_emits_warning(self):
+        """Using 'size' instead of 'qty' must warn — silent stats is a real bug."""
+        result = validate_dag(_dag_with_section_summary("size"))
+        warnings = [i for i in result.warnings if i.code == "UNKNOWN_COLUMN"]
+        assert warnings, "expected UNKNOWN_COLUMN warning for semantic alias 'size'"
+        assert warnings[0].node_id == "n03"
+
+    def test_invented_column_emits_warning(self):
+        result = validate_dag(_dag_with_section_summary("does_not_exist"))
+        assert any(i.code == "UNKNOWN_COLUMN" for i in result.warnings)
+
+    def test_warning_does_not_block_execution(self):
+        """UNKNOWN_COLUMN is a warning, not an error — valid should still be True."""
+        result = validate_dag(_dag_with_section_summary("size"))
+        assert result.valid  # errors list empty
+
+    def test_unresolvable_input_name_skips_silently(self):
+        """If the dataset name doesn't trace to a collector, don't emit false positives."""
+        result = validate_dag(_dag_with_section_summary("any_field", collector_output="other_dataset"))
+        # collector output_name="other_dataset" — SECTION_SUMMARY input_name="other_dataset"
+        # But "other_dataset" isn't produced by a collector in the same DAG → skip
+        # (the dag above DOES produce "other_dataset" from trade collector, so let's
+        #  test a truly unknown dataset by using a mismatched input_name)
+        dag = _dag_with_section_summary("qty", "trades")
+        # now change section summary input_name to something that doesn't come from a collector
+        dag["nodes"][2]["config"]["input_name"] = "enriched_trades"
+        result = validate_dag(dag)
+        assert not any(i.code == "UNKNOWN_COLUMN" for i in result.issues)

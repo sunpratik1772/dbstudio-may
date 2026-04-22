@@ -8,7 +8,7 @@ regulator-grade Excel report.
 <img alt="dbSherpa" width="100%"
      src="https://img.shields.io/badge/python-3.11%2B-blue" />
 <img alt="React" src="https://img.shields.io/badge/react-18-61dafb" />
-<img alt="Tests" src="https://img.shields.io/badge/tests-66%20passing-brightgreen" />
+<img alt="Tests" src="https://img.shields.io/badge/tests-69%20passing-brightgreen" />
 <img alt="License" src="https://img.shields.io/badge/license-proprietary-lightgrey" />
 
 ---
@@ -166,15 +166,16 @@ See `docs/BACKEND_ARCHITECTURE.md §6 — Testing guide` for patterns
 
 ## Status
 
-- **66 backend tests green**, frontend typecheck green.
+- **69 backend tests green**, frontend typecheck green.
 - Full Cloud Run deployment artifacts (`backend/deploy/`,
   `frontend/deploy/`).
 - Copilot chat + streaming generation with edit-mode (deictic
   references to the selected canvas node).
 - Five built-in surveillance scenarios shipped:
   FX front-running, FI wash, FI layering, FI spoofing, comms.
-- Semantic column resolver is the next scheduled milestone — see
-  `docs/BACKEND_ARCHITECTURE.md §3.9`.
+- Semantic column resolver shipped — `ColumnSpec.semantic` tags are
+  injected into the LLM system prompt and validated post-generation;
+  see `docs/BACKEND_ARCHITECTURE.md §3.9`.
 
 ---
 

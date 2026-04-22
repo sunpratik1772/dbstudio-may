@@ -324,7 +324,7 @@ function RunLogTimeline() {
           }}
         >
           {runError}
-        </div>
+                      </div>
       )}
 
       {/* Timeline */}
@@ -365,7 +365,7 @@ function RunLogTimeline() {
                 <div className="flex-1 min-w-0">
                   <div className="truncate" style={{ fontSize: 11.5, color: 'var(--text-0)', fontWeight: 500 }}>
                     {entry.label}
-                  </div>
+                    </div>
                   <div className="truncate" style={{ fontSize: 10.5, color: 'var(--text-2)' }}>
                     {entry.node_type} · <span className="num">{entry.node_id}</span>
                   </div>
@@ -394,8 +394,8 @@ function RunLogTimeline() {
             </div>
           )
         })}
-      </div>
-    </div>
+                </div>
+              </div>
   )
 }
 
@@ -621,7 +621,7 @@ export default function NodeConfig() {
                     <label className="eyebrow" style={{ color: 'var(--text-2)' }}>Executive Summary</label>
                     <div
                       className="mt-1 rounded-lg p-2.5 whitespace-pre-wrap"
-                      style={{
+                  style={{
                         fontSize: 11.5,
                         color: 'var(--text-1)',
                         lineHeight: 1.6,

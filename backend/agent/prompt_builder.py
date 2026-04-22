@@ -22,6 +22,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from data_sources import get_registry
 from .repair.feedback_builder import build_feedback
 
 
@@ -73,12 +74,16 @@ class PromptBuilder:
     def system_prompt(self) -> str:
         skills = self._load_skills()
         contracts = self._load_contracts()
+        schema_hints = get_registry().schema_hints_for_prompt()
         return f"""You are dbSherpa Copilot — an AI workflow designer for financial trade surveillance.
 
 You generate complete, valid DAG JSON workflows for the dbSherpa engine.
 
 ## Node I/O Contracts
 {contracts}
+
+## Data Source Column Schemas
+{schema_hints}
 
 ## Surveillance Skills Library
 {skills}
