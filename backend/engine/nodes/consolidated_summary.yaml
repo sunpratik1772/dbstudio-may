@@ -1,0 +1,35 @@
+type_id: CONSOLIDATED_SUMMARY
+description: "LLM executive summary across all sections"
+
+ui:
+  color: "#B45309"
+  icon: FileStack
+
+input_ports:
+  - name: sections
+    type: object
+    description: >-
+      All section objects produced by upstream SECTION_SUMMARY nodes
+      (context.sections).
+
+output_ports:
+  - name: executive_summary
+    type: text
+    description: "Multi-paragraph executive summary. Stored as context.executive_summary."
+
+params:
+  - name: llm_prompt_template
+    type: string
+    description: >-
+      Custom prompt with {section_text}, {trader_id}, {currency_pair},
+      {disposition}, {flag_count} placeholders. Falls back to the built-in
+      template when empty.
+    required: false
+    widget: textarea
+
+semantics:
+  requires: []
+
+constraints:
+  - "LLM model: claude-sonnet-4-6, max_tokens: 1000."
+  - "Must run after all SECTION_SUMMARY nodes."

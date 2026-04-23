@@ -1,11 +1,11 @@
 import re
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
 from ..context import RunContext
-from ..node_spec import NodeSpec, _spec
-from ..ports import ParamSpec, ParamType, PortSpec, PortType, Widget
+from ..node_spec import NodeSpec, _spec_from_yaml
 
 _MOCK_MESSAGES = [
     "need to move before the fix window opens",
@@ -73,72 +73,4 @@ def handle_comms_collector(node: dict, ctx: RunContext) -> None:
     ctx.set(f"{output_name}_keyword_hits", int(df["_keyword_hit"].sum()))
 
 
-NODE_SPEC: NodeSpec = _spec(
-    "COMMS_COLLECTOR",
-    handle_comms_collector,
-    "Query Oculus comms with keyword scanning",
-    color="#059669",
-    icon="MessageSquareText",
-    config_tags=("output_name",),
-    input_ports=(
-        PortSpec(
-            name="context",
-            type=PortType.OBJECT,
-            description="Context keys referenced in query_template as {context.xxx}.",
-            optional=True,
-        ),
-    ),
-    output_ports=(
-        PortSpec(
-            name="comms",
-            type=PortType.DATAFRAME,
-            description=(
-                "DataFrame with columns: user, timestamp, display_post, event_type, "
-                "_keyword_hit, _matched_keywords. Stored under ctx.datasets[output_name]."
-            ),
-        ),
-        PortSpec(
-            name="keyword_hit_count",
-            type=PortType.SCALAR,
-            description="Total keyword hit count (int). Stored as {output_name}_keyword_hits.",
-            optional=True,
-        ),
-    ),
-    params=(
-        ParamSpec(
-            name="query_template",
-            type=ParamType.STRING,
-            description="Oculus query with {context.xxx} placeholders.",
-            required=True,
-            widget=Widget.TEXTAREA,
-        ),
-        ParamSpec(
-            name="keywords",
-            type=ParamType.STRING_LIST,
-            description="Terms to scan in display_post.",
-            default=[],
-            required=False,
-        ),
-        ParamSpec(
-            name="output_name",
-            type=ParamType.STRING,
-            description="Dataset name in ctx.datasets.",
-            default="comms",
-            required=True,
-        ),
-        ParamSpec(
-            name="mock_csv_path",
-            type=ParamType.STRING,
-            description=(
-                "Demo-mode override: path to a CSV used verbatim instead of "
-                "the synthetic generator. Ignored if the file is missing."
-            ),
-            default="",
-            required=False,
-        ),
-    ),
-    constraints=(
-        "Always adds _keyword_hit (boolean) and _matched_keywords (list[str]) columns.",
-        "Scans display_post field only.",
-    ),
-)
+NODE_SPEC: NodeSpec = _spec_from_yaml(Path(__file__).with_suffix(".yaml"), handle_comms_collector)

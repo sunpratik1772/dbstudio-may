@@ -1,10 +1,11 @@
+from pathlib import Path
+
 import pandas as pd
 
 from llm import get_default_adapter
 
 from ..context import RunContext
-from ..node_spec import NodeSpec, _spec
-from ..ports import ParamSpec, ParamType, PortSpec, PortType, Widget
+from ..node_spec import NodeSpec, _spec_from_yaml
 
 
 def _llm_narrative(prompt: str) -> str:
@@ -80,70 +81,4 @@ def handle_section_summary(node: dict, ctx: RunContext) -> None:
     }
 
 
-NODE_SPEC: NodeSpec = _spec(
-    "SECTION_SUMMARY",
-    handle_section_summary,
-    "Aggregate stats + LLM narrative section",
-    color="#DB2777",
-    icon="NotebookText",
-    input_ports=(
-        PortSpec(
-            name="dataset",
-            type=PortType.DATAFRAME,
-            description="Any DataFrame referenced by input_name.",
-        ),
-        PortSpec(
-            name="context",
-            type=PortType.OBJECT,
-            description=(
-                "trader_id, currency_pair, disposition consumed by the prompt "
-                "template."
-            ),
-            optional=True,
-        ),
-    ),
-    output_ports=(
-        PortSpec(
-            name="section",
-            type=PortType.OBJECT,
-            description=(
-                "{name, stats, narrative, dataset}. Stored under "
-                "context.sections[section_name]."
-            ),
-        ),
-    ),
-    params=(
-        ParamSpec(
-            name="section_name",
-            type=ParamType.STRING,
-            description="Unique section identifier.",
-            required=True,
-        ),
-        ParamSpec(
-            name="input_name",
-            type=ParamType.INPUT_REF,
-            description="Source dataset.",
-            required=True,
-        ),
-        ParamSpec(
-            name="field_bindings",
-            type=ParamType.ARRAY,
-            description=(
-                "Array of {field: string, agg: 'count'|'sum'|'mean'|'nunique'|'max'|'min'}."
-            ),
-            default=[],
-            required=False,
-        ),
-        ParamSpec(
-            name="llm_prompt_template",
-            type=ParamType.STRING,
-            description=(
-                "Prompt with {stats}, {section}, {disposition}, {trader_id}, "
-                "{currency_pair} placeholders."
-            ),
-            required=False,
-            widget=Widget.TEXTAREA,
-        ),
-    ),
-    constraints=("LLM model: claude-sonnet-4-6, max_tokens: 600.",),
-)
+NODE_SPEC: NodeSpec = _spec_from_yaml(Path(__file__).with_suffix(".yaml"), handle_section_summary)

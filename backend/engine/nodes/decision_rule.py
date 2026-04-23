@@ -1,6 +1,7 @@
+from pathlib import Path
+
 from ..context import RunContext
-from ..node_spec import NodeSpec, _spec
-from ..ports import ParamSpec, ParamType, PortSpec, PortType
+from ..node_spec import NodeSpec, _spec_from_yaml
 
 
 def handle_decision_rule(node: dict, ctx: RunContext) -> None:
@@ -42,81 +43,4 @@ def handle_decision_rule(node: dict, ctx: RunContext) -> None:
     ctx.set("output_branch", branch)
 
 
-NODE_SPEC: NodeSpec = _spec(
-    "DECISION_RULE",
-    handle_decision_rule,
-    "Evaluate flag_count → ESCALATE/REVIEW/DISMISS",
-    color="#D97706",
-    icon="Gavel",
-    input_ports=(
-        PortSpec(
-            name="dataset",
-            type=PortType.DATAFRAME,
-            description="Signal DataFrame with _signal_flag column.",
-        ),
-        PortSpec(
-            name="flag_count",
-            type=PortType.SCALAR,
-            description=(
-                "Flag count from SIGNAL_CALCULATOR (read from "
-                "ctx.values[{input_name}_flag_count] if the dataset isn't available)."
-            ),
-            optional=True,
-        ),
-    ),
-    output_ports=(
-        PortSpec(
-            name="disposition",
-            type=PortType.TEXT,
-            description="'ESCALATE' | 'REVIEW' | 'DISMISS'. Stored as context.disposition.",
-        ),
-        PortSpec(
-            name="flag_count",
-            type=PortType.SCALAR,
-            description="Total signal hits (int). Stored as context.flag_count.",
-        ),
-        PortSpec(
-            name="output_branch",
-            type=PortType.TEXT,
-            description="Branch name to route to. Stored as context.output_branch.",
-        ),
-    ),
-    params=(
-        ParamSpec(
-            name="input_name",
-            type=ParamType.INPUT_REF,
-            description="Signal dataset name.",
-            required=True,
-        ),
-        ParamSpec(
-            name="flag_count_expr",
-            type=ParamType.STRING,
-            description=(
-                "Python expression using 'flag_count' variable, e.g. 'flag_count > 0'. "
-                "Overrides escalate/review thresholds when supplied."
-            ),
-            required=False,
-        ),
-        ParamSpec(
-            name="escalate_threshold",
-            type=ParamType.INTEGER,
-            description="flag_count >= this → ESCALATE.",
-            default=1,
-            required=False,
-        ),
-        ParamSpec(
-            name="review_threshold",
-            type=ParamType.INTEGER,
-            description="flag_count >= this → REVIEW, else DISMISS.",
-            default=1,
-            required=False,
-        ),
-        ParamSpec(
-            name="output_branches",
-            type=ParamType.OBJECT,
-            description="Map of disposition → branch_name string.",
-            default={},
-            required=False,
-        ),
-    ),
-)
+NODE_SPEC: NodeSpec = _spec_from_yaml(Path(__file__).with_suffix(".yaml"), handle_decision_rule)

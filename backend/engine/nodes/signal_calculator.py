@@ -1,9 +1,10 @@
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 
 from ..context import RunContext
-from ..node_spec import NodeSpec, _spec
-from ..ports import ParamSpec, ParamType, PortSpec, PortType
+from ..node_spec import NodeSpec, _spec_from_yaml
 
 # These 5 columns are the contract — always present, no exceptions
 SIGNAL_COLUMNS = ["_signal_flag", "_signal_score", "_signal_reason", "_signal_type", "_signal_window"]
@@ -157,103 +158,4 @@ def handle_signal_calculator(node: dict, ctx: RunContext) -> None:
     ctx.set(f"{output_name}_flag_count", int(df["_signal_flag"].sum()))
 
 
-NODE_SPEC: NodeSpec = _spec(
-    "SIGNAL_CALCULATOR",
-    handle_signal_calculator,
-    "Compute signals — always outputs 5 columns",
-    color="#DC2626",
-    icon="Signal",
-    config_tags=("signal_type", "output_name"),
-    input_ports=(
-        PortSpec(
-            name="dataset",
-            type=PortType.DATAFRAME,
-            description="Trade/execution DataFrame (typically after NORMALISE_ENRICH).",
-        ),
-    ),
-    output_ports=(
-        PortSpec(
-            name="signals",
-            type=PortType.DATAFRAME,
-            description=(
-                "Input DataFrame + exactly 5 signal columns: _signal_flag (bool), "
-                "_signal_score (float 0-10), _signal_reason (str), _signal_type (str), "
-                "_signal_window (str)."
-            ),
-        ),
-        PortSpec(
-            name="flag_count",
-            type=PortType.SCALAR,
-            description=(
-                "Number of rows where _signal_flag == True. Stored as "
-                "{output_name}_flag_count."
-            ),
-            optional=True,
-        ),
-    ),
-    params=(
-        ParamSpec(
-            name="mode",
-            type=ParamType.ENUM,
-            description="How the signal is computed.",
-            enum=("configure", "upload_script"),
-            default="configure",
-            required=True,
-        ),
-        ParamSpec(
-            name="signal_type",
-            type=ParamType.ENUM,
-            description="Built-in signal family (configure mode only).",
-            enum=("FRONT_RUNNING", "WASH_TRADE", "SPOOFING", "LAYERING"),
-            required=False,
-        ),
-        ParamSpec(
-            name="input_name",
-            type=ParamType.INPUT_REF,
-            description="Source dataset name (an upstream output_name).",
-            required=True,
-        ),
-        ParamSpec(
-            name="output_name",
-            type=ParamType.STRING,
-            description="Output dataset name.",
-            required=True,
-        ),
-        ParamSpec(
-            name="params",
-            type=ParamType.OBJECT,
-            description="Signal-specific parameters (overrides built-in defaults).",
-            default={},
-            required=False,
-        ),
-        ParamSpec(
-            name="script_path",
-            type=ParamType.STRING,
-            description="Path to custom Python script (upload_script mode).",
-            required=False,
-        ),
-        ParamSpec(
-            name="script_content",
-            type=ParamType.CODE,
-            description=(
-                "Inline Python snippet operating on local variable `df` "
-                "(upload_script mode)."
-            ),
-            required=False,
-        ),
-    ),
-    constraints=(
-        "ALWAYS outputs exactly these 5 columns: _signal_flag, _signal_score, "
-        "_signal_reason, _signal_type, _signal_window.",
-        "Missing signal columns are auto-filled with defaults (False, 0.0, '', '', '').",
-        "Custom scripts must operate on local variable 'df' and leave result in 'df'.",
-    ),
-    extras={
-        "built_in_signal_params": {
-            "FRONT_RUNNING": {"window_minutes": 5, "price_move_threshold": 0.0003},
-            "WASH_TRADE": {"window_minutes": 10, "ratio_threshold": 0.8},
-            "SPOOFING": {"cancel_ratio_threshold": 0.7, "window": "1d"},
-            "LAYERING": {"min_layers": 5, "window": "30m"},
-        }
-    },
-)
+NODE_SPEC: NodeSpec = _spec_from_yaml(Path(__file__).with_suffix(".yaml"), handle_signal_calculator)

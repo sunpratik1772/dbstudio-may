@@ -1,6 +1,7 @@
+from pathlib import Path
+
 from ..context import RunContext
-from ..node_spec import NodeSpec, _spec
-from ..ports import ParamSpec, ParamType, PortSpec, PortType
+from ..node_spec import NodeSpec, _spec_from_yaml
 
 STANDARD_FIELDS = ("trader_id", "book", "alert_date", "currency_pair", "alert_id", "entity", "desk")
 
@@ -24,43 +25,4 @@ def handle_alert_trigger(node: dict, ctx: RunContext) -> None:
                 ctx.set(key, val)
 
 
-NODE_SPEC: NodeSpec = _spec(
-    "ALERT_TRIGGER",
-    handle_alert_trigger,
-    "Entry point — binds alert payload to context",
-    color="#7C3AED",
-    icon="Siren",
-    input_ports=(
-        PortSpec(
-            name="alert_payload",
-            type=PortType.OBJECT,
-            description="JSON object passed at workflow invocation time.",
-        ),
-    ),
-    output_ports=(
-        PortSpec(
-            name="context_keys",
-            type=PortType.OBJECT,
-            description=(
-                "One context key per declared alert_field, e.g. trader_id, book, "
-                "alert_date, currency_pair, alert_id."
-            ),
-        ),
-    ),
-    params=(
-        ParamSpec(
-            name="alert_fields",
-            type=ParamType.OBJECT,
-            description=(
-                "Map of field_name → type (string|date|number). Binds standard fields"
-                " trader_id, book, alert_date, currency_pair, alert_id, entity, desk."
-            ),
-            default={},
-            required=False,
-        ),
-    ),
-    constraints=(
-        "Must be the first node (id=n01).",
-        "No dataset inputs or outputs.",
-    ),
-)
+NODE_SPEC: NodeSpec = _spec_from_yaml(Path(__file__).with_suffix(".yaml"), handle_alert_trigger)

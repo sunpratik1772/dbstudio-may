@@ -1,8 +1,9 @@
+from pathlib import Path
+
 from llm import get_default_adapter
 
 from ..context import RunContext
-from ..node_spec import NodeSpec, _spec
-from ..ports import ParamSpec, ParamType, PortSpec, PortType, Widget
+from ..node_spec import NodeSpec, _spec_from_yaml
 
 
 def _llm_summary(prompt: str) -> str:
@@ -71,47 +72,4 @@ Be precise, analytical, and reference specific statistics from the section findi
     ctx.set("executive_summary", ctx.executive_summary)
 
 
-NODE_SPEC: NodeSpec = _spec(
-    "CONSOLIDATED_SUMMARY",
-    handle_consolidated_summary,
-    "LLM executive summary across all sections",
-    color="#B45309",
-    icon="FileStack",
-    input_ports=(
-        PortSpec(
-            name="sections",
-            type=PortType.OBJECT,
-            description=(
-                "All section objects produced by upstream SECTION_SUMMARY nodes "
-                "(context.sections)."
-            ),
-        ),
-    ),
-    output_ports=(
-        PortSpec(
-            name="executive_summary",
-            type=PortType.TEXT,
-            description=(
-                "Multi-paragraph executive summary. Stored as "
-                "context.executive_summary."
-            ),
-        ),
-    ),
-    params=(
-        ParamSpec(
-            name="llm_prompt_template",
-            type=ParamType.STRING,
-            description=(
-                "Custom prompt with {section_text}, {trader_id}, "
-                "{currency_pair}, {disposition}, {flag_count} placeholders. "
-                "Falls back to the built-in template when empty."
-            ),
-            required=False,
-            widget=Widget.TEXTAREA,
-        ),
-    ),
-    constraints=(
-        "LLM model: claude-sonnet-4-6, max_tokens: 1000.",
-        "Must run after all SECTION_SUMMARY nodes.",
-    ),
-)
+NODE_SPEC: NodeSpec = _spec_from_yaml(Path(__file__).with_suffix(".yaml"), handle_consolidated_summary)

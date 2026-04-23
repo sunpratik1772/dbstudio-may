@@ -1,5 +1,6 @@
 import os
 import re
+from pathlib import Path
 
 import pandas as pd
 from openpyxl import Workbook
@@ -7,8 +8,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 from ..context import RunContext
-from ..node_spec import NodeSpec, _spec
-from ..ports import ParamSpec, ParamType, PortSpec, PortType
+from ..node_spec import NodeSpec, _spec_from_yaml
 
 
 def _hex_fill(hex_colour: str) -> PatternFill:
@@ -186,68 +186,4 @@ def handle_report_output(node: dict, ctx: RunContext) -> None:
     ctx.set("report_path", output_path)
 
 
-NODE_SPEC: NodeSpec = _spec(
-    "REPORT_OUTPUT",
-    handle_report_output,
-    "Generate Excel report with tabs & highlights",
-    color="#047857",
-    icon="FileSpreadsheet",
-    config_tags=("output_name",),
-    input_ports=(
-        PortSpec(
-            name="datasets",
-            type=PortType.OBJECT,
-            description="All DataFrames to include as tabs (ctx.datasets).",
-        ),
-        PortSpec(
-            name="sections",
-            type=PortType.OBJECT,
-            description="Section narratives for the Section Summaries sheet.",
-            optional=True,
-        ),
-        PortSpec(
-            name="executive_summary",
-            type=PortType.TEXT,
-            description="Executive summary text.",
-            optional=True,
-        ),
-        PortSpec(
-            name="context",
-            type=PortType.OBJECT,
-            description="disposition, trader_id, currency_pair etc. used on the cover page.",
-            optional=True,
-        ),
-    ),
-    output_ports=(
-        PortSpec(
-            name="report_path",
-            type=PortType.TEXT,
-            description="Absolute path to the written .xlsx file. Stored as context.report_path.",
-        ),
-    ),
-    params=(
-        ParamSpec(
-            name="output_path",
-            type=ParamType.STRING,
-            description="File path for the Excel output (e.g. 'output/report.xlsx').",
-            required=True,
-        ),
-        ParamSpec(
-            name="tabs",
-            type=ParamType.ARRAY,
-            description=(
-                "Array of {name: string (max 31 chars), dataset: string, "
-                "include_highlights: boolean}. When empty, all context.datasets are included."
-            ),
-            default=[],
-            required=False,
-        ),
-    ),
-    constraints=(
-        "Tab names truncated to 31 characters (Excel limit).",
-        "Datetime columns converted to strings automatically.",
-        "List/dict cell values stringified automatically.",
-        "If include_highlights=true, uses dataset_name + '_highlighted' if it exists.",
-        "Must be the final node in the workflow.",
-    ),
-)
+NODE_SPEC: NodeSpec = _spec_from_yaml(Path(__file__).with_suffix(".yaml"), handle_report_output)

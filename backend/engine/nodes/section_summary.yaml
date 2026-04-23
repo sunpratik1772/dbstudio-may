@@ -1,0 +1,48 @@
+type_id: SECTION_SUMMARY
+description: "Aggregate stats + LLM narrative section"
+
+ui:
+  color: "#DB2777"
+  icon: NotebookText
+
+input_ports:
+  - name: dataset
+    type: dataframe
+    description: "Any DataFrame referenced by input_name."
+  - name: context
+    type: object
+    description: "trader_id, currency_pair, disposition consumed by the prompt template."
+    optional: true
+
+output_ports:
+  - name: section
+    type: object
+    description: "{name, stats, narrative, dataset}. Stored under context.sections[section_name]."
+
+params:
+  - name: section_name
+    type: string
+    description: "Unique section identifier."
+    required: true
+  - name: input_name
+    type: input_ref
+    description: "Source dataset."
+    required: true
+  - name: field_bindings
+    type: array
+    description: "Array of {field: string, agg: 'count'|'sum'|'mean'|'nunique'|'max'|'min'}."
+    default: []
+    required: false
+  - name: llm_prompt_template
+    type: string
+    description: >-
+      Prompt with {stats}, {section}, {disposition}, {trader_id},
+      {currency_pair} placeholders.
+    required: false
+    widget: textarea
+
+semantics:
+  requires: []
+
+constraints:
+  - "LLM model: claude-sonnet-4-6, max_tokens: 600."

@@ -1,0 +1,57 @@
+type_id: MARKET_DATA_COLLECTOR
+description: "Query EBS/Mercury tick data, normalise timestamps"
+
+ui:
+  color: "#0891B2"
+  icon: CandlestickChart
+  config_tags: [source, output_name]
+
+input_ports:
+  - name: context
+    type: object
+    description: "Context keys referenced in query_template as {context.xxx}."
+    optional: true
+
+output_ports:
+  - name: ticks
+    type: dataframe
+    description: >-
+      DataFrame with columns: timestamp (ISO str), symbol (str), bid, ask,
+      mid, spread_pips, bid_size, ask_size, venue_name, seq_no.
+      Stored under ctx.datasets[output_name].
+  - name: tick_count
+    type: scalar
+    description: "Tick count (int). Stored as {output_name}_tick_count."
+    optional: true
+
+params:
+  - name: source
+    type: enum
+    description: "Which tick feed to query."
+    enum: [EBS, Mercury]
+    default: EBS
+    required: true
+  - name: query_template
+    type: string
+    description: "Query with {context.xxx} placeholders."
+    required: true
+    widget: textarea
+  - name: output_name
+    type: string
+    description: "Dataset name in ctx.datasets."
+    default: market_data
+    required: true
+  - name: mock_csv_path
+    type: string
+    description: >-
+      Demo-mode override: path to a CSV used verbatim instead of the synthetic
+      generator. Ignored if the file is missing.
+    default: ""
+    required: false
+
+semantics:
+  requires: [time, price]
+
+constraints:
+  - "Normalises raw_timestamp (nanosecond int) → ISO-8601 string."
+  - "Normalises byte-string fields (raw_symbol, venue) → plain str."

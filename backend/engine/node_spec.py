@@ -1,29 +1,42 @@
 """
-The `NodeSpec` data type and the `_spec(...)` factory.
+The `NodeSpec` data type and the `_spec(...)` / `_spec_from_yaml(...)` factories.
 
 These used to live in `engine/registry.py` next to the single giant
 tuple of every node declaration. That made the registry a merge-conflict
 hotspot — every new node added by any developer touched the same tuple.
 
-Now each node module declares its own `NODE_SPEC = _spec(...)` at the
-bottom of its handler file, and `registry.py` is a tiny auto-discovery
-module that collects them. Two developers adding two nodes touch two
-different files.
+Now each node module declares its own `NODE_SPEC` at the bottom of its
+handler file via one of two patterns:
 
-Keeping `NodeSpec` + `_spec` in a dedicated module (rather than
-`engine/ports.py` or `engine/registry.py`) avoids circular imports:
-node modules import from here, and `registry.py` imports the node
+  # Legacy (Python inline):
+  NODE_SPEC = _spec("TYPE_ID", handler, "description", color=..., ...)
+
+  # YAML-driven (preferred for new nodes):
+  NODE_SPEC = _spec_from_yaml(Path(__file__).with_suffix('.yaml'), handler)
+
+Both return an identical `NodeSpec`. The YAML form externalises all
+metadata so non-Python contributors can add or modify node specs without
+touching Python.
+
+Keeping `NodeSpec` + factories in a dedicated module avoids circular
+imports: node modules import from here, `registry.py` imports node
 modules. Nothing else in this module reaches into either direction.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable
+
+import yaml as _yaml  # PyYAML — already a project dependency (data_sources uses it)
 
 from .context import RunContext
 from .ports import (
     ParamSpec,
+    ParamType,
     PortSpec,
+    PortType,
+    Widget,
     params_from_legacy,
     ports_from_legacy,
 )
@@ -62,6 +75,12 @@ class NodeSpec:
     output_ports: tuple[PortSpec, ...] = field(default_factory=tuple)
     params: tuple[ParamSpec, ...] = field(default_factory=tuple)
 
+    # Semantic tags this node requires from upstream datasets, e.g.
+    # ("trader", "time"). Empty = no declared semantic requirements.
+    # Populated from the YAML `semantics.requires` list; used by the
+    # validator and agent prompt builder.
+    semantics_requires: tuple[str, ...] = field(default_factory=tuple)
+
 
 def _spec(
     type_id: str,
@@ -83,6 +102,8 @@ def _spec(
     input_ports: tuple[PortSpec, ...] | None = None,
     output_ports: tuple[PortSpec, ...] | None = None,
     params: tuple[ParamSpec, ...] | None = None,
+    # Semantic tags this node requires from upstream datasets.
+    semantics_requires: tuple[str, ...] = (),
 ) -> NodeSpec:
     # -- Resolve typed specs --------------------------------------------------
     typed_inputs = tuple(input_ports) if input_ports is not None else tuple(ports_from_legacy(inputs))
@@ -122,7 +143,83 @@ def _spec(
         input_ports=typed_inputs,
         output_ports=typed_outputs,
         params=typed_params,
+        semantics_requires=tuple(semantics_requires),
     )
 
 
-__all__ = ["NodeSpec", "Handler", "_spec"]
+# ---------------------------------------------------------------------------
+# YAML type alias table — maps common aliases to canonical ParamType values
+# so YAML authors can write "float", "int", "bool" naturally.
+# ---------------------------------------------------------------------------
+_PARAM_TYPE_ALIASES: dict[str, str] = {
+    "float":  "number",
+    "int":    "integer",
+    "bool":   "boolean",
+    "str":    "string",
+    "list":   "array",
+    "dict":   "object",
+}
+
+
+def _spec_from_yaml(yaml_path: Path | str, handler: Handler) -> NodeSpec:
+    """
+    Load a node spec from a sibling YAML file and construct a NodeSpec
+    identical to what ``_spec()`` would produce.
+
+    The YAML is the single source of truth for all node metadata (type,
+    description, ports, params, constraints, semantics). The handler
+    function is the only thing YAML cannot encode — it is passed
+    explicitly so the two stay paired by naming convention.
+
+    Downstream consumers (registry, validator, gen_artifacts, copilot)
+    receive an ordinary ``NodeSpec`` — they are unaware of whether it
+    was produced by ``_spec()`` or ``_spec_from_yaml()``.
+    """
+    with open(yaml_path) as f:
+        data = _yaml.safe_load(f)
+
+    def _load_port(p: dict) -> PortSpec:
+        return PortSpec(
+            name=p["name"],
+            type=PortType(p["type"].lower()),
+            description=p.get("description", ""),
+            optional=bool(p.get("optional", False)),
+        )
+
+    def _load_param(p: dict) -> ParamSpec:
+        raw = p["type"].lower()
+        raw = _PARAM_TYPE_ALIASES.get(raw, raw)
+        ptype = ParamType(raw)
+        # Widget can sit directly under "widget" or nested as "ui.control"
+        raw_widget = p.get("widget") or (p.get("ui") or {}).get("control")
+        widget = Widget(raw_widget.lower()) if raw_widget else None
+        return ParamSpec(
+            name=p["name"],
+            type=ptype,
+            description=p.get("description", ""),
+            default=p.get("default"),
+            required=bool(p.get("required", True)),
+            enum=tuple(str(v) for v in (p.get("enum") or [])),
+            widget=widget,
+        )
+
+    ui = data.get("ui") or {}
+    sem = data.get("semantics") or {}
+
+    return _spec(
+        data["type_id"],
+        handler,
+        data["description"],
+        color=ui.get("color", "#6B7280"),
+        icon=ui.get("icon", "Box"),
+        config_tags=tuple(ui.get("config_tags") or []),
+        input_ports=tuple(_load_port(p) for p in (data.get("input_ports") or [])),
+        output_ports=tuple(_load_port(p) for p in (data.get("output_ports") or [])),
+        params=tuple(_load_param(p) for p in (data.get("params") or [])),
+        constraints=tuple(data.get("constraints") or []),
+        extras=data.get("extras"),
+        semantics_requires=tuple(sem.get("requires") or []),
+    )
+
+
+__all__ = ["NodeSpec", "Handler", "_spec", "_spec_from_yaml"]

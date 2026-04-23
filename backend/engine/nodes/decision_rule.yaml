@@ -1,0 +1,60 @@
+type_id: DECISION_RULE
+description: "Evaluate flag_count → ESCALATE/REVIEW/DISMISS"
+
+ui:
+  color: "#D97706"
+  icon: Gavel
+
+input_ports:
+  - name: dataset
+    type: dataframe
+    description: "Signal DataFrame with _signal_flag column."
+  - name: flag_count
+    type: scalar
+    description: >-
+      Flag count from SIGNAL_CALCULATOR (read from
+      ctx.values[{input_name}_flag_count] if the dataset isn't available).
+    optional: true
+
+output_ports:
+  - name: disposition
+    type: text
+    description: "'ESCALATE' | 'REVIEW' | 'DISMISS'. Stored as context.disposition."
+  - name: flag_count
+    type: scalar
+    description: "Total signal hits (int). Stored as context.flag_count."
+  - name: output_branch
+    type: text
+    description: "Branch name to route to. Stored as context.output_branch."
+
+params:
+  - name: input_name
+    type: input_ref
+    description: "Signal dataset name."
+    required: true
+  - name: flag_count_expr
+    type: string
+    description: >-
+      Python expression using 'flag_count' variable, e.g. 'flag_count > 0'.
+      Overrides escalate/review thresholds when supplied.
+    required: false
+  - name: escalate_threshold
+    type: integer
+    description: "flag_count >= this → ESCALATE."
+    default: 1
+    required: false
+  - name: review_threshold
+    type: integer
+    description: "flag_count >= this → REVIEW, else DISMISS."
+    default: 1
+    required: false
+  - name: output_branches
+    type: object
+    description: "Map of disposition → branch_name string."
+    default: {}
+    required: false
+
+semantics:
+  requires: []
+
+constraints: []

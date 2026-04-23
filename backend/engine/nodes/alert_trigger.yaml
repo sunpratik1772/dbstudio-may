@@ -1,0 +1,35 @@
+type_id: ALERT_TRIGGER
+description: "Entry point — binds alert payload to context"
+
+ui:
+  color: "#7C3AED"
+  icon: Siren
+
+input_ports:
+  - name: alert_payload
+    type: object
+    description: "JSON object passed at workflow invocation time."
+
+output_ports:
+  - name: context_keys
+    type: object
+    description: >-
+      One context key per declared alert_field, e.g. trader_id, book,
+      alert_date, currency_pair, alert_id.
+
+params:
+  - name: alert_fields
+    type: object
+    description: >-
+      Map of field_name → type (string|date|number). Binds standard fields
+      trader_id, book, alert_date, currency_pair, alert_id, entity, desk.
+    default: {}
+    required: false
+    widget: json
+
+semantics:
+  requires: []
+
+constraints:
+  - "Must be the first node (id=n01)."
+  - "No dataset inputs or outputs."

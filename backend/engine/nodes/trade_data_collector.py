@@ -1,9 +1,10 @@
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 
 from ..context import RunContext
-from ..node_spec import NodeSpec, _spec
-from ..ports import ParamSpec, ParamType, PortSpec, PortType, Widget
+from ..node_spec import NodeSpec, _spec_from_yaml
 
 
 def _mock_hs_client_order(ctx: RunContext) -> pd.DataFrame:
@@ -88,85 +89,4 @@ def handle_trade_data_collector(node: dict, ctx: RunContext) -> None:
     ctx.set(f"_{output_name}_resolved_query", resolved_query)
 
 
-NODE_SPEC: NodeSpec = _spec(
-    "TRADE_DATA_COLLECTOR",
-    handle_trade_data_collector,
-    "Query Solr trade data (orders/executions)",
-    color="#2563EB",
-    icon="ArrowLeftRight",
-    config_tags=("source", "output_name"),
-    input_ports=(
-        PortSpec(
-            name="context",
-            type=PortType.OBJECT,
-            description="Context keys referenced in query_template as {context.xxx}",
-            optional=True,
-        ),
-    ),
-    output_ports=(
-        PortSpec(
-            name="trades",
-            type=PortType.DATAFRAME,
-            description="Order / execution rows. Stored in ctx.datasets under the configured output_name.",
-        ),
-        PortSpec(
-            name="row_count",
-            type=PortType.SCALAR,
-            description="Integer row count. Stored in ctx.values as {output_name}_count.",
-            optional=True,
-        ),
-    ),
-    params=(
-        ParamSpec(
-            name="source",
-            type=ParamType.ENUM,
-            description="Which Solr collection to query.",
-            enum=("hs_client_order", "hs_execution"),
-            default="hs_client_order",
-            required=True,
-        ),
-        ParamSpec(
-            name="query_template",
-            type=ParamType.STRING,
-            description="Solr query; use {context.xxx} placeholders for alert fields.",
-            required=True,
-            widget=Widget.TEXTAREA,
-        ),
-        ParamSpec(
-            name="output_name",
-            type=ParamType.STRING,
-            description="Dataset name in ctx.datasets.",
-            default="trade_data",
-            required=True,
-        ),
-        ParamSpec(
-            name="loop_over_books",
-            type=ParamType.BOOLEAN,
-            description="Repeat the query for each book in the books list.",
-            default=False,
-            required=False,
-        ),
-        ParamSpec(
-            name="books",
-            type=ParamType.STRING_LIST,
-            description="Book names when loop_over_books=true.",
-            default=[],
-            required=False,
-        ),
-        ParamSpec(
-            name="mock_csv_path",
-            type=ParamType.STRING,
-            description=(
-                "Demo-mode override: path to a CSV used verbatim instead of "
-                "the synthetic generator. Ignored if the file is missing."
-            ),
-            default="",
-            required=False,
-        ),
-    ),
-    constraints=(
-        "When source='hs_execution', trade_version:1 MUST be hard-coded in query_template "
-        "— never from context.",
-        "Output DataFrame will always include trade_version=1 column for hs_execution.",
-    ),
-)
+NODE_SPEC: NodeSpec = _spec_from_yaml(Path(__file__).with_suffix(".yaml"), handle_trade_data_collector)

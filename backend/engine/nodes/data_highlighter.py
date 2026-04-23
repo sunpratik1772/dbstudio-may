@@ -1,8 +1,9 @@
+from pathlib import Path
+
 import pandas as pd
 
 from ..context import RunContext
-from ..node_spec import NodeSpec, _spec
-from ..ports import ParamSpec, ParamType, PortSpec, PortType
+from ..node_spec import NodeSpec, _spec_from_yaml
 
 DEFAULT_RULES = [
     {"condition": "_signal_flag == True", "colour": "#FF4444", "label": "SIGNAL HIT"},
@@ -41,59 +42,4 @@ def handle_data_highlighter(node: dict, ctx: RunContext) -> None:
     ctx.datasets[output_name] = df
 
 
-NODE_SPEC: NodeSpec = _spec(
-    "DATA_HIGHLIGHTER",
-    handle_data_highlighter,
-    "Apply colour rules to dataset rows",
-    color="#9333EA",
-    icon="Highlighter",
-    config_tags=("output_name",),
-    input_ports=(
-        PortSpec(
-            name="dataset",
-            type=PortType.DATAFRAME,
-            description="Any DataFrame referenced by input_name.",
-        ),
-    ),
-    output_ports=(
-        PortSpec(
-            name="highlighted",
-            type=PortType.DATAFRAME,
-            description=(
-                "Input DataFrame + _highlight_colour (hex) + _highlight_label (str). "
-                "Stored under ctx.datasets[output_name]."
-            ),
-        ),
-    ),
-    params=(
-        ParamSpec(
-            name="input_name",
-            type=ParamType.INPUT_REF,
-            description="Source dataset.",
-            required=True,
-        ),
-        ParamSpec(
-            name="output_name",
-            type=ParamType.STRING,
-            description=(
-                "Highlighted dataset name (convention: input_name + '_highlighted')."
-            ),
-            required=True,
-        ),
-        ParamSpec(
-            name="rules",
-            type=ParamType.ARRAY,
-            description=(
-                "Array of {condition: string (pandas eval expression), "
-                "colour: string (hex #RRGGBB), label: string}."
-            ),
-            default=[],
-            required=False,
-        ),
-    ),
-    constraints=(
-        "Conditions are evaluated with pandas DataFrame.eval().",
-        "Rules are applied in order — last matching rule wins.",
-        "Rows with no matching rule get colour #FFFFFF and empty label.",
-    ),
-)
+NODE_SPEC: NodeSpec = _spec_from_yaml(Path(__file__).with_suffix(".yaml"), handle_data_highlighter)

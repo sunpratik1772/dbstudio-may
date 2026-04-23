@@ -1,8 +1,9 @@
+from pathlib import Path
+
 import pandas as pd
 
 from ..context import RunContext
-from ..node_spec import NodeSpec, _spec
-from ..ports import ParamSpec, ParamType, PortSpec, PortType
+from ..node_spec import NodeSpec, _spec_from_yaml
 
 
 def handle_normalise_enrich(node: dict, ctx: RunContext) -> None:
@@ -46,66 +47,4 @@ def handle_normalise_enrich(node: dict, ctx: RunContext) -> None:
     ctx.datasets[output_name] = df
 
 
-NODE_SPEC: NodeSpec = _spec(
-    "NORMALISE_ENRICH",
-    handle_normalise_enrich,
-    "Rename fields, lifecycle tracking, signed_notional",
-    color="#6366F1",
-    icon="Blend",
-    config_tags=("output_name",),
-    input_ports=(
-        PortSpec(
-            name="dataset",
-            type=PortType.DATAFRAME,
-            description="Any trade DataFrame referenced by input_name.",
-        ),
-    ),
-    output_ports=(
-        PortSpec(
-            name="enriched",
-            type=PortType.DATAFRAME,
-            description=(
-                "Enriched DataFrame. May add: _prev_status, _status_changed, "
-                "_lifecycle_event, signed_notional."
-            ),
-        ),
-    ),
-    params=(
-        ParamSpec(
-            name="input_name",
-            type=ParamType.INPUT_REF,
-            description="Source dataset name (an upstream output_name).",
-            required=True,
-        ),
-        ParamSpec(
-            name="output_name",
-            type=ParamType.STRING,
-            description="Enriched dataset name.",
-            required=True,
-        ),
-        ParamSpec(
-            name="field_renames",
-            type=ParamType.OBJECT,
-            description="Map of old_col_name → new_col_name.",
-            default={},
-            required=False,
-        ),
-        ParamSpec(
-            name="track_lifecycle",
-            type=ParamType.BOOLEAN,
-            description=(
-                "Adds _prev_status, _status_changed, _lifecycle_event "
-                "(requires order_id, status columns)."
-            ),
-            default=False,
-            required=False,
-        ),
-        ParamSpec(
-            name="compute_signed_notional",
-            type=ParamType.BOOLEAN,
-            description="Adds signed_notional = qty * price * ±1 based on side (BUY=+1, SELL=-1).",
-            default=False,
-            required=False,
-        ),
-    ),
-)
+NODE_SPEC: NodeSpec = _spec_from_yaml(Path(__file__).with_suffix(".yaml"), handle_normalise_enrich)

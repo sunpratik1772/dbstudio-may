@@ -1,11 +1,11 @@
 from datetime import datetime, timezone
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
 from ..context import RunContext
-from ..node_spec import NodeSpec, _spec
-from ..ports import ParamSpec, ParamType, PortSpec, PortType, Widget
+from ..node_spec import NodeSpec, _spec_from_yaml
 
 
 def _norm_timestamp(ts) -> str:
@@ -70,74 +70,4 @@ def handle_market_data_collector(node: dict, ctx: RunContext) -> None:
     ctx.set(f"{output_name}_tick_count", len(clean))
 
 
-NODE_SPEC: NodeSpec = _spec(
-    "MARKET_DATA_COLLECTOR",
-    handle_market_data_collector,
-    "Query EBS/Mercury tick data, normalise timestamps",
-    color="#0891B2",
-    icon="CandlestickChart",
-    config_tags=("source", "output_name"),
-    input_ports=(
-        PortSpec(
-            name="context",
-            type=PortType.OBJECT,
-            description="Context keys referenced in query_template as {context.xxx}.",
-            optional=True,
-        ),
-    ),
-    output_ports=(
-        PortSpec(
-            name="ticks",
-            type=PortType.DATAFRAME,
-            description=(
-                "DataFrame with columns: timestamp (ISO str), symbol (str), bid, ask, "
-                "mid, spread_pips, bid_size, ask_size, venue_name, seq_no. Stored under "
-                "ctx.datasets[output_name]."
-            ),
-        ),
-        PortSpec(
-            name="tick_count",
-            type=PortType.SCALAR,
-            description="Tick count (int). Stored as {output_name}_tick_count.",
-            optional=True,
-        ),
-    ),
-    params=(
-        ParamSpec(
-            name="source",
-            type=ParamType.ENUM,
-            description="Which tick feed to query.",
-            enum=("EBS", "Mercury"),
-            default="EBS",
-            required=True,
-        ),
-        ParamSpec(
-            name="query_template",
-            type=ParamType.STRING,
-            description="Query with {context.xxx} placeholders.",
-            required=True,
-            widget=Widget.TEXTAREA,
-        ),
-        ParamSpec(
-            name="output_name",
-            type=ParamType.STRING,
-            description="Dataset name in ctx.datasets.",
-            default="market_data",
-            required=True,
-        ),
-        ParamSpec(
-            name="mock_csv_path",
-            type=ParamType.STRING,
-            description=(
-                "Demo-mode override: path to a CSV used verbatim instead of "
-                "the synthetic generator. Ignored if the file is missing."
-            ),
-            default="",
-            required=False,
-        ),
-    ),
-    constraints=(
-        "Normalises raw_timestamp (nanosecond int) → ISO-8601 string.",
-        "Normalises byte-string fields (raw_symbol, venue) → plain str.",
-    ),
-)
+NODE_SPEC: NodeSpec = _spec_from_yaml(Path(__file__).with_suffix(".yaml"), handle_market_data_collector)

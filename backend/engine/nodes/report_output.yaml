@@ -1,0 +1,53 @@
+type_id: REPORT_OUTPUT
+description: "Generate Excel report with tabs & highlights"
+
+ui:
+  color: "#047857"
+  icon: FileSpreadsheet
+  config_tags: [output_name]
+
+input_ports:
+  - name: datasets
+    type: object
+    description: "All DataFrames to include as tabs (ctx.datasets)."
+  - name: sections
+    type: object
+    description: "Section narratives for the Section Summaries sheet."
+    optional: true
+  - name: executive_summary
+    type: text
+    description: "Executive summary text."
+    optional: true
+  - name: context
+    type: object
+    description: "disposition, trader_id, currency_pair etc. used on the cover page."
+    optional: true
+
+output_ports:
+  - name: report_path
+    type: text
+    description: "Absolute path to the written .xlsx file. Stored as context.report_path."
+
+params:
+  - name: output_path
+    type: string
+    description: "File path for the Excel output (e.g. 'output/report.xlsx')."
+    required: true
+  - name: tabs
+    type: array
+    description: >-
+      Array of {name: string (max 31 chars), dataset: string,
+      include_highlights: boolean}. When empty, all context.datasets are
+      included.
+    default: []
+    required: false
+
+semantics:
+  requires: []
+
+constraints:
+  - "Tab names truncated to 31 characters (Excel limit)."
+  - "Datetime columns converted to strings automatically."
+  - "List/dict cell values stringified automatically."
+  - "If include_highlights=true, uses dataset_name + '_highlighted' if it exists."
+  - "Must be the final node in the workflow."
