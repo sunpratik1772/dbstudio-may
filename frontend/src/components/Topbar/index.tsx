@@ -1,279 +1,275 @@
-import { useEffect } from 'react'
-import { Library, BotMessageSquare, SunMedium, MoonStar, ShieldCheck } from 'lucide-react'
+/**
+ * Top action bar.
+ *
+ * Owns: workflow name editing, theme toggle, drawer toggle (saved
+ * workflows), import/export JSON, validate, save, and run.
+ * All actions delegate to workflowStore — this component is mostly a
+ * styled set of buttons.
+ *
+ * "Run" calls `streamRun` (services/api.ts) and pipes events into the
+ * store; the canvas + RunLogView subscribe and animate as events
+ * arrive. The button itself only flips between idle / loading state.
+ */
+import { useState } from 'react'
+import {
+  Sun, Moon, LayoutTemplate, Upload, Download, ShieldCheck, Save, Play, Loader2, Trash2,
+} from 'lucide-react'
 import { useWorkflowStore } from '../../store/workflowStore'
 import { useThemeStore } from '../../store/themeStore'
-import WorkflowActions from '../WorkflowActions'
+import { api } from '../../services/api'
 
-type ChipMode = 'edit' | 'draft' | 'new'
+const SAMPLE_PAYLOAD = {
+  trader_id: 'T001',
+  book: 'FX-SPOT',
+  alert_date: '2024-01-15',
+  currency_pair: 'EUR/USD',
+  alert_id: 'ALT-001',
+}
+
+function slugify(name: string | undefined | null): string {
+  const s = (name || 'workflow').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
+  return s || 'workflow'
+}
 
 export default function Topbar() {
   const workflow = useWorkflowStore((s) => s.workflow)
   const sourceFilename = useWorkflowStore((s) => s.sourceFilename)
   const sourceKind = useWorkflowStore((s) => s.sourceKind)
-  const drawerOpen = useWorkflowStore((s) => s.workflowDrawerOpen)
   const setDrawerOpen = useWorkflowStore((s) => s.setWorkflowDrawerOpen)
-  const copilotOpen = useWorkflowStore((s) => s.copilotOpen)
-  const setCopilotOpen = useWorkflowStore((s) => s.setCopilotOpen)
+  const isRunning = useWorkflowStore((s) => s.isRunning)
+  const setRunning = useWorkflowStore((s) => s.setRunning)
+  const setRunError = useWorkflowStore((s) => s.setRunError)
+  const resetRun = useWorkflowStore((s) => s.resetRun)
+  const applyRunEvent = useWorkflowStore((s) => s.applyRunEvent)
+  const setRightPanelTab = useWorkflowStore((s) => s.setRightPanelTab)
+  const setRightPanelMode = useWorkflowStore((s) => s.setRightPanelMode)
+  const validationIssues = useWorkflowStore((s) => s.validationIssues)
+  const markSaved = useWorkflowStore((s) => s.markSaved)
+  const runLog = useWorkflowStore((s) => s.runLog)
+  const runResult = useWorkflowStore((s) => s.runResult)
+  const runError = useWorkflowStore((s) => s.runError)
+  const clearWorkflow = useWorkflowStore((s) => s.clearWorkflow)
+  const resetRunStore = useWorkflowStore((s) => s.resetRun)
+
+  function handleClear() {
+    resetRunStore()
+    clearWorkflow()
+  }
   const theme = useThemeStore((s) => s.theme)
   const toggleTheme = useThemeStore((s) => s.toggle)
+  const [saving, setSaving] = useState(false)
 
-  const chipMode: ChipMode =
-    sourceKind === 'saved' ? 'edit' : sourceKind === 'draft' ? 'draft' : 'new'
+  const nodeCount = workflow?.nodes.length ?? 0
+  const edgeCount = workflow?.edges.length ?? 0
+  const title = workflow?.name || 'Untitled workflow'
 
-  // Global hotkey: Cmd/Ctrl+O opens the workflows drawer
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'o') {
-        e.preventDefault()
-        setDrawerOpen(true)
-      }
+  async function handleRun() {
+    if (!workflow) return
+    setRunning(true)
+    resetRun()
+    setRunError(null)
+    setRightPanelTab('runlog')
+    setRightPanelMode('runlog')
+    try {
+      await api.runWorkflowStream(workflow, SAMPLE_PAYLOAD, (ev) => applyRunEvent(ev))
+    } catch (e) {
+      setRunError((e as Error).message)
+    } finally {
+      setRunning(false)
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [setDrawerOpen])
+  }
+
+  async function handleSave() {
+    if (!workflow) return
+    const suggested = sourceKind === 'saved' ? workflow.name : workflow.name || 'New workflow'
+    const rawName = window.prompt('Save workflow as…', suggested)
+    if (!rawName || !rawName.trim()) return
+    const name = rawName.trim()
+    const targetFilename =
+      sourceKind === 'saved' && name === workflow.name
+        ? (sourceFilename ?? `${slugify(name)}.json`)
+        : `${slugify(name)}.json`
+    setSaving(true)
+    try {
+      const updated = { ...workflow, name }
+      if (sourceKind === 'draft' && sourceFilename) {
+        await api.saveWorkflow(targetFilename, updated)
+        await api.deleteDraft(sourceFilename).catch(() => void 0)
+      } else {
+        await api.saveWorkflow(targetFilename, updated)
+      }
+      useWorkflowStore.setState({ workflow: updated })
+      markSaved(targetFilename)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  function handleExport() {
+    if (!workflow) return
+    const blob = new Blob([JSON.stringify(workflow, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${slugify(workflow.name)}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const validateBadge = validationIssues && validationIssues.length > 0
 
   return (
     <div
-      className="relative flex items-center gap-3 px-4 shrink-0 z-10"
+      className="flex items-center px-4 shrink-0"
       style={{
-        height: 48,
+        height: 56,
         background: 'var(--bg-1)',
         borderBottom: '1px solid var(--border)',
       }}
     >
-      {/* Wordmark — gradient tile + shield glyph says "surveillance" at a
-          glance without us having to write it out. */}
-      <div className="flex items-center gap-2.5 mr-1">
+      {/* Left: WF logo + brand */}
+      <div className="flex items-center gap-3">
         <div
-          className="flex items-center justify-center"
+          className="flex items-center justify-center font-mono"
           style={{
-            width: 28, height: 28,
-            borderRadius: 7,
-            background: 'linear-gradient(145deg, var(--accent-hi), var(--accent-lo))',
-            boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.25), 0 6px 16px -6px color-mix(in srgb, var(--accent) 60%, transparent)',
-            color: '#0A0A0A',
+            width: 32, height: 32,
+            borderRadius: 6,
+            background: 'var(--text-0)',
+            color: 'var(--bg-0)',
+            fontSize: 12,
+            fontWeight: 700,
+            letterSpacing: '0.04em',
           }}
         >
-          <ShieldCheck size={15} strokeWidth={2.3} />
+          ds
         </div>
         <div className="flex flex-col justify-center leading-tight gap-0.5">
           <span
-            className="display"
-            style={{ fontWeight: 600, fontSize: 16, color: 'var(--text-0)' }}
+            style={{
+              fontFamily: 'Chivo, system-ui, sans-serif',
+              fontWeight: 600,
+              fontSize: 16,
+              color: 'var(--text-0)',
+              letterSpacing: '-0.01em',
+            }}
           >
             dbSherpa Studio
           </span>
-          <span
-            style={{
-              fontSize: 10,
-              fontWeight: 500,
-              letterSpacing: '0.02em',
-              color: 'var(--text-2)',
-            }}
-          >
+          <span style={{ color: 'var(--text-2)', fontSize: 10, fontWeight: 500, letterSpacing: '0.02em' }}>
             AI workflow builder
           </span>
         </div>
       </div>
 
-      <Divider />
-
-      {/* Workflows drawer trigger */}
-      <button
-        onClick={() => setDrawerOpen(!drawerOpen)}
-        className="lift flex items-center gap-2"
-        style={{
-          height: 30,
-          padding: '0 10px',
-          borderRadius: 7,
-          fontSize: 11.5,
-          fontWeight: 500,
-          background: drawerOpen ? 'color-mix(in srgb, var(--accent) 12%, var(--bg-2))' : 'var(--bg-2)',
-          color: drawerOpen ? 'var(--accent)' : 'var(--text-1)',
-          border: `1px solid ${drawerOpen ? 'color-mix(in srgb, var(--accent) 40%, transparent)' : 'var(--border)'}`,
-          letterSpacing: '0.01em',
-        }}
-        aria-pressed={drawerOpen}
-      >
-        <Library size={13} strokeWidth={2} />
-        <span>Workflows</span>
-        <span
-          className="num"
-          style={{
-            fontSize: 9.5,
-            color: 'var(--text-3)',
-            border: '1px solid var(--border)',
-            padding: '1px 5px',
-            borderRadius: 4,
-            letterSpacing: '0.05em',
-          }}
-        >
-          ⌘O
+      {/* Center: title + counts */}
+      <div className="flex-1 flex items-center justify-center gap-6">
+        <span style={{ color: 'var(--text-1)', fontSize: 14, fontWeight: 500 }}>{title}</span>
+        <span className="font-mono" style={{ color: 'var(--text-3)', fontSize: 11.5 }}>
+          {nodeCount} nodes · {edgeCount} edges
         </span>
-      </button>
+      </div>
 
-      {workflow && (
-        <>
-          <Divider />
-          <DocumentChip
-            mode={chipMode}
-            name={workflow.name}
-            filename={sourceFilename}
-            nodeCount={workflow.nodes.length}
-          />
-        </>
-      )}
-
-      <div className="flex-1" />
-
-      {/* Primary workflow actions (Run / Reset / Save as / Clear).
-          Moved up from the bottom bar so all workflow verbs live together. */}
-      {workflow && (
-        <>
-          <WorkflowActions />
-          <Divider />
-        </>
-      )}
-
-      {/* Theme toggle */}
-      <button
-        onClick={toggleTheme}
-        aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-        title={theme === 'dark' ? 'Switch to light' : 'Switch to dark'}
-        className="lift flex items-center justify-center"
-        style={{
-          width: 30, height: 30,
-          borderRadius: 6,
-          background: 'var(--bg-2)',
-          color: 'var(--text-1)',
-          border: '1px solid var(--border)',
-        }}
-      >
-        {theme === 'dark' ? <SunMedium size={14} strokeWidth={2} /> : <MoonStar size={14} strokeWidth={2} />}
-      </button>
-
-      {/* Copilot toggle */}
-      <button
-        onClick={() => setCopilotOpen(!copilotOpen)}
-        className="lift"
-        style={{
-          display: 'inline-flex', alignItems: 'center', gap: 6,
-          fontSize: 11,
-          padding: '5px 10px',
-          borderRadius: 6,
-          background: copilotOpen ? 'color-mix(in srgb, var(--accent) 12%, transparent)' : 'var(--bg-2)',
-          color: copilotOpen ? 'var(--accent)' : 'var(--text-2)',
-          border: `1px solid ${copilotOpen ? 'color-mix(in srgb, var(--accent) 40%, transparent)' : 'var(--border)'}`,
-          letterSpacing: '0.08em',
-          textTransform: 'uppercase',
-          fontWeight: 600,
-        }}
-      >
-        <BotMessageSquare size={12} strokeWidth={2} />
-        <span>Copilot</span>
-      </button>
+      {/* Right: action buttons */}
+      <div className="flex items-center gap-2">
+        <IconButton onClick={toggleTheme} title="Toggle theme">
+          {theme === 'dark' ? <Sun size={15} strokeWidth={2} /> : <Moon size={15} strokeWidth={2} />}
+        </IconButton>
+        <BarButton onClick={() => setDrawerOpen(true)} icon={<LayoutTemplate size={14} strokeWidth={2} />}>Templates</BarButton>
+        <BarButton onClick={() => setDrawerOpen(true)} icon={<Upload size={14} strokeWidth={2} />}>Import</BarButton>
+        <BarButton onClick={handleExport} icon={<Download size={14} strokeWidth={2} />} disabled={!workflow}>Export</BarButton>
+        <BarButton
+          onClick={() => { setRightPanelTab('config'); setRightPanelMode('config') }}
+          icon={<ShieldCheck size={14} strokeWidth={2} />}
+          tone={validateBadge ? 'danger' : undefined}
+        >
+          Validate{validateBadge ? ` · ${validationIssues!.length}` : ''}
+        </BarButton>
+        <BarButton
+          onClick={resetRun}
+          icon={<Trash2 size={14} strokeWidth={2} />}
+          disabled={isRunning || (!workflow && runLog.length === 0 && !runResult && !runError)}
+        >
+          Clear
+        </BarButton>
+        <BarButton onClick={handleSave} icon={saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} strokeWidth={2} />} disabled={!workflow || saving}>
+          Save
+        </BarButton>
+        <RunButton onClick={handleRun} disabled={!workflow || isRunning} running={isRunning} />
+      </div>
     </div>
   )
 }
 
-function Divider() {
-  return <div style={{ width: 1, height: 22, background: 'var(--border)' }} />
+function IconButton({ children, onClick, title }: { children: React.ReactNode; onClick: () => void; title?: string }) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      className="flex items-center justify-center"
+      style={{
+        width: 36, height: 36,
+        borderRadius: 8,
+        background: 'transparent',
+        color: 'var(--text-1)',
+        border: '1px solid var(--border)',
+        cursor: 'pointer',
+      }}
+    >
+      {children}
+    </button>
+  )
 }
 
-function DocumentChip({
-  mode,
-  name,
-  filename,
-  nodeCount,
-}: {
-  mode: ChipMode
-  name: string
-  filename: string | null
-  nodeCount: number
-}) {
-  // Label + accent shift per workflow origin so the operator always knows
-  // whether they're editing a live saved workflow, a draft that hasn't
-  // been named yet, or an in-memory scratch canvas.
-  const style =
-    mode === 'edit'
-      ? {
-          label: 'Editing',
-          bg: 'color-mix(in srgb, var(--accent) 7%, var(--bg-2))',
-          accent: 'var(--accent)',
-          border: '3px solid color-mix(in srgb, var(--accent) 60%, transparent)',
-          italic: false,
-        }
-      : mode === 'draft'
-        ? {
-            label: 'Draft',
-            bg: 'color-mix(in srgb, var(--info) 7%, var(--bg-2))',
-            accent: 'var(--info)',
-            border: '3px solid color-mix(in srgb, var(--info) 55%, transparent)',
-            italic: false,
-          }
-        : {
-            label: 'New',
-            bg: 'var(--bg-2)',
-            accent: 'var(--text-3)',
-            border: '3px dashed var(--border-strong)',
-            italic: true,
-          }
-
+function BarButton({
+  children, icon, onClick, disabled, tone,
+}: { children: React.ReactNode; icon: React.ReactNode; onClick: () => void; disabled?: boolean; tone?: 'danger' }) {
+  const danger = tone === 'danger'
   return (
-    <div
-      className={`doc-chip doc-chip--${mode} flex items-center gap-2.5 min-w-0`}
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="flex items-center gap-2"
       style={{
-        height: 30,
-        padding: '0 10px 0 11px',
-        borderRadius: 7,
-        background: style.bg,
-        borderTop: '1px solid var(--border)',
-        borderRight: '1px solid var(--border)',
-        borderBottom: '1px solid var(--border)',
-        borderLeft: style.border,
+        height: 36,
+        padding: '0 12px',
+        borderRadius: 8,
+        fontSize: 12.5,
+        fontWeight: 500,
+        background: 'transparent',
+        color: danger ? 'var(--danger)' : disabled ? 'var(--text-3)' : 'var(--text-1)',
+        border: `1px solid ${danger ? 'color-mix(in srgb, var(--danger) 50%, var(--border))' : 'var(--border)'}`,
+        opacity: disabled ? 0.55 : 1,
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        whiteSpace: 'nowrap',
       }}
-      title={
-        filename
-          ? mode === 'draft'
-            ? `Draft · ${filename}`
-            : filename
-          : 'Unsaved new workflow'
-      }
     >
-      <span
-        className="eyebrow shrink-0"
-        style={{ color: style.accent, letterSpacing: '0.12em' }}
-      >
-        {style.label}
-      </span>
+      {icon}
+      <span>{children}</span>
+    </button>
+  )
+}
 
-      <span
-        className="truncate"
-        style={{
-          fontSize: 12.5,
-          fontWeight: 600,
-          fontStyle: style.italic ? 'italic' : 'normal',
-          color: mode === 'edit' ? 'var(--text-0)' : 'var(--text-1)',
-          maxWidth: 220,
-          letterSpacing: '-0.005em',
-        }}
-      >
-        {name || 'Untitled workflow'}
-      </span>
-
-      <span
-        className="num shrink-0"
-        style={{
-          fontSize: 10,
-          color: 'var(--text-2)',
-          background: 'var(--bg-0)',
-          border: '1px solid var(--border)',
-          padding: '1px 6px',
-          borderRadius: 999,
-        }}
-      >
-        {nodeCount} node{nodeCount === 1 ? '' : 's'}
-      </span>
-    </div>
+function RunButton({ onClick, disabled, running }: { onClick: () => void; disabled: boolean; running: boolean }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="flex items-center gap-2"
+      style={{
+        height: 36,
+        padding: '0 16px',
+        borderRadius: 8,
+        fontSize: 13,
+        fontWeight: 600,
+        background: 'var(--text-0)',
+        color: 'var(--bg-0)',
+        border: 'none',
+        opacity: disabled && !running ? 0.55 : 1,
+        cursor: disabled ? (running ? 'progress' : 'not-allowed') : 'pointer',
+      }}
+    >
+      {running ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} strokeWidth={2.5} />}
+      <span>{running ? 'Running…' : 'Run'}</span>
+    </button>
   )
 }

@@ -21,6 +21,7 @@ import {
   Repeat,
   Signal,
   Siren,
+  SlidersHorizontal,
   Split,
 } from 'lucide-react'
 
@@ -32,6 +33,7 @@ export type NodeType =
   | 'DECISION_RULE'
   | 'EXTRACT_LIST'
   | 'EXTRACT_SCALAR'
+  | 'FEATURE_ENGINE'
   | 'GROUP_BY'
   | 'MAP'
   | 'MARKET_DATA_COLLECTOR'
@@ -79,7 +81,7 @@ export const NODE_UI: Record<NodeType, NodeUIMeta> = {
   DECISION_RULE: {
     color: '#D97706',
     Icon: Gavel,
-    description: "Evaluate flag_count \u2192 ESCALATE/REVIEW/DISMISS",
+    description: "Evaluate flag_count or rules \u2192 ESCALATE/REVIEW/DISMISS + severity",
     configTags: [] as const,
   },
   EXTRACT_LIST: {
@@ -92,6 +94,12 @@ export const NODE_UI: Record<NodeType, NodeUIMeta> = {
     color: '#8B5CF6',
     Icon: Crosshair,
     description: "Reduce a column of an upstream DataFrame to a single scalar (first, unique_single, max, min, count, sum, mean).",
+    configTags: [] as const,
+  },
+  FEATURE_ENGINE: {
+    color: '#0EA5E9',
+    Icon: SlidersHorizontal,
+    description: "Compose feature transforms (window, slice, pivot, agg, rolling, derive)",
     configTags: [] as const,
   },
   GROUP_BY: {
@@ -133,7 +141,7 @@ export const NODE_UI: Record<NodeType, NodeUIMeta> = {
   SECTION_SUMMARY: {
     color: '#DB2777',
     Icon: NotebookText,
-    description: "Aggregate stats + narrative (templated, fact-pack + LLM, or event-ordered).",
+    description: "Aggregate stats + LLM narrative section",
     configTags: [] as const,
   },
   SIGNAL_CALCULATOR: {
@@ -164,6 +172,7 @@ export const NODE_TYPES: readonly NodeType[] = [
   'DECISION_RULE',
   'EXTRACT_LIST',
   'EXTRACT_SCALAR',
+  'FEATURE_ENGINE',
   'GROUP_BY',
   'MAP',
   'MARKET_DATA_COLLECTOR',
@@ -212,6 +221,8 @@ export const NODE_CONTRACTS: Record<NodeType, NodeContract> = {
     configSchema: {
           "query_template": "Oculus query with {context.xxx} placeholders.",
           "keywords": "Terms to scan in display_post.",
+          "keyword_categories": "Optional {category: [kw1, kw2, ...]} map. When present, each row gains a _matched_categories list plus one _hit_<cat> boolean column. Combined with plain `keywords` (both are scanned).",
+          "emit_hits_only": "Also publish ctx.datasets[f\"{output_name}_hits\"] containing only rows with at least one keyword match. Lets downstream SECTION_SUMMARY narrate just the suspicious subset.",
           "output_name": "Dataset name in ctx.datasets.",
           "mock_csv_path": "Demo-mode override: path to a CSV used verbatim instead of the synthetic generator. Ignored if the file is missing.",
           "window_key": "ctx.values key holding the window dict (default 'window'). No-op if key is absent."
@@ -227,8 +238,8 @@ export const NODE_CONTRACTS: Record<NodeType, NodeContract> = {
           "executive_summary": "Multi-paragraph executive summary. Stored as context.executive_summary."
     },
     configSchema: {
-          "use_section_facts": "When true, prefer per-section \"facts\" JSON (and stats fallback) over prose-only for the LLM input \u2014 reduces cross-section contradictions. Placeholders: {facts_text}, {section_text}, {fact_union}, {facts_json} (alias of facts_text).",
-          "llm_prompt_template": "Custom prompt with {section_text}, {facts_text}, {fact_union}, {trader_id}, {currency_pair}, {disposition}, {flag_count} placeholders. Falls back to the built-in template when empty."
+          "llm_prompt_template": "Custom prompt with {section_text}, {trader_id}, {currency_pair}, {disposition}, {flag_count} placeholders, plus any vars defined under prompt_context.vars and (when mode=dataset|mixed) {dataset}. Cross-dataset refs like {executions.notional.sum} resolve inline. Falls back to the built-in template when empty.",
+          "prompt_context": "Optional structured slot block: {mode: template|dataset|mixed, vars: {name: ref_expr, ...}, dataset: {ref, format, max_rows, columns}}. Same shape as SECTION_SUMMARY.prompt_context."
     },
     constraints: ["LLM model: claude-sonnet-4-6, max_tokens: 1000.", "Must run after all SECTION_SUMMARY nodes."] as const,
   },
@@ -243,29 +254,33 @@ export const NODE_CONTRACTS: Record<NodeType, NodeContract> = {
     configSchema: {
           "input_name": "Source dataset.",
           "output_name": "Highlighted dataset name (convention: input_name + '_highlighted').",
-          "rules": "Array of {condition: string (pandas eval expression), colour: string (hex #RRGGBB), label: string}."
+          "rules": "Array of {condition, colour, label}. `condition` is a pandas.DataFrame.eval expression evaluated against the target dataset's rows. The condition may include `{ref}` placeholders that resolve to SCALAR values via the cross-dataset ref grammar BEFORE pandas eval \u2014 e.g. `notional > {context.peak_threshold}`, `bucket == {ladder.peak_bucket.first}`. `colour` is hex #RRGGBB."
     },
-    constraints: ["Conditions are evaluated with pandas DataFrame.eval().", "Rules are applied in order \u2014 last matching rule wins.", "Rows with no matching rule get colour #FFFFFF and empty label."] as const,
+    constraints: ["Conditions are evaluated with pandas DataFrame.eval after `{ref}` resolution.", "Rules are applied in order \u2014 last matching rule wins.", "Rows with no matching rule get colour #FFFFFF and empty label.", "Refs that fail to resolve leave the placeholder intact, causing pandas.eval to fail loudly (the rule is skipped, not silently true)."] as const,
   },
   DECISION_RULE: {
-    description: "Evaluate flag_count \u2192 ESCALATE/REVIEW/DISMISS",
+    description: "Evaluate flag_count or rules \u2192 ESCALATE/REVIEW/DISMISS + severity",
     inputs: {
           "dataset": "Signal DataFrame with _signal_flag column.",
           "flag_count": "Flag count from SIGNAL_CALCULATOR (read from ctx.values[{input_name}_flag_count] if the dataset isn't available)."
     },
     outputs: {
           "disposition": "'ESCALATE' | 'REVIEW' | 'DISMISS'. Stored as context.disposition.",
+          "severity": "'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW'. Stored as context.severity.",
+          "score": "Normalised severity score in [0, 1]. Stored as context.score.",
           "flag_count": "Total signal hits (int). Stored as context.flag_count.",
-          "output_branch": "Branch name to route to. Stored as context.output_branch."
+          "output_branch": "Branch name to route to. Stored as context.output_branch.",
+          "matched_rule": "Name of the rule that fired (rule mode only; empty in threshold mode). Stored as context.matched_rule."
     },
     configSchema: {
           "input_name": "Signal dataset name.",
-          "flag_count_expr": "Python expression using 'flag_count' variable, e.g. 'flag_count > 0'. Overrides escalate/review thresholds when supplied.",
-          "escalate_threshold": "flag_count >= this \u2192 ESCALATE.",
-          "review_threshold": "flag_count >= this \u2192 REVIEW, else DISMISS.",
+          "escalate_threshold": "flag_count >= this \u2192 ESCALATE (threshold mode).",
+          "review_threshold": "flag_count >= this \u2192 REVIEW (threshold mode).",
+          "rules": "Optional rules list, evaluated top-to-bottom; first match wins. Each rule: {name, when, severity?, disposition?}. `when` accepts `{ref}` (truthy test) or `{ref} OP literal` where OP \u2208 {>=,<=,==,!=,>,<}. Refs use the cross-dataset grammar \u2014 e.g. `{executions._signal_flag.sum} >= 10`, `{ladder.symmetry.max} > 0.85`, `{context.book_count} > 1`.",
+          "severity_map": "Override severity per disposition. Defaults: {ESCALATE: HIGH, REVIEW: MEDIUM, DISMISS: LOW}.",
           "output_branches": "Map of disposition \u2192 branch_name string."
     },
-    constraints: [] as const,
+    constraints: ["Threshold mode (default) requires escalate_threshold >= review_threshold.", "Rule mode short-circuits: first matching rule sets disposition + severity."] as const,
   },
   EXTRACT_LIST: {
     description: "Emit the unique values of a column as an ordered list \u2014 cascade primitive for fan-out keys.",
@@ -300,6 +315,21 @@ export const NODE_CONTRACTS: Record<NodeType, NodeContract> = {
           "fail_on_ambiguous": "When reducer=unique_single, raise if the column has more than one distinct value (default false \u2014 take the first)."
     },
     constraints: ["Typical use: EXTRACT_SCALAR(orders, 'trader_id', unique_single) \u2192 feeds a downstream collector's trader_filter_key."] as const,
+  },
+  FEATURE_ENGINE: {
+    description: "Compose feature transforms (window, slice, pivot, agg, rolling, derive)",
+    inputs: {
+          "dataset": "Source DataFrame referenced by input_name."
+    },
+    outputs: {
+          "features": "Final working DataFrame after all chained ops, published as ctx.datasets[output_name]. Ops with an `as` field also publish intermediate datasets under that name."
+    },
+    configSchema: {
+          "input_name": "Source dataset name.",
+          "output_name": "Target dataset name (defaults to input_name).",
+          "ops": "Ordered list of operations applied to the working DataFrame. Each op is {op: <name>, ...op-specific keys, as?: <publish_name>}. Supported ops:\n\u2022 window_bucket {time_col, interval_ms, out_col}\n  Floor a timestamp into integer buckets of size interval_ms.\n\n\u2022 time_slice {time_col, out_col, on_miss?, windows: [{name,start,end}]}\n  Label rows with a phase string based on which window they fall in.\n  start/end accept {context.x} or any ref grammar; missing rows get on_miss.\n\n\u2022 groupby_agg {by, aggs: {col: agg, ...}}\n  Standard pandas groupby + agg, returns a flat reset_index frame.\n\n\u2022 pivot {index, columns, values, aggfunc?}\n  DataFrame.pivot_table; column names cast to str; fill_value=0.\n\n\u2022 rolling {window, col, agg, out_col?}\n  Rolling window aggregation (mean/sum/min/max/std/...) with\n  min_periods=1.\n\n\u2022 derive {out_col, expr}\n  Vectorised DataFrame.eval expression (no Python branching).\n\n\u2022 apply_expr {out_col, expr}\n  Per-row Python expression evaluated with the row as locals.\n  Slower; use only when `derive` cannot express the logic."
+    },
+    constraints: ["Ops execute in declared order; mid-pipeline `as` publishes intermediate datasets without consuming them.", "apply_expr runs Python eval row-by-row \u2014 keep expressions small and side-effect-free."] as const,
   },
   GROUP_BY: {
     description: "Split a dataset by column value into one DataFrame per group",
@@ -408,33 +438,34 @@ export const NODE_CONTRACTS: Record<NodeType, NodeContract> = {
     },
     configSchema: {
           "output_path": "File path for the Excel output (e.g. 'output/report.xlsx').",
-          "tabs": "Array of {name: string (max 31 chars), dataset: string, include_highlights: boolean}. When empty, all context.datasets are included (plus any map_tab_sets expansion).",
-          "map_tab_sets": "After explicit tabs, expand MAP outputs: each item {map_value_key, dataset_prefix, datasets: [short names from collect_datasets], name_pattern: \"{k}_{d}\" optional}. Reads ctx.values[map_value_key].results and ctx.datasets[\"{prefix}_{k}_{d}\"] or the DataFrame in the results bundle."
+          "tabs": "Array of tab specs. Each tab is one of:\n\u2022 Static tab \u2014 {name, dataset, include_highlights?}.\n  Renders the named dataset under the given sheet name.\n\n\u2022 Expanded tab \u2014 {expand_from, as?, name, dataset, include_highlights?}.\n  `expand_from` is a single `{ref}` resolving to a list, dict,\n  Series, or MAP-result. One tab is emitted per item, with the\n  item bound under `as` (default `item`) and substituted into both\n  `name` and `dataset` templates via `.format_map`. Examples:\n\n    expand_from: \"{context.book_list}\"\n    as: book\n    name: \"Executions \u00b7 {book}\"\n    dataset: \"executions_{book}\"\n\n    expand_from: \"{per_book.results}\"   # MAP result dict\n    as: key\n    name: \"Per-book {key}\"\n    dataset: \"per_book_{key}_executions\"\n\nWhen `tabs` is empty, all context.datasets are included as auto-named tabs.",
+          "summary_position": "Cover/Exec/Sections placement relative to data tabs."
     },
     constraints: ["Tab names truncated to 31 characters (Excel limit).", "Datetime columns converted to strings automatically.", "List/dict cell values stringified automatically.", "If include_highlights=true, uses dataset_name + '_highlighted' if it exists.", "Must be the final node in the workflow."] as const,
   },
   SECTION_SUMMARY: {
-    description: "Aggregate stats + narrative (templated, fact-pack + LLM, or event-ordered).",
+    description: "Aggregate stats + LLM narrative section",
     inputs: {
           "dataset": "Any DataFrame referenced by input_name.",
           "context": "trader_id, currency_pair, disposition consumed by the prompt template."
     },
     outputs: {
-          "section": "{name, stats, facts, narrative, dataset}. Stored under context.sections[section_name]."
+          "section": "{name, stats, narrative, dataset}. Stored under context.sections[section_name]."
     },
     configSchema: {
           "section_name": "Unique section identifier.",
           "input_name": "Source dataset.",
-          "field_bindings": "Array of {field: string, agg: 'count'|'sum'|'mean'|'nunique'|'max'|'min'}.",
-          "summary_mode": "legacy: field_bindings + LLM (default, backward compatible). templated: format llm_prompt_template with stats, no LLM. fact_pack_llm: fact_pack + JSON prompt + LLM with required_facts verbatim check. event_narrative: sort by order_by, events to LLM.",
-          "fact_pack": "For fact_pack_llm: list of {name, column, agg} or {name, const, render} or {name, special: row_count, render optional}.",
-          "required_facts": "For fact_pack_llm: fact names whose render strings must appear verbatim in narrative.",
-          "max_retries": "Extra LLM pass if required_facts are missing (0 or 1 recommended).",
-          "order_by": "For event_narrative: sort column (default timestamp if present in event_fields path).",
-          "event_fields": "For event_narrative: which columns to print per line.",
-          "llm_prompt_template": "Prompt: legacy/templated use {stats}, {section}, etc. fact_pack_llm also {facts_json}. event_narrative also {events_text}."
+          "mode": "templated     \u2014 legacy stats-in-prompt flow. fact_pack_llm \u2014 pre-compute named facts, pass as JSON, verify each\n                required fact appears in narrative (retry once).\nevent_narrative \u2014 format one line per row into a chronological list,\n                  then stitch with an LLM.",
+          "field_bindings": "Array of {field: string, agg: 'count'|'sum'|'mean'|'nunique'|'max'|'min'}. Used in templated mode.",
+          "facts": "Array of {name, column, agg} for fact_pack_llm mode. Example: [{name: 'buy_count', column: 'side', agg: 'count_where_buy'}].",
+          "required_facts": "Fact names whose values MUST appear verbatim in the generated narrative. A retry is triggered once if any are missing.",
+          "sort_by": "Column used to order rows for event_narrative mode.",
+          "event_template": "Python format string used to render each event row in event_narrative mode. Row columns are passed as keyword args. Example: '{timestamp}  {side} {quantity} @ {limit_price}'.",
+          "max_events": "Cap events passed to the LLM in event_narrative mode.",
+          "llm_prompt_template": "Prompt with {stats}, {facts}, {events}, {section}, {disposition}, {trader_id}, {currency_pair} placeholders, plus any vars defined under prompt_context.vars and (when mode=dataset|mixed) {dataset}. Cross-dataset refs like {executions.notional.sum} resolve inline.",
+          "prompt_context": "Optional structured slot block: {mode: template|dataset|mixed, vars: {name: ref_expr, ...}, dataset: {ref, format, max_rows, columns}}. vars resolve cross-dataset refs into named slots; the serialized dataset (csv/json/markdown) is exposed as {dataset}."
     },
-    constraints: ["LLM model: claude-sonnet-4-6, max_tokens: 600 for legacy; fact_pack_llm enforces required substrings or raises.", "templated mode never calls the LLM; safe for provably numeric table copy."] as const,
+    constraints: ["LLM model: claude-sonnet-4-6, max_tokens: 600.", "fact_pack_llm retries at most once when required facts are missing from the narrative."] as const,
   },
   SIGNAL_CALCULATOR: {
     description: "Compute signals \u2014 always outputs 5 columns",
@@ -551,22 +582,22 @@ export const NODE_TYPED: Record<NodeType, NodeTypedSpec> = {
   COMMS_COLLECTOR: {
     inputPorts: [{"name": "context", "type": "object", "description": "Context keys referenced in query_template as {context.xxx}.", "optional": true}, {"name": "window", "type": "object", "description": "Optional TIME_WINDOW output; when present, filters comms by timestamp.", "optional": true}] as const,
     outputPorts: [{"name": "comms", "type": "dataframe", "description": "DataFrame with columns: user, timestamp, display_post, event_type, _keyword_hit, _matched_keywords. Stored under ctx.datasets[output_name].", "optional": false}, {"name": "keyword_hit_count", "type": "scalar", "description": "Total keyword hit count (int). Stored as {output_name}_keyword_hits.", "optional": true}] as const,
-    params: [{"name": "query_template", "type": "string", "description": "Oculus query with {context.xxx} placeholders.", "required": true, "widget": "textarea"}, {"name": "keywords", "type": "string_list", "description": "Terms to scan in display_post.", "required": false, "widget": "chips", "default": []}, {"name": "output_name", "type": "string", "description": "Dataset name in ctx.datasets.", "required": true, "widget": "text", "default": "comms"}, {"name": "mock_csv_path", "type": "string", "description": "Demo-mode override: path to a CSV used verbatim instead of the synthetic generator. Ignored if the file is missing.", "required": false, "widget": "text", "default": ""}, {"name": "window_key", "type": "string", "description": "ctx.values key holding the window dict (default 'window'). No-op if key is absent.", "required": false, "widget": "text", "default": "window"}] as const,
+    params: [{"name": "query_template", "type": "string", "description": "Oculus query with {context.xxx} placeholders.", "required": true, "widget": "textarea"}, {"name": "keywords", "type": "string_list", "description": "Terms to scan in display_post.", "required": false, "widget": "chips", "default": []}, {"name": "keyword_categories", "type": "object", "description": "Optional {category: [kw1, kw2, ...]} map. When present, each row gains a _matched_categories list plus one _hit_<cat> boolean column. Combined with plain `keywords` (both are scanned).", "required": false, "widget": "json", "default": {}}, {"name": "emit_hits_only", "type": "boolean", "description": "Also publish ctx.datasets[f\"{output_name}_hits\"] containing only rows with at least one keyword match. Lets downstream SECTION_SUMMARY narrate just the suspicious subset.", "required": false, "widget": "checkbox", "default": false}, {"name": "output_name", "type": "string", "description": "Dataset name in ctx.datasets.", "required": true, "widget": "text", "default": "comms"}, {"name": "mock_csv_path", "type": "string", "description": "Demo-mode override: path to a CSV used verbatim instead of the synthetic generator. Ignored if the file is missing.", "required": false, "widget": "text", "default": ""}, {"name": "window_key", "type": "string", "description": "ctx.values key holding the window dict (default 'window'). No-op if key is absent.", "required": false, "widget": "text", "default": "window"}] as const,
   },
   CONSOLIDATED_SUMMARY: {
     inputPorts: [{"name": "sections", "type": "object", "description": "All section objects produced by upstream SECTION_SUMMARY nodes (context.sections).", "optional": false}] as const,
     outputPorts: [{"name": "executive_summary", "type": "text", "description": "Multi-paragraph executive summary. Stored as context.executive_summary.", "optional": false}] as const,
-    params: [{"name": "use_section_facts", "type": "boolean", "description": "When true, prefer per-section \"facts\" JSON (and stats fallback) over prose-only for the LLM input \u2014 reduces cross-section contradictions. Placeholders: {facts_text}, {section_text}, {fact_union}, {facts_json} (alias of facts_text).", "required": false, "widget": "checkbox", "default": true}, {"name": "llm_prompt_template", "type": "string", "description": "Custom prompt with {section_text}, {facts_text}, {fact_union}, {trader_id}, {currency_pair}, {disposition}, {flag_count} placeholders. Falls back to the built-in template when empty.", "required": false, "widget": "textarea"}] as const,
+    params: [{"name": "llm_prompt_template", "type": "string", "description": "Custom prompt with {section_text}, {trader_id}, {currency_pair}, {disposition}, {flag_count} placeholders, plus any vars defined under prompt_context.vars and (when mode=dataset|mixed) {dataset}. Cross-dataset refs like {executions.notional.sum} resolve inline. Falls back to the built-in template when empty.", "required": false, "widget": "textarea"}, {"name": "prompt_context", "type": "object", "description": "Optional structured slot block: {mode: template|dataset|mixed, vars: {name: ref_expr, ...}, dataset: {ref, format, max_rows, columns}}. Same shape as SECTION_SUMMARY.prompt_context.", "required": false, "widget": "json", "default": {}}] as const,
   },
   DATA_HIGHLIGHTER: {
     inputPorts: [{"name": "dataset", "type": "dataframe", "description": "Any DataFrame referenced by input_name.", "optional": false}] as const,
     outputPorts: [{"name": "highlighted", "type": "dataframe", "description": "Input DataFrame + _highlight_colour (hex) + _highlight_label (str). Stored under ctx.datasets[output_name].", "optional": false}] as const,
-    params: [{"name": "input_name", "type": "input_ref", "description": "Source dataset.", "required": true, "widget": "input_ref"}, {"name": "output_name", "type": "string", "description": "Highlighted dataset name (convention: input_name + '_highlighted').", "required": true, "widget": "text"}, {"name": "rules", "type": "array", "description": "Array of {condition: string (pandas eval expression), colour: string (hex #RRGGBB), label: string}.", "required": false, "widget": "json", "default": []}] as const,
+    params: [{"name": "input_name", "type": "input_ref", "description": "Source dataset.", "required": true, "widget": "input_ref"}, {"name": "output_name", "type": "string", "description": "Highlighted dataset name (convention: input_name + '_highlighted').", "required": true, "widget": "text"}, {"name": "rules", "type": "array", "description": "Array of {condition, colour, label}. `condition` is a pandas.DataFrame.eval expression evaluated against the target dataset's rows. The condition may include `{ref}` placeholders that resolve to SCALAR values via the cross-dataset ref grammar BEFORE pandas eval \u2014 e.g. `notional > {context.peak_threshold}`, `bucket == {ladder.peak_bucket.first}`. `colour` is hex #RRGGBB.", "required": false, "widget": "json", "default": []}] as const,
   },
   DECISION_RULE: {
     inputPorts: [{"name": "dataset", "type": "dataframe", "description": "Signal DataFrame with _signal_flag column.", "optional": false}, {"name": "flag_count", "type": "scalar", "description": "Flag count from SIGNAL_CALCULATOR (read from ctx.values[{input_name}_flag_count] if the dataset isn't available).", "optional": true}] as const,
-    outputPorts: [{"name": "disposition", "type": "text", "description": "'ESCALATE' | 'REVIEW' | 'DISMISS'. Stored as context.disposition.", "optional": false}, {"name": "flag_count", "type": "scalar", "description": "Total signal hits (int). Stored as context.flag_count.", "optional": false}, {"name": "output_branch", "type": "text", "description": "Branch name to route to. Stored as context.output_branch.", "optional": false}] as const,
-    params: [{"name": "input_name", "type": "input_ref", "description": "Signal dataset name.", "required": true, "widget": "input_ref"}, {"name": "flag_count_expr", "type": "string", "description": "Python expression using 'flag_count' variable, e.g. 'flag_count > 0'. Overrides escalate/review thresholds when supplied.", "required": false, "widget": "text"}, {"name": "escalate_threshold", "type": "integer", "description": "flag_count >= this \u2192 ESCALATE.", "required": false, "widget": "number", "default": 1}, {"name": "review_threshold", "type": "integer", "description": "flag_count >= this \u2192 REVIEW, else DISMISS.", "required": false, "widget": "number", "default": 1}, {"name": "output_branches", "type": "object", "description": "Map of disposition \u2192 branch_name string.", "required": false, "widget": "json", "default": {}}] as const,
+    outputPorts: [{"name": "disposition", "type": "text", "description": "'ESCALATE' | 'REVIEW' | 'DISMISS'. Stored as context.disposition.", "optional": false}, {"name": "severity", "type": "text", "description": "'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW'. Stored as context.severity.", "optional": false}, {"name": "score", "type": "scalar", "description": "Normalised severity score in [0, 1]. Stored as context.score.", "optional": false}, {"name": "flag_count", "type": "scalar", "description": "Total signal hits (int). Stored as context.flag_count.", "optional": false}, {"name": "output_branch", "type": "text", "description": "Branch name to route to. Stored as context.output_branch.", "optional": false}, {"name": "matched_rule", "type": "text", "description": "Name of the rule that fired (rule mode only; empty in threshold mode). Stored as context.matched_rule.", "optional": false}] as const,
+    params: [{"name": "input_name", "type": "input_ref", "description": "Signal dataset name.", "required": true, "widget": "input_ref"}, {"name": "escalate_threshold", "type": "integer", "description": "flag_count >= this \u2192 ESCALATE (threshold mode).", "required": false, "widget": "number", "default": 1}, {"name": "review_threshold", "type": "integer", "description": "flag_count >= this \u2192 REVIEW (threshold mode).", "required": false, "widget": "number", "default": 1}, {"name": "rules", "type": "array", "description": "Optional rules list, evaluated top-to-bottom; first match wins. Each rule: {name, when, severity?, disposition?}. `when` accepts `{ref}` (truthy test) or `{ref} OP literal` where OP \u2208 {>=,<=,==,!=,>,<}. Refs use the cross-dataset grammar \u2014 e.g. `{executions._signal_flag.sum} >= 10`, `{ladder.symmetry.max} > 0.85`, `{context.book_count} > 1`.", "required": false, "widget": "json", "default": []}, {"name": "severity_map", "type": "object", "description": "Override severity per disposition. Defaults: {ESCALATE: HIGH, REVIEW: MEDIUM, DISMISS: LOW}.", "required": false, "widget": "json", "default": {}}, {"name": "output_branches", "type": "object", "description": "Map of disposition \u2192 branch_name string.", "required": false, "widget": "json", "default": {}}] as const,
   },
   EXTRACT_LIST: {
     inputPorts: [{"name": "dataset", "type": "dataframe", "description": "Source DataFrame (by input_name).", "optional": false}] as const,
@@ -577,6 +608,11 @@ export const NODE_TYPED: Record<NodeType, NodeTypedSpec> = {
     inputPorts: [{"name": "dataset", "type": "dataframe", "description": "Source DataFrame (by input_name).", "optional": false}] as const,
     outputPorts: [{"name": "value", "type": "scalar", "description": "Published under ctx.values[output_name].", "optional": true}] as const,
     params: [{"name": "input_name", "type": "input_ref", "description": "Dataset name in ctx.datasets.", "required": true, "widget": "input_ref"}, {"name": "column", "type": "string", "description": "Column to reduce.", "required": true, "widget": "text"}, {"name": "reducer", "type": "enum", "description": "How to collapse the column to a single value.", "required": true, "widget": "select", "default": "unique_single", "enum": ["first", "unique_single", "max", "min", "count", "sum", "mean"]}, {"name": "output_name", "type": "string", "description": "ctx.values key to publish the scalar under.", "required": true, "widget": "text"}, {"name": "fail_on_ambiguous", "type": "boolean", "description": "When reducer=unique_single, raise if the column has more than one distinct value (default false \u2014 take the first).", "required": false, "widget": "checkbox", "default": false}] as const,
+  },
+  FEATURE_ENGINE: {
+    inputPorts: [{"name": "dataset", "type": "dataframe", "description": "Source DataFrame referenced by input_name.", "optional": false}] as const,
+    outputPorts: [{"name": "features", "type": "dataframe", "description": "Final working DataFrame after all chained ops, published as ctx.datasets[output_name]. Ops with an `as` field also publish intermediate datasets under that name.", "optional": false}] as const,
+    params: [{"name": "input_name", "type": "input_ref", "description": "Source dataset name.", "required": true, "widget": "input_ref"}, {"name": "output_name", "type": "string", "description": "Target dataset name (defaults to input_name).", "required": false, "widget": "text"}, {"name": "ops", "type": "array", "description": "Ordered list of operations applied to the working DataFrame. Each op is {op: <name>, ...op-specific keys, as?: <publish_name>}. Supported ops:\n\u2022 window_bucket {time_col, interval_ms, out_col}\n  Floor a timestamp into integer buckets of size interval_ms.\n\n\u2022 time_slice {time_col, out_col, on_miss?, windows: [{name,start,end}]}\n  Label rows with a phase string based on which window they fall in.\n  start/end accept {context.x} or any ref grammar; missing rows get on_miss.\n\n\u2022 groupby_agg {by, aggs: {col: agg, ...}}\n  Standard pandas groupby + agg, returns a flat reset_index frame.\n\n\u2022 pivot {index, columns, values, aggfunc?}\n  DataFrame.pivot_table; column names cast to str; fill_value=0.\n\n\u2022 rolling {window, col, agg, out_col?}\n  Rolling window aggregation (mean/sum/min/max/std/...) with\n  min_periods=1.\n\n\u2022 derive {out_col, expr}\n  Vectorised DataFrame.eval expression (no Python branching).\n\n\u2022 apply_expr {out_col, expr}\n  Per-row Python expression evaluated with the row as locals.\n  Slower; use only when `derive` cannot express the logic.", "required": true, "widget": "json", "default": []}] as const,
   },
   GROUP_BY: {
     inputPorts: [{"name": "dataset", "type": "dataframe", "description": "Upstream dataset to partition.", "optional": false}] as const,
@@ -606,12 +642,12 @@ export const NODE_TYPED: Record<NodeType, NodeTypedSpec> = {
   REPORT_OUTPUT: {
     inputPorts: [{"name": "datasets", "type": "object", "description": "All DataFrames to include as tabs (ctx.datasets).", "optional": false}, {"name": "sections", "type": "object", "description": "Section narratives for the Section Summaries sheet.", "optional": true}, {"name": "executive_summary", "type": "text", "description": "Executive summary text.", "optional": true}, {"name": "context", "type": "object", "description": "disposition, trader_id, currency_pair etc. used on the cover page.", "optional": true}] as const,
     outputPorts: [{"name": "report_path", "type": "text", "description": "Absolute path to the written .xlsx file. Stored as context.report_path.", "optional": false}] as const,
-    params: [{"name": "output_path", "type": "string", "description": "File path for the Excel output (e.g. 'output/report.xlsx').", "required": true, "widget": "text"}, {"name": "tabs", "type": "array", "description": "Array of {name: string (max 31 chars), dataset: string, include_highlights: boolean}. When empty, all context.datasets are included (plus any map_tab_sets expansion).", "required": false, "widget": "json", "default": []}, {"name": "map_tab_sets", "type": "array", "description": "After explicit tabs, expand MAP outputs: each item {map_value_key, dataset_prefix, datasets: [short names from collect_datasets], name_pattern: \"{k}_{d}\" optional}. Reads ctx.values[map_value_key].results and ctx.datasets[\"{prefix}_{k}_{d}\"] or the DataFrame in the results bundle.", "required": false, "widget": "json", "default": []}] as const,
+    params: [{"name": "output_path", "type": "string", "description": "File path for the Excel output (e.g. 'output/report.xlsx').", "required": true, "widget": "text"}, {"name": "tabs", "type": "array", "description": "Array of tab specs. Each tab is one of:\n\u2022 Static tab \u2014 {name, dataset, include_highlights?}.\n  Renders the named dataset under the given sheet name.\n\n\u2022 Expanded tab \u2014 {expand_from, as?, name, dataset, include_highlights?}.\n  `expand_from` is a single `{ref}` resolving to a list, dict,\n  Series, or MAP-result. One tab is emitted per item, with the\n  item bound under `as` (default `item`) and substituted into both\n  `name` and `dataset` templates via `.format_map`. Examples:\n\n    expand_from: \"{context.book_list}\"\n    as: book\n    name: \"Executions \u00b7 {book}\"\n    dataset: \"executions_{book}\"\n\n    expand_from: \"{per_book.results}\"   # MAP result dict\n    as: key\n    name: \"Per-book {key}\"\n    dataset: \"per_book_{key}_executions\"\n\nWhen `tabs` is empty, all context.datasets are included as auto-named tabs.", "required": false, "widget": "json", "default": []}, {"name": "summary_position", "type": "enum", "description": "Cover/Exec/Sections placement relative to data tabs.", "required": false, "widget": "select", "default": "first", "enum": ["first", "last"]}] as const,
   },
   SECTION_SUMMARY: {
     inputPorts: [{"name": "dataset", "type": "dataframe", "description": "Any DataFrame referenced by input_name.", "optional": false}, {"name": "context", "type": "object", "description": "trader_id, currency_pair, disposition consumed by the prompt template.", "optional": true}] as const,
-    outputPorts: [{"name": "section", "type": "object", "description": "{name, stats, facts, narrative, dataset}. Stored under context.sections[section_name].", "optional": false}] as const,
-    params: [{"name": "section_name", "type": "string", "description": "Unique section identifier.", "required": true, "widget": "text"}, {"name": "input_name", "type": "input_ref", "description": "Source dataset.", "required": true, "widget": "input_ref"}, {"name": "field_bindings", "type": "array", "description": "Array of {field: string, agg: 'count'|'sum'|'mean'|'nunique'|'max'|'min'}.", "required": false, "widget": "json", "default": []}, {"name": "summary_mode", "type": "enum", "description": "legacy: field_bindings + LLM (default, backward compatible). templated: format llm_prompt_template with stats, no LLM. fact_pack_llm: fact_pack + JSON prompt + LLM with required_facts verbatim check. event_narrative: sort by order_by, events to LLM.", "required": false, "widget": "select", "default": "legacy", "enum": ["legacy", "templated", "fact_pack_llm", "event_narrative"]}, {"name": "fact_pack", "type": "array", "description": "For fact_pack_llm: list of {name, column, agg} or {name, const, render} or {name, special: row_count, render optional}.", "required": false, "widget": "json", "default": []}, {"name": "required_facts", "type": "string_list", "description": "For fact_pack_llm: fact names whose render strings must appear verbatim in narrative.", "required": false, "widget": "chips", "default": []}, {"name": "max_retries", "type": "integer", "description": "Extra LLM pass if required_facts are missing (0 or 1 recommended).", "required": false, "widget": "number", "default": 1}, {"name": "order_by", "type": "string", "description": "For event_narrative: sort column (default timestamp if present in event_fields path).", "required": false, "widget": "text", "default": ""}, {"name": "event_fields", "type": "string_list", "description": "For event_narrative: which columns to print per line.", "required": false, "widget": "chips", "default": []}, {"name": "llm_prompt_template", "type": "string", "description": "Prompt: legacy/templated use {stats}, {section}, etc. fact_pack_llm also {facts_json}. event_narrative also {events_text}.", "required": false, "widget": "textarea"}] as const,
+    outputPorts: [{"name": "section", "type": "object", "description": "{name, stats, narrative, dataset}. Stored under context.sections[section_name].", "optional": false}] as const,
+    params: [{"name": "section_name", "type": "string", "description": "Unique section identifier.", "required": true, "widget": "text"}, {"name": "input_name", "type": "input_ref", "description": "Source dataset.", "required": true, "widget": "input_ref"}, {"name": "mode", "type": "enum", "description": "templated     \u2014 legacy stats-in-prompt flow. fact_pack_llm \u2014 pre-compute named facts, pass as JSON, verify each\n                required fact appears in narrative (retry once).\nevent_narrative \u2014 format one line per row into a chronological list,\n                  then stitch with an LLM.", "required": false, "widget": "select", "default": "templated", "enum": ["templated", "fact_pack_llm", "event_narrative"]}, {"name": "field_bindings", "type": "array", "description": "Array of {field: string, agg: 'count'|'sum'|'mean'|'nunique'|'max'|'min'}. Used in templated mode.", "required": false, "widget": "json", "default": []}, {"name": "facts", "type": "array", "description": "Array of {name, column, agg} for fact_pack_llm mode. Example: [{name: 'buy_count', column: 'side', agg: 'count_where_buy'}].", "required": false, "widget": "json", "default": []}, {"name": "required_facts", "type": "string_list", "description": "Fact names whose values MUST appear verbatim in the generated narrative. A retry is triggered once if any are missing.", "required": false, "widget": "chips", "default": []}, {"name": "sort_by", "type": "string", "description": "Column used to order rows for event_narrative mode.", "required": false, "widget": "text", "default": ""}, {"name": "event_template", "type": "string", "description": "Python format string used to render each event row in event_narrative mode. Row columns are passed as keyword args. Example: '{timestamp}  {side} {quantity} @ {limit_price}'.", "required": false, "widget": "text", "default": ""}, {"name": "max_events", "type": "integer", "description": "Cap events passed to the LLM in event_narrative mode.", "required": false, "widget": "number", "default": 40}, {"name": "llm_prompt_template", "type": "string", "description": "Prompt with {stats}, {facts}, {events}, {section}, {disposition}, {trader_id}, {currency_pair} placeholders, plus any vars defined under prompt_context.vars and (when mode=dataset|mixed) {dataset}. Cross-dataset refs like {executions.notional.sum} resolve inline.", "required": false, "widget": "textarea"}, {"name": "prompt_context", "type": "object", "description": "Optional structured slot block: {mode: template|dataset|mixed, vars: {name: ref_expr, ...}, dataset: {ref, format, max_rows, columns}}. vars resolve cross-dataset refs into named slots; the serialized dataset (csv/json/markdown) is exposed as {dataset}.", "required": false, "widget": "json", "default": {}}] as const,
   },
   SIGNAL_CALCULATOR: {
     inputPorts: [{"name": "dataset", "type": "dataframe", "description": "Trade/execution DataFrame (typically after NORMALISE_ENRICH).", "optional": false}] as const,

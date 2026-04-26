@@ -1,3 +1,21 @@
+"""
+ALERT_TRIGGER — entry node of every workflow.
+
+Job: copy the relevant fields out of the immutable alert_payload onto
+ctx.values so downstream nodes can reference `{context.trader_id}`,
+`{context.event_time}`, etc., via the refs grammar.
+
+There are two kinds of fields:
+  • declared in the YAML config under `alert_fields` — explicitly
+    requested by the workflow author.
+  • STANDARD_FIELDS — the conventional surveillance set we always
+    expose if present in the payload, so collectors and prompt
+    templates can rely on them without per-workflow boilerplate.
+
+Topology rule (validator-enforced): there is exactly one
+ALERT_TRIGGER per workflow, its id is `n01`, and it has no incoming
+edges.
+"""
 from pathlib import Path
 
 from ..context import RunContext

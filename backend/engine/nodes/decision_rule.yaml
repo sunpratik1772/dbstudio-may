@@ -1,5 +1,5 @@
 type_id: DECISION_RULE
-description: "Evaluate flag_count → ESCALATE/REVIEW/DISMISS"
+description: "Evaluate flag_count or rules → ESCALATE/REVIEW/DISMISS + severity"
 
 ui:
   color: "#D97706"
@@ -23,6 +23,12 @@ output_ports:
     type: text
     store_at: "ctx.disposition"
     description: "'ESCALATE' | 'REVIEW' | 'DISMISS'. Stored as context.disposition."
+  - name: severity
+    type: text
+    description: "'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW'. Stored as context.severity."
+  - name: score
+    type: scalar
+    description: "Normalised severity score in [0, 1]. Stored as context.score."
   - name: flag_count
     type: scalar
     store_at: "ctx.values[flag_count]"
@@ -31,27 +37,44 @@ output_ports:
     type: text
     store_at: "ctx.output_branch"
     description: "Branch name to route to. Stored as context.output_branch."
+  - name: matched_rule
+    type: text
+    description: >-
+      Name of the rule that fired (rule mode only; empty in threshold
+      mode). Stored as context.matched_rule.
 
 params:
   - name: input_name
     type: input_ref
     description: "Signal dataset name."
     required: true
-  - name: flag_count_expr
-    type: string
-    description: >-
-      Python expression using 'flag_count' variable, e.g. 'flag_count > 0'.
-      Overrides escalate/review thresholds when supplied.
-    required: false
   - name: escalate_threshold
     type: integer
-    description: "flag_count >= this → ESCALATE."
+    description: "flag_count >= this → ESCALATE (threshold mode)."
     default: 1
     required: false
   - name: review_threshold
     type: integer
-    description: "flag_count >= this → REVIEW, else DISMISS."
+    description: "flag_count >= this → REVIEW (threshold mode)."
     default: 1
+    required: false
+  - name: rules
+    type: array
+    description: >-
+      Optional rules list, evaluated top-to-bottom; first match wins.
+      Each rule: {name, when, severity?, disposition?}. `when` accepts
+      `{ref}` (truthy test) or `{ref} OP literal` where OP ∈
+      {>=,<=,==,!=,>,<}. Refs use the cross-dataset grammar — e.g.
+      `{executions._signal_flag.sum} >= 10`,
+      `{ladder.symmetry.max} > 0.85`, `{context.book_count} > 1`.
+    default: []
+    required: false
+  - name: severity_map
+    type: object
+    description: >-
+      Override severity per disposition. Defaults:
+      {ESCALATE: HIGH, REVIEW: MEDIUM, DISMISS: LOW}.
+    default: {}
     required: false
   - name: output_branches
     type: object
@@ -62,4 +85,6 @@ params:
 semantics:
   requires: []
 
-constraints: []
+constraints:
+  - "Threshold mode (default) requires escalate_threshold >= review_threshold."
+  - "Rule mode short-circuits: first matching rule sets disposition + severity."

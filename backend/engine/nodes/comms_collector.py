@@ -1,3 +1,26 @@
+"""
+COMMS_COLLECTOR — pulls trader chat / e-comms for the alert window.
+
+Comms live in a different upstream system (Oculus) than orders /
+executions (Solr). Keeping the collector split per source system is a
+deliberate architectural choice — see the chassis section in
+docs/BACKEND_ARCHITECTURE.md.
+
+Two extras beyond a plain row pull:
+
+  • keyword_categories — `{INTENT: [...], TIMING: [...], COVERUP: [...]}`.
+    For each row we add `_hit_<CAT>` boolean columns and a
+    `_matched_categories` join-string. The downstream
+    SECTION_SUMMARY in `event_narrative` mode references the join in
+    its event_template.
+  • emit_hits_only — when true we publish a sibling dataset
+    `<output_name>_hits` containing just rows where any keyword
+    matched. The validator wiring check is aware of this naming
+    convention; downstream nodes can `input_name: comms_hits`.
+
+Like every collector, mock data ships with the module so workflows are
+runnable end-to-end without external systems.
+"""
 import re
 from pathlib import Path
 
@@ -38,6 +61,8 @@ def handle_comms_collector(node: dict, ctx: RunContext) -> None:
         "fix", "benchmark", "front-run", "ahead", "before the move",
         "cover", "rotate", "push through", "WM fix", "layering", "spoofing",
     ])
+    categories: dict[str, list[str]] = cfg.get("keyword_categories") or {}
+    emit_hits_only: bool = bool(cfg.get("emit_hits_only", False))
     output_name: str = cfg.get("output_name", "comms_data")
 
     # Demo mode: prefer the configured CSV when present; otherwise
@@ -65,14 +90,33 @@ def handle_comms_collector(node: dict, ctx: RunContext) -> None:
         })
 
     def find_hits(text: str) -> list[str]:
-        return [kw for kw in keywords if re.search(re.escape(kw), text, re.IGNORECASE)]
+        return [kw for kw in keywords if re.search(re.escape(kw), str(text), re.IGNORECASE)]
+
+    def find_categories(text: str) -> list[str]:
+        t = str(text)
+        hits: list[str] = []
+        for cat, kws in (categories or {}).items():
+            for kw in kws or []:
+                if re.search(re.escape(kw), t, re.IGNORECASE):
+                    hits.append(cat)
+                    break
+        return hits
 
     df["_matched_keywords"] = df["display_post"].apply(find_hits)
     df["_keyword_hit"] = df["_matched_keywords"].apply(bool)
+    if categories:
+        df["_matched_categories"] = df["display_post"].apply(find_categories)
+        for cat in categories.keys():
+            df[f"_hit_{cat}"] = df["_matched_categories"].apply(lambda hs, c=cat: c in hs)
 
     ctx.datasets[output_name] = df
     ctx.dataset_provenance[output_name] = collector_source_ref("COMMS_COLLECTOR", cfg)
     ctx.set(f"{output_name}_keyword_hits", int(df["_keyword_hit"].sum()))
+
+    if emit_hits_only:
+        hits_df = df[df["_keyword_hit"]].reset_index(drop=True)
+        ctx.datasets[f"{output_name}_hits"] = hits_df
+        ctx.set(f"{output_name}_hits_count", int(len(hits_df)))
 
 
 NODE_SPEC: NodeSpec = _spec_from_yaml(Path(__file__).with_suffix(".yaml"), handle_comms_collector)

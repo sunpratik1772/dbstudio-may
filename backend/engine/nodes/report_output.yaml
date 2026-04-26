@@ -37,12 +37,31 @@ params:
   - name: tabs
     type: array
     description: >-
-      Array of {name: string (max 31 chars), dataset: string,
-      include_highlights: boolean}. When empty, all context.datasets are
-      included.
+      Array of tab specs. Each tab is one of:
+
+      • Static tab — {name, dataset, include_highlights?}.
+        Renders the named dataset under the given sheet name.
+
+      • Expanded tab — {expand_from, as?, name, dataset, include_highlights?}.
+        `expand_from` is a single `{ref}` resolving to a list, dict,
+        Series, or MAP-result. One tab is emitted per item, with the
+        item bound under `as` (default `item`) and substituted into both
+        `name` and `dataset` templates via `.format_map`. Examples:
+
+          expand_from: "{context.book_list}"
+          as: book
+          name: "Executions · {book}"
+          dataset: "executions_{book}"
+
+          expand_from: "{per_book.results}"   # MAP result dict
+          as: key
+          name: "Per-book {key}"
+          dataset: "per_book_{key}_executions"
+
+      When `tabs` is empty, all context.datasets are included as
+      auto-named tabs.
     default: []
     required: false
-
 semantics:
   requires: []
 

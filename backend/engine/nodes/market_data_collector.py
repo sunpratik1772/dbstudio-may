@@ -1,3 +1,12 @@
+"""
+MARKET_DATA_COLLECTOR — pulls market ticks (mid prices, sizes) for the
+instrument under review.
+
+Sourced from Mercury in production; this module ships a deterministic
+mock generator so workflows are runnable end-to-end without external
+systems. Honours the shared `window_key` contract every collector uses
+so all collectors filter to the same TIME_WINDOW.
+"""
 from datetime import datetime, timezone
 from pathlib import Path
 

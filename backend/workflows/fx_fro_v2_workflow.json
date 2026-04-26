@@ -1,0 +1,288 @@
+{
+  "schema_version": "1.0",
+  "workflow_id": "fx_fro_v2",
+  "name": "FX Front-Running Detection (chassis v2)",
+  "version": "2.1",
+  "description": "FRO scenario on the DRY chassis. Demonstrates: TIME_WINDOW + multi-source collectors, GROUP_BY + MAP per-book fan-out, FEATURE_ENGINE (window_bucket + derive), shared SIGNAL_CALCULATOR (signal_type=FRONT_RUNNING), DATA_HIGHLIGHTER with cross-dataset refs, DECISION_RULE rules-mode + severity, SECTION_SUMMARY in templated/fact_pack_llm/event_narrative modes, CONSOLIDATED_SUMMARY, and REPORT_OUTPUT with static + dynamic (expand_from per book) tabs.",
+  "nodes": [
+    {
+      "id": "n01",
+      "type": "ALERT_TRIGGER",
+      "label": "Alert Trigger",
+      "config": {
+        "alert_fields": {
+          "trader_id": "string",
+          "alert_date": "date",
+          "currency_pair": "string",
+          "alert_id": "string",
+          "event_time": "string"
+        }
+      }
+    },
+    {
+      "id": "n02",
+      "type": "TIME_WINDOW",
+      "label": "Alert Window",
+      "config": {
+        "event_time_key": "event_time",
+        "pre_minutes": 30,
+        "post_minutes": 30,
+        "output_name": "window"
+      }
+    },
+    {
+      "id": "n03",
+      "type": "ORDER_COLLECTOR",
+      "label": "Collect Orders",
+      "config": {
+        "query_template": "trader_id:{context.trader_id}",
+        "output_name": "orders",
+        "window_key": "window"
+      }
+    },
+    {
+      "id": "n04",
+      "type": "TRADE_DATA_COLLECTOR",
+      "label": "Collect Executions",
+      "config": {
+        "source": "hs_execution",
+        "query_template": "trader_id:{context.trader_id} AND trade_version:1",
+        "output_name": "executions",
+        "window_key": "window"
+      }
+    },
+    {
+      "id": "n05",
+      "type": "COMMS_COLLECTOR",
+      "label": "Collect Communications",
+      "config": {
+        "query_template": "user:{context.trader_id}",
+        "output_name": "comms",
+        "window_key": "window",
+        "keyword_categories": {
+          "INTENT": ["layering", "spoofing", "front-run", "push through"],
+          "TIMING": ["fix", "WM fix", "benchmark", "before the move"],
+          "COVERUP": ["cover", "rotate", "step-out"]
+        },
+        "emit_hits_only": true
+      }
+    },
+    {
+      "id": "n06",
+      "type": "MARKET_DATA_COLLECTOR",
+      "label": "Collect Market Ticks",
+      "config": {
+        "source": "EBS",
+        "query_template": "symbol:{context.currency_pair}",
+        "output_name": "market",
+        "window_key": "window"
+      }
+    },
+    {
+      "id": "n07",
+      "type": "GROUP_BY",
+      "label": "Partition Orders by Book",
+      "config": {
+        "input_name": "orders",
+        "group_by_column": "book",
+        "output_prefix": "orders_by_book",
+        "keys_output_name": "book_keys",
+        "order": "sort"
+      }
+    },
+    {
+      "id": "n08",
+      "type": "MAP",
+      "label": "Per-Book Analysis",
+      "config": {
+        "keys_key": "book_keys",
+        "iteration_ctx_key": "current_book",
+        "dataset_prefix": "orders_by_book",
+        "iteration_dataset_alias": "orders",
+        "output_name": "per_book",
+        "collect_values": ["book_qty_total", "book_order_count"],
+        "collect_datasets": ["orders"],
+        "sub_workflow": {
+          "nodes": [
+            {
+              "id": "s1",
+              "type": "EXTRACT_SCALAR",
+              "label": "Book qty",
+              "config": {
+                "input_name": "orders",
+                "column": "quantity",
+                "reducer": "sum",
+                "output_name": "book_qty_total"
+              }
+            },
+            {
+              "id": "s2",
+              "type": "EXTRACT_SCALAR",
+              "label": "Book order count",
+              "config": {
+                "input_name": "orders",
+                "column": "order_id",
+                "reducer": "count",
+                "output_name": "book_order_count"
+              }
+            }
+          ],
+          "edges": [{"from": "s1", "to": "s2"}]
+        }
+      }
+    },
+    {
+      "id": "n09",
+      "type": "FEATURE_ENGINE",
+      "label": "Feature Engine — bucket + signed qty",
+      "config": {
+        "input_name": "executions",
+        "output_name": "executions_features",
+        "ops": [
+          {"op": "window_bucket", "time_col": "exec_time", "interval_ms": 60000, "out_col": "minute_bucket"},
+          {"op": "derive", "out_col": "notional_per_unit", "expr": "notional_usd / exec_quantity"}
+        ]
+      }
+    },
+    {
+      "id": "n10",
+      "type": "SIGNAL_CALCULATOR",
+      "label": "Signal — Front Running",
+      "config": {
+        "mode": "configure",
+        "signal_type": "FRONT_RUNNING",
+        "input_name": "executions_features",
+        "output_name": "executions_signals",
+        "params": {"window_minutes": 5, "price_move_threshold": 0.0003}
+      }
+    },
+    {
+      "id": "n11",
+      "type": "DATA_HIGHLIGHTER",
+      "label": "Highlight Flagged Executions",
+      "config": {
+        "input_name": "executions_signals",
+        "output_name": "executions_signals_highlighted",
+        "rules": [
+          {"condition": "_signal_flag == True", "colour": "#FCA5A5", "label": "Front-run signal"},
+          {"condition": "_signal_score > 0.5", "colour": "#DC2626", "label": "Severe price move"}
+        ]
+      }
+    },
+    {
+      "id": "n12",
+      "type": "DECISION_RULE",
+      "label": "Disposition (rules-mode)",
+      "config": {
+        "input_name": "executions_signals",
+        "escalate_threshold": 5,
+        "review_threshold": 1,
+        "rules": [
+          {"name": "comms_intent_with_signal", "when": "{executions_signals._signal_flag.sum} >= 1", "disposition": "ESCALATE", "severity": "CRITICAL"},
+          {"name": "any_signal", "when": "{context.flag_count} >= 1", "disposition": "REVIEW", "severity": "MEDIUM"}
+        ],
+        "severity_map": {"DISMISS": "LOW"}
+      }
+    },
+    {
+      "id": "n13",
+      "type": "SECTION_SUMMARY",
+      "label": "Signals Section (templated)",
+      "config": {
+        "section_name": "signals_overview",
+        "input_name": "executions_signals",
+        "mode": "templated",
+        "field_bindings": [
+          {"field": "_signal_flag", "agg": "sum"},
+          {"field": "_signal_score", "agg": "max"},
+          {"field": "_signal_type", "agg": "nunique"}
+        ],
+        "llm_prompt_template": "You are a trade surveillance analyst.\nTrader: {trader_id}  Disposition: {disposition}\nSignal stats:\n{stats}\n\nWrite a one-paragraph summary of the front-running signals."
+      }
+    },
+    {
+      "id": "n14",
+      "type": "SECTION_SUMMARY",
+      "label": "Executions Fact Pack",
+      "config": {
+        "section_name": "executions_analysis",
+        "input_name": "executions",
+        "mode": "fact_pack_llm",
+        "facts": [
+          {"name": "exec_count", "column": "exec_id", "agg": "count"},
+          {"name": "buy_count", "column": "side", "agg": "count_where_buy"},
+          {"name": "sell_count", "column": "side", "agg": "count_where_sell"},
+          {"name": "total_qty", "column": "exec_quantity", "agg": "sum"},
+          {"name": "venues_touched", "column": "venue", "agg": "unique_values"}
+        ],
+        "required_facts": ["exec_count", "total_qty"],
+        "llm_prompt_template": "You are a trade surveillance analyst.\nTrader: {trader_id}  Disposition: {disposition}\nFacts (JSON):\n{facts}\n\nWrite a tight 2-paragraph narrative referencing every fact verbatim."
+      }
+    },
+    {
+      "id": "n15",
+      "type": "SECTION_SUMMARY",
+      "label": "Comms Event Narrative",
+      "config": {
+        "section_name": "comms_narrative",
+        "input_name": "comms_hits",
+        "mode": "event_narrative",
+        "sort_by": "timestamp",
+        "event_template": "{timestamp}  [{event_type}] {display_post}  (categories: {_matched_categories})",
+        "max_events": 20,
+        "llm_prompt_template": "Below is a chronological list of flagged comms for trader {trader_id}.\n{events}\n\nWrite a single-paragraph narrative weaving the events into a story. Be specific about timing."
+      }
+    },
+    {
+      "id": "n16",
+      "type": "CONSOLIDATED_SUMMARY",
+      "label": "Executive Summary",
+      "config": {}
+    },
+    {
+      "id": "n17",
+      "type": "REPORT_OUTPUT",
+      "label": "Generate Excel Report",
+      "config": {
+        "output_path": "output/fx_fro_v2_report.xlsx",
+        "tabs": [
+          {"name": "All Orders", "dataset": "orders", "include_highlights": false},
+          {"name": "Executions", "dataset": "executions", "include_highlights": false},
+          {"name": "Signal Detections", "dataset": "executions_signals", "include_highlights": true},
+          {"name": "Comms Hits", "dataset": "comms_hits", "include_highlights": false},
+          {"name": "Market", "dataset": "market", "include_highlights": false},
+          {
+            "expand_from": "{context.per_book}",
+            "as": "key",
+            "name": "Book {key} Orders",
+            "dataset": "per_book_{key}_orders",
+            "include_highlights": false
+          }
+        ]
+      }
+    }
+  ],
+  "edges": [
+    {"from": "n01", "to": "n02"},
+    {"from": "n02", "to": "n03"},
+    {"from": "n02", "to": "n04"},
+    {"from": "n02", "to": "n05"},
+    {"from": "n02", "to": "n06"},
+    {"from": "n03", "to": "n07"},
+    {"from": "n07", "to": "n08"},
+    {"from": "n04", "to": "n09"},
+    {"from": "n09", "to": "n10"},
+    {"from": "n10", "to": "n11"},
+    {"from": "n10", "to": "n12"},
+    {"from": "n10", "to": "n13"},
+    {"from": "n04", "to": "n14"},
+    {"from": "n05", "to": "n15"},
+    {"from": "n12", "to": "n16"},
+    {"from": "n13", "to": "n16"},
+    {"from": "n14", "to": "n16"},
+    {"from": "n15", "to": "n16"},
+    {"from": "n08", "to": "n17"},
+    {"from": "n11", "to": "n17"},
+    {"from": "n16", "to": "n17"}
+  ]
+}

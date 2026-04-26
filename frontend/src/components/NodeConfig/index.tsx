@@ -1,3 +1,18 @@
+/**
+ * Bottom-edge config drawer — opens for the currently selected node.
+ *
+ * The form is generated entirely from the node's typed ParamSpec
+ * (declared in YAML on the backend, surfaced via NODE_UI). When the
+ * backend adds a new param, regenerate `src/nodes/generated.ts` and
+ * the field shows up here automatically — no edits to this file.
+ *
+ * Validation issues for the selected node light up beside the
+ * relevant input. The "Apply" button writes back through
+ * workflowStore.updateNode; "Cancel" reverts to the last saved state.
+ *
+ * The companion `ConfigInspector.tsx` renders the read-only summary
+ * shown in the right panel.
+ */
 import { useRef, useState } from 'react'
 import ResizeHandle from '../ResizeHandle'
 import type { LucideIcon } from 'lucide-react'

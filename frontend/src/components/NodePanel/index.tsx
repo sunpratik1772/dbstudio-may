@@ -1,113 +1,126 @@
-import { useRef, type DragEvent } from 'react'
-import { NODE_UI, NODE_TYPES, type NodeType } from '../../nodes'
+/**
+ * Left-side node palette — the draggable catalogue of node types.
+ *
+ * Source of truth is the generated NODE_UI registry (auto-built from
+ * each backend handler's YAML). Add a new node type on the backend,
+ * regenerate, and it appears here grouped by category with the right
+ * colour and icon. No edits to this file.
+ *
+ * Drag-and-drop hands off to WorkflowCanvas via the PALETTE_DND_MIME
+ * payload — the canvas creates the node at the drop coordinates.
+ */
+import { useMemo, useRef, useState, type DragEvent } from 'react'
+import { Search } from 'lucide-react'
+import { NODE_UI, NODE_TYPES, getNodeDisplayName, type NodeType } from '../../nodes'
 import { useWorkflowStore } from '../../store/workflowStore'
 import { PALETTE_DND_MIME } from '../WorkflowCanvas'
 import ResizeHandle from '../ResizeHandle'
 
+type Category = {
+  key: string
+  label: string
+  color: string
+  types: NodeType[]
+}
+
+const CATEGORIES: Category[] = [
+  { key: 'trigger',   label: 'TRIGGER',   color: '#F5A623', types: ['ALERT_TRIGGER'] },
+  { key: 'collector', label: 'INTEGRATIONS', color: '#00E5FF', types: ['COMMS_COLLECTOR', 'TRADE_DATA_COLLECTOR', 'MARKET_DATA_COLLECTOR'] },
+  { key: 'transform', label: 'TRANSFORM', color: '#A78BFA', types: ['NORMALISE_ENRICH', 'DATA_HIGHLIGHTER'] },
+  { key: 'signal',    label: 'SIGNAL',    color: '#F472B6', types: ['SIGNAL_CALCULATOR'] },
+  { key: 'rule',      label: 'RULE',      color: '#FBBF24', types: ['DECISION_RULE'] },
+  { key: 'narrative', label: 'NARRATIVE', color: '#F472B6', types: ['SECTION_SUMMARY', 'CONSOLIDATED_SUMMARY'] },
+  { key: 'output',    label: 'OUTPUT',    color: '#10B981', types: ['REPORT_OUTPUT'] },
+]
+
 export default function NodePanel() {
-  const workflow = useWorkflowStore((s) => s.workflow)
   const paletteWidth = useWorkflowStore((s) => s.paletteWidth)
   const setPaletteWidth = useWorkflowStore((s) => s.setPaletteWidth)
   const rootRef = useRef<HTMLDivElement>(null)
+  const [query, setQuery] = useState('')
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return CATEGORIES
+    return CATEGORIES.map((c) => ({
+      ...c,
+      types: c.types.filter((t) => t.toLowerCase().includes(q) || NODE_UI[t].description.toLowerCase().includes(q)),
+    })).filter((c) => c.types.length > 0)
+  }, [query])
 
   return (
     <div
       ref={rootRef}
-      className="flex flex-col h-full overflow-y-auto relative shrink-0"
+      className="flex flex-col h-full overflow-hidden relative shrink-0"
       style={{ width: paletteWidth, background: 'var(--bg-1)', borderRight: '1px solid var(--border)' }}
     >
-      <div className="px-3 py-3" style={{ borderBottom: '1px solid var(--border)' }}>
-        <h3 className="eyebrow" style={{ color: 'var(--text-1)', letterSpacing: '0.12em' }}>
-          NODES{' '}
-          <span className="num" style={{ fontSize: 11, color: 'var(--text-2)' }}>
+      {/* Header */}
+      <div className="px-4 pt-4 pb-3 shrink-0">
+        <div className="flex items-baseline gap-2">
+          <span className="font-mono" style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-1)', textTransform: 'uppercase', letterSpacing: '0.18em' }}>
+            NODES
+          </span>
+          <span className="font-mono" style={{ fontSize: 11, color: 'var(--text-3)' }}>
             {NODE_TYPES.length}
           </span>
-        </h3>
-        <p style={{ fontSize: 10.5, color: 'var(--text-3)', marginTop: 4 }}>
-          Drag a node onto the canvas. The ×N badge counts how many of that type are in the workflow.
-        </p>
-      </div>
-
-      <div className="flex-1 p-2 space-y-1">
-        {NODE_TYPES.map((type) => {
-          const meta = NODE_UI[type]
-          const IconComp = meta.Icon
-          const usedCount = workflow?.nodes.filter((n) => n.type === type).length ?? 0
-          return (
-            <div
-              key={type}
-              draggable
-              onDragStart={(e: DragEvent<HTMLDivElement>) => {
-                // Both MIMEs — the custom one gives us a type-safe lookup on
-                // the canvas, the text/plain fallback keeps Safari happy.
-                e.dataTransfer.setData(PALETTE_DND_MIME, type)
-                e.dataTransfer.setData('text/plain', type)
-                e.dataTransfer.effectAllowed = 'copyMove'
-              }}
-              title={`${type.replace(/_/g, ' ')} — ${meta.description}\n\nDrag onto canvas to add.`}
-              className="flex items-center gap-2 px-2 py-2 rounded-lg cursor-grab active:cursor-grabbing lift"
-              style={{
-                background: 'var(--bg-2)',
-                border: `1px solid color-mix(in srgb, ${meta.color} 22%, var(--border))`,
-              }}
-              onMouseEnter={(e) => {
-                ;(e.currentTarget as HTMLDivElement).style.borderColor = `color-mix(in srgb, ${meta.color} 55%, transparent)`
-                ;(e.currentTarget as HTMLDivElement).style.background = 'var(--bg-3)'
-              }}
-              onMouseLeave={(e) => {
-                ;(e.currentTarget as HTMLDivElement).style.borderColor = `color-mix(in srgb, ${meta.color} 22%, var(--border))`
-                ;(e.currentTarget as HTMLDivElement).style.background = 'var(--bg-2)'
-              }}
-            >
-              <span
-                className="flex items-center justify-center rounded shrink-0"
-                style={{
-                  width: 22, height: 22,
-                  background: `${meta.color}14`,
-                  border: `1px solid ${meta.color}35`,
-                  color: meta.color,
-                }}
-              >
-                <IconComp size={13} strokeWidth={2} />
-              </span>
-              <div className="flex-1 min-w-0">
-                <div
-                  className="truncate"
-                  style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-0)', lineHeight: 1.2 }}
-                >
-                  {type.replace(/_/g, ' ')}
-                </div>
-              </div>
-              {usedCount > 0 && (
-                <span
-                  className="num rounded-full px-1.5 py-0.5"
-                  style={{
-                    fontSize: 10,
-                    background: `color-mix(in srgb, ${meta.color} 18%, transparent)`,
-                    color: meta.color,
-                    fontWeight: 600,
-                  }}
-                  title={`${usedCount} ${type.replace(/_/g, ' ').toLowerCase()} node${usedCount === 1 ? '' : 's'} in the current workflow`}
-                >
-                  ×{usedCount}
-                </span>
-              )}
-            </div>
-          )
-        })}
-      </div>
-
-      {workflow && (
-        <div className="p-3" style={{ borderTop: '1px solid var(--border)' }}>
-          <div className="space-y-1" style={{ fontSize: 10.5, color: 'var(--text-2)' }}>
-            <StatRow k="Nodes" v={String(workflow.nodes.length)} />
-            <StatRow k="Edges" v={String(workflow.edges.length)} />
-            <StatRow k="Version" v={workflow.version} />
-          </div>
         </div>
-      )}
+      </div>
 
-      {/* Drag the right edge to resize the palette (VSCode-style). */}
+      {/* Search */}
+      <div className="px-4 pb-3 shrink-0">
+        <div
+          className="flex items-center gap-2"
+          style={{
+            height: 36,
+            padding: '0 10px',
+            borderRadius: 8,
+            background: 'var(--bg-2)',
+            border: '1px solid var(--border)',
+          }}
+        >
+          <Search size={13} strokeWidth={2} style={{ color: 'var(--text-3)' }} />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search nodes…"
+            className="flex-1 bg-transparent outline-none"
+            style={{ fontSize: 12.5, color: 'var(--text-0)' }}
+          />
+        </div>
+      </div>
+
+      {/* Categories */}
+      <div className="flex-1 overflow-y-auto px-3 pb-3">
+        {filtered.map((cat) => (
+          <div key={cat.key} className="mb-4">
+            <div className="flex items-center justify-between px-1 mb-1.5">
+              <span
+                className="font-mono"
+                style={{ fontSize: 10.5, fontWeight: 700, color: cat.color, textTransform: 'uppercase', letterSpacing: '0.22em' }}
+              >
+                {cat.label}
+              </span>
+              <span className="font-mono" style={{ fontSize: 10.5, color: 'var(--text-3)' }}>
+                {cat.types.length}
+              </span>
+            </div>
+            <div className="space-y-1.5">
+              {cat.types.map((type) => (
+                <NodeCard key={type} type={type} accent={cat.color} />
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Footer */}
+      <div className="px-4 py-3 shrink-0" style={{ borderTop: '1px solid var(--border)' }}>
+        <div className="font-mono" style={{ fontSize: 10, color: 'var(--text-3)', lineHeight: 1.5 }}>
+          drag or double-click to add ·<br />
+          powered by spec-driven registry
+        </div>
+      </div>
+
       <ResizeHandle
         edge="right"
         ariaLabel="Resize node palette"
@@ -120,11 +133,48 @@ export default function NodePanel() {
   )
 }
 
-function StatRow({ k, v }: { k: string; v: string }) {
+function NodeCard({ type, accent }: { type: NodeType; accent: string }) {
+  const meta = NODE_UI[type]
+  const Icon = meta.Icon
+  const addNode = useWorkflowStore((s) => s.addNode)
+  const titleCase = getNodeDisplayName(type)
+
   return (
-    <div className="flex justify-between items-baseline">
-      <span className="eyebrow" style={{ color: 'var(--text-2)' }}>{k}</span>
-      <span className="num" style={{ color: 'var(--text-0)', fontSize: 11.5, fontWeight: 500 }}>{v}</span>
+    <div
+      draggable
+      onDragStart={(e: DragEvent<HTMLDivElement>) => {
+        e.dataTransfer.setData(PALETTE_DND_MIME, type)
+        e.dataTransfer.setData('text/plain', type)
+        e.dataTransfer.effectAllowed = 'copyMove'
+      }}
+      onDoubleClick={() => addNode(type, { x: 200, y: 200 })}
+      title={meta.description}
+      className="flex items-center gap-3 cursor-grab active:cursor-grabbing"
+      style={{
+        padding: '10px 12px',
+        borderRadius: 10,
+        background: 'var(--bg-node)',
+        border: '1px solid var(--border)',
+        transition: 'border-color 140ms, background 140ms',
+      }}
+      onMouseEnter={(e) => {
+        ;(e.currentTarget as HTMLDivElement).style.borderColor = `color-mix(in srgb, ${accent} 50%, var(--border))`
+      }}
+      onMouseLeave={(e) => {
+        ;(e.currentTarget as HTMLDivElement).style.borderColor = 'var(--border)'
+      }}
+    >
+      <span style={{ color: accent, display: 'inline-flex' }}>
+        <Icon size={16} strokeWidth={2} />
+      </span>
+      <div className="flex-1 min-w-0">
+        <div style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--text-0)', lineHeight: 1.25 }}>
+          {titleCase}
+        </div>
+        <div className="font-mono truncate" style={{ fontSize: 10, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginTop: 2 }}>
+          {type}
+        </div>
+      </div>
     </div>
   )
 }

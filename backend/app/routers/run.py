@@ -60,13 +60,14 @@ def _resolve_workflow_mock_csv_paths(dag: dict) -> dict:
 
 # Sensible defaults for the demo endpoint so a reviewer can curl the
 # URL with an empty body and still get a meaningful run.
-_DEMO_WORKFLOW_FILENAME = "demo_fx_fro_workflow.json"
+_DEMO_WORKFLOW_FILENAME = "fx_fro_v2_workflow.json"
 _DEMO_ALERT_PAYLOAD: dict[str, str] = {
     "trader_id": "T001",
     "book": "FX-SPOT",
     "currency_pair": "EUR/USD",
     "alert_date": "2024-01-15",
     "alert_id": "DEMO-0001",
+    "event_time": "2024-01-15 09:00",
 }
 
 

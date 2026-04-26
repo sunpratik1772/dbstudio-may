@@ -23,10 +23,20 @@ params:
     type: string
     description: >-
       Custom prompt with {section_text}, {trader_id}, {currency_pair},
-      {disposition}, {flag_count} placeholders. Falls back to the built-in
-      template when empty.
+      {disposition}, {flag_count} placeholders, plus any vars defined
+      under prompt_context.vars and (when mode=dataset|mixed) {dataset}.
+      Cross-dataset refs like {executions.notional.sum} resolve inline.
+      Falls back to the built-in template when empty.
     required: false
     widget: textarea
+  - name: prompt_context
+    type: object
+    description: >-
+      Optional structured slot block: {mode: template|dataset|mixed,
+      vars: {name: ref_expr, ...}, dataset: {ref, format, max_rows,
+      columns}}. Same shape as SECTION_SUMMARY.prompt_context.
+    default: {}
+    required: false
 
 semantics:
   requires: []

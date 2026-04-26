@@ -12,7 +12,7 @@ columns:
     description: True = this row is a hit.
   - name: _signal_score
     type: number
-    description: Strength of the hit, 0–10.
+    description: Strength of the hit, normalised to [0, 1] (same scale as DECISION_RULE.score).
   - name: _signal_reason
     type: string
     description: Human-readable reason string.

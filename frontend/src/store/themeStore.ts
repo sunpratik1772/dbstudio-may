@@ -1,3 +1,12 @@
+/**
+ * Theme (dark/light) — tiny Zustand store + a hook to mirror the
+ * choice onto `<html data-theme>` so CSS variables in globals.css
+ * pick it up. Persisted to localStorage. Default = 'dark'.
+ *
+ * Components: read `useThemeStore((s) => s.theme)` and call
+ * `s.setTheme(...)` / `s.toggle()`. The Topbar's theme switcher is
+ * the only writer in the app today.
+ */
 import { useEffect } from 'react'
 import { create } from 'zustand'
 

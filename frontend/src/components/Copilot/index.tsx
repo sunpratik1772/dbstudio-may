@@ -1,3 +1,20 @@
+/**
+ * Copilot panel — the LLM-driven workflow author / editor.
+ *
+ * Three modes:
+ *   • Generate — type intent, get a brand-new validated workflow.
+ *   • Edit     — describe a change to the current canvas, copilot
+ *                returns a patched DAG. The diff is previewed before
+ *                applying.
+ *   • Explain  — ask questions about the current workflow.
+ *
+ * Streaming: copilot.streamGenerate / streamEdit yield SSE events
+ * (planning → tool_call → patch → done). This component renders them
+ * progressively so the user sees the agent's reasoning instead of
+ * staring at a spinner. Events are typed in `types/index.ts` —
+ * unrecognised event kinds are ignored, not crashed on, so the
+ * backend can add new event types without breaking old clients.
+ */
 import { useState, useRef, useEffect } from 'react'
 import ResizeHandle from '../ResizeHandle'
 import type { LucideIcon } from 'lucide-react'
@@ -14,7 +31,7 @@ import {
   Check,
   X as XIcon,
   ArrowUp,
-  Loader2,
+  MessageSquare,
 } from 'lucide-react'
 import { useWorkflowStore } from '../../store/workflowStore'
 import { api } from '../../services/api'
@@ -53,7 +70,7 @@ interface PhaseState {
   id: string
   phase: CopilotPhase
   label: string
-  status: 'running' | 'done' | 'error'
+  status: 'pending' | 'running' | 'done' | 'error'
   detail?: string
   /** Error codes emitted by the validator on this critic attempt. */
   errorCodes?: string[]
@@ -61,6 +78,31 @@ interface PhaseState {
   approved?: boolean
   /** Descriptions of deterministic fixes applied during an auto_fixing pass. */
   appliedFixes?: string[]
+}
+
+/**
+ * Build the full ghost skeleton of phases the agent is going to walk
+ * through. We render this immediately on send so the user sees the
+ * full plan upfront ("understanding → planning → generating → N
+ * critic passes → finalizing"), with each row lighting up as its
+ * event arrives.
+ */
+function buildPendingPhases(criticIter: number): PhaseState[] {
+  const rows: PhaseState[] = [
+    { id: 'understanding', phase: 'understanding', label: PHASE_LABEL.understanding, status: 'pending' },
+    { id: 'planning', phase: 'planning', label: PHASE_LABEL.planning, status: 'pending' },
+    { id: 'generating', phase: 'generating', label: PHASE_LABEL.generating, status: 'pending' },
+  ]
+  for (let i = 1; i <= Math.max(1, criticIter); i++) {
+    rows.push({
+      id: `critiquing:${i}`,
+      phase: 'critiquing',
+      label: `${PHASE_LABEL.critiquing} · pass ${i}`,
+      status: 'pending',
+    })
+  }
+  rows.push({ id: 'finalizing', phase: 'finalizing', label: PHASE_LABEL.finalizing, status: 'pending' })
+  return rows
 }
 
 function CopilotAvatar({ size = 24 }: { size?: number }) {
@@ -83,34 +125,56 @@ function CopilotAvatar({ size = 24 }: { size?: number }) {
 function PhaseTimeline({ phases }: { phases: PhaseState[] }) {
   if (phases.length === 0) return null
   return (
-    <div className="mb-2 space-y-2">
-      {phases.map((p) => {
+    <div className="mb-3 space-y-1 relative">
+      <div
+        className="font-mono mb-1.5"
+        style={{ fontSize: 9.5, letterSpacing: '0.18em', textTransform: 'uppercase', color: 'var(--text-3)' }}
+      >
+        Pipeline · {phases.length} {phases.length === 1 ? 'stage' : 'stages'}
+      </div>
+      {phases.map((p, idx) => {
+        const isPending = p.status === 'pending'
         const isRunning = p.status === 'running'
         const isError = p.status === 'error'
-        const color = isError ? 'var(--danger)' : p.status === 'done' ? 'var(--success)' : 'var(--accent)'
+        const isDone = p.status === 'done'
+        const color = isError
+          ? 'var(--danger)'
+          : isDone
+            ? 'var(--success)'
+            : isRunning
+              ? 'var(--accent)'
+              : 'var(--text-3)'
         const IconComp = PHASE_ICON[p.phase] ?? Sparkles
+        const last = idx === phases.length - 1
         return (
+          <div key={p.id} className="relative" style={{ opacity: isPending ? 0.55 : 1 }}>
+            {!last && (
+              <span
+                aria-hidden
+                style={{
+                  position: 'absolute', left: 9, top: 22, bottom: -4, width: 1,
+                  background: 'var(--border-soft)',
+                }}
+              />
+            )}
             <div
-              key={p.id}
-              className="flex min-w-0 items-start gap-2 rounded-lg px-2.5 py-2"
+              className="flex items-start gap-2 px-2 py-1.5 rounded-md"
               style={{
-                background: 'color-mix(in srgb, var(--text-0) 4.5%, var(--bg-2))',
-                border: `1.5px solid color-mix(in srgb, ${color} 50%, var(--border))`,
+                background: isPending ? 'transparent' : 'var(--bg-2)',
+                border: `1px solid ${isPending ? 'var(--border-soft)' : `color-mix(in srgb, ${color} 22%, var(--border-soft))`}`,
                 fontSize: 11.5,
-                boxShadow: '0 1px 0 color-mix(in srgb, var(--text-0) 5%, transparent)',
               }}
-            >
+          >
             <div
               className="shrink-0 mt-0.5 w-4 h-4 rounded-full flex items-center justify-center"
               style={{
-                background: `color-mix(in srgb, ${color} 22%, var(--bg-1))`,
-                border: `1.5px solid color-mix(in srgb, ${color} 70%, var(--bg-0))`,
+                background: isPending ? 'transparent' : `color-mix(in srgb, ${color} 15%, transparent)`,
+                border: `1px ${isPending ? 'dashed' : 'solid'} ${color}`,
                 color,
-                boxShadow: 'inset 0 1px 0 color-mix(in srgb, #fff 12%, transparent)',
               }}
             >
-              {isRunning ? (
-                <Loader2 size={10} strokeWidth={2.5} className="animate-spin" style={{ color }} />
+              {isPending ? null : isRunning ? (
+                <span className="w-1.5 h-1.5 rounded-full live-blink" style={{ background: color }} />
               ) : isError ? (
                 <XIcon size={9} strokeWidth={3} />
               ) : (
@@ -118,9 +182,9 @@ function PhaseTimeline({ phases }: { phases: PhaseState[] }) {
               )}
             </div>
             <div className="flex-1 min-w-0">
-              <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5 min-w-0">
-                <IconComp size={11} strokeWidth={2} className="shrink-0" style={{ color: 'var(--text-2)' }} />
-                <span style={{ color: 'var(--text-0)', fontWeight: 600 }}>{p.label}</span>
+              <div className="flex items-center gap-1.5">
+                <IconComp size={11} strokeWidth={2} style={{ color: 'var(--text-2)' }} />
+                <span style={{ color: 'var(--text-0)', fontWeight: 500 }}>{p.label}</span>
                 {p.approved === true && (
                   <span
                     className="num"
@@ -137,21 +201,12 @@ function PhaseTimeline({ phases }: { phases: PhaseState[] }) {
                     VALID
                   </span>
                 )}
-                {p.detail && (
-                  <>
-                    <span className="shrink-0" style={{ color: 'var(--text-3)', fontSize: 11, fontWeight: 400 }} aria-hidden>
-                      —
-                    </span>
-                    <span
-                      className="truncate min-w-0"
-                      style={{ color: 'var(--text-2)', fontSize: 10.5, fontWeight: 400, flex: '1 1 120px' }}
-                      title={p.detail}
-                    >
-                      {p.detail}
-                    </span>
-                  </>
-                )}
               </div>
+              {p.detail && (
+                <div className="truncate mt-0.5" style={{ color: 'var(--text-2)', fontSize: 10.5 }} title={p.detail}>
+                  {p.detail}
+                </div>
+              )}
               {p.errorCodes && p.errorCodes.length > 0 && (
                 <div className="flex flex-wrap gap-1 mt-1">
                   {p.errorCodes.slice(0, 6).map((code, i) => (
@@ -203,6 +258,7 @@ function PhaseTimeline({ phases }: { phases: PhaseState[] }) {
               )}
             </div>
             </div>
+          </div>
         )
       })}
     </div>
@@ -279,47 +335,67 @@ const EXAMPLE_PROMPTS = [
 function MessageBubble({ msg }: { msg: CopilotMessage }) {
   const isUser = msg.role === 'user'
   const isJson = !isUser && msg.content.trim().startsWith('{')
+  const time = msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 
+  // Tight, row-style messages — small radius, monospace timestamp eyebrow,
+  // matching the EntryRow / param row visual language used elsewhere in the
+  // right panel.
   return (
-    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-3`}>
-      {!isUser && <div className="mr-2 mt-0.5"><CopilotAvatar size={24} /></div>}
+    <div className="mb-3">
       <div
-        className={`rounded-xl px-3 py-2 leading-relaxed ${isUser ? 'rounded-br-sm' : 'rounded-bl-sm'}`}
+        className="font-mono mb-1 flex items-center gap-1.5"
+        style={{ fontSize: 9.5, letterSpacing: '0.18em', textTransform: 'uppercase', color: 'var(--text-3)' }}
+      >
+        {isUser ? (
+          <span style={{ color: 'var(--info)' }}>You</span>
+        ) : (
+          <>
+            <Sparkles size={10} strokeWidth={2} style={{ color: 'var(--accent)' }} />
+            <span style={{ color: 'var(--accent)' }}>Copilot</span>
+          </>
+        )}
+        <span style={{ color: 'var(--text-3)' }}>· {time}</span>
+      </div>
+      <div
+        className="rounded-md"
         style={{
           fontSize: 12,
+          padding: '8px 10px',
           background: isUser
-            ? 'color-mix(in srgb, var(--info) 22%, var(--bg-2))'
-            : 'color-mix(in srgb, var(--text-0) 3%, var(--bg-2))',
+            ? 'color-mix(in srgb, var(--info) 8%, var(--bg-2))'
+            : 'var(--bg-2)',
           color: 'var(--text-0)',
-          border: `1px solid ${isUser ? 'color-mix(in srgb, var(--info) 42%, var(--border))' : 'var(--border)'}`,
-          maxWidth: '85%',
+          border: `1px solid ${isUser
+            ? 'color-mix(in srgb, var(--info) 25%, transparent)'
+            : 'var(--border-soft)'}`,
+          lineHeight: 1.55,
         }}
       >
         {isJson ? (
           <pre
-            className="font-mono overflow-x-auto whitespace-pre-wrap break-all"
-            style={{ fontSize: 11, color: 'var(--success)', maxHeight: 300, overflowY: 'auto' }}
+            className="num overflow-x-auto whitespace-pre-wrap break-all"
+            style={{ fontSize: 10.5, color: 'var(--success)', maxHeight: 260, overflowY: 'auto' }}
           >
             {msg.content}
           </pre>
         ) : (
           <p className="whitespace-pre-wrap">{msg.content}</p>
         )}
-        <div className="num mt-1" style={{ color: 'var(--text-3)', fontSize: 10 }}>
-          {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-        </div>
       </div>
     </div>
   )
 }
 
-function TypingIndicator() {
+function TypingDots() {
   return (
-    <div
-      className="flex items-center gap-2 px-3 py-2 rounded-xl rounded-bl-sm"
-      style={{ background: 'var(--bg-2)', border: '1px solid var(--border)' }}
-    >
-      <Loader2 size={14} strokeWidth={2.2} className="animate-spin shrink-0" style={{ color: 'var(--accent)' }} />
+    <div className="flex gap-1 px-3 py-2 rounded-xl rounded-bl-sm" style={{ background: 'var(--bg-2)', border: '1px solid var(--border)' }}>
+      {[0, 1, 2].map((i) => (
+        <div
+          key={i}
+          className="w-1.5 h-1.5 rounded-full animate-bounce"
+          style={{ background: 'var(--accent)', animationDelay: `${i * 150}ms` }}
+        />
+      ))}
     </div>
   )
 }
@@ -343,14 +419,12 @@ export default function Copilot() {
   const [useGenerate, setUseGenerate] = useState(true)
   const [criticIter, setCriticIter] = useState(3)
   const [phases, setPhases] = useState<PhaseState[]>([])
-  const messagesScrollRef = useRef<HTMLDivElement>(null)
+  const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const rootRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    const el = messagesScrollRef.current
-    if (!el) return
-    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [copilotMessages, isLoading, phases])
 
   // "Fix with Copilot" CTAs elsewhere in the app set copilotDraft; we
@@ -372,14 +446,15 @@ export default function Copilot() {
   function handlePhaseEvent(ev: CopilotStreamEvent) {
     setPhases((prev) => {
       const label = ev.label || PHASE_LABEL[ev.phase] || ev.phase
-      // The backend now emits one critic frame per repair attempt,
-      // and one `auto_fixing` frame per deterministic repair pass.
-      // Using `attempt` (when present) as the row key means repeated
-      // runs produce distinct rows rather than stomping over the same
-      // timeline row.
+      // The backend emits one critic frame per repair attempt and one
+      // `auto_fixing` frame per deterministic repair pass. The ghost
+      // skeleton already has critic rows id'd as `critiquing:<n>`; we
+      // line them up by attempt number. Auto-fixing rows are inserted
+      // right after the matching critic row, since they aren't part
+      // of the static plan.
       const rowId =
         ev.phase === 'critiquing'
-          ? `critiquing:${ev.attempt ?? label}`
+          ? `critiquing:${ev.attempt ?? prev.filter((p) => p.phase === 'critiquing').length}`
           : ev.phase === 'auto_fixing'
             ? `auto_fixing:${prev.filter((p) => p.phase === 'auto_fixing').length + 1}`
             : ev.phase
@@ -402,6 +477,26 @@ export default function Copilot() {
       if (existing >= 0) {
         const copy = [...prev]
         copy[existing] = next
+        // When a phase completes, eagerly mark the next still-pending
+        // row as running so users see the baton being passed even if
+        // the backend hasn't yet emitted its `running` frame.
+        if (ev.status === 'done') {
+          for (let i = existing + 1; i < copy.length; i++) {
+            if (copy[i].status === 'pending') {
+              copy[i] = { ...copy[i], status: 'running' }
+              break
+            }
+          }
+        }
+        return copy
+      }
+      // Auto-fix rows aren't in the skeleton — splice in next to the
+      // most recent critic row so they cluster with their cause.
+      if (ev.phase === 'auto_fixing') {
+        const lastCritic = [...prev].reverse().findIndex((p) => p.phase === 'critiquing')
+        const insertAt = lastCritic === -1 ? prev.length : prev.length - lastCritic
+        const copy = [...prev]
+        copy.splice(insertAt, 0, next)
         return copy
       }
       return [...prev, next]
@@ -416,7 +511,9 @@ export default function Copilot() {
     const userMsg: CopilotMessage = { role: 'user', content: msg, timestamp: new Date() }
     addCopilotMessage(userMsg)
     setIsLoading(true)
-    setPhases([])
+    // Seed the timeline with the full ghost plan so the user sees the
+    // whole pipeline upfront. Each row lights up as its event arrives.
+    setPhases(useGenerate ? buildPendingPhases(criticIter) : [])
 
     // Build the edit-mode context. When the canvas has a workflow
     // loaded we always attach it — the backend treats the absence of
@@ -489,7 +586,7 @@ export default function Copilot() {
   return (
     <div
       ref={rootRef}
-      className="flex flex-col relative shrink-0 min-h-0"
+      className="flex flex-col relative shrink-0"
       style={{
         width: copilotWidth,
         background: 'var(--bg-1)',
@@ -506,99 +603,95 @@ export default function Copilot() {
           setCopilotWidth(right - clientX)
         }}
       />
-      {/* Header */}
-      <div className="px-3 py-2.5 border-b shrink-0" style={{ borderColor: 'var(--border)' }}>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2 min-w-0">
-            <CopilotAvatar size={24} />
-            <div className="flex flex-col min-w-0">
-              <span className="display" style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-0)', lineHeight: 1.2 }}>
-                Copilot
-              </span>
-              <span
-                className="font-mono"
-                style={{
-                  fontSize: 9.5,
-                  color: 'var(--text-3)',
-                  letterSpacing: '0.14em',
-                  textTransform: 'uppercase',
-                  marginTop: 1,
-                }}
-              >
-                gemini — plan + chat
-              </span>
-            </div>
+      {/* Header — matches RightPanel/Shell: icon + title + eyebrow + close. */}
+      <div className="px-4 pt-4 pb-3 shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
+        <div className="flex items-center gap-2">
+          <Sparkles size={16} strokeWidth={2} style={{ color: 'var(--accent)' }} />
+          <span style={{ fontFamily: 'Chivo, system-ui, sans-serif', fontSize: 15, fontWeight: 600, color: 'var(--text-0)' }}>Copilot</span>
+          <span className="font-mono" style={{ fontSize: 10, color: 'var(--text-3)', letterSpacing: '0.18em', textTransform: 'uppercase' }}>
+            GEMINI
+          </span>
+          <div className="flex-1" />
+          {/* Chat / Plan tabs aligned right */}
+          <div className="flex items-center gap-1">
+            <SegTab active={!useGenerate} onClick={() => setUseGenerate(false)} icon={<MessageSquare size={11} strokeWidth={2} />}>Chat</SegTab>
+            <SegTab active={useGenerate} onClick={() => setUseGenerate(true)} icon={<ListChecks size={11} strokeWidth={2} />}>Plan</SegTab>
           </div>
           <button
-            onClick={() => { clearCopilotMessages(); api.copilotChat('', true).catch(() => {}) }}
-            className="eyebrow lift"
-            style={{ color: 'var(--text-2)' }}
+            onClick={() => useWorkflowStore.getState().setRightPanelMode(null)}
+            aria-label="Close panel"
+            className="flex items-center justify-center"
+            style={{
+              width: 24, height: 24, borderRadius: 6,
+              background: 'transparent', color: 'var(--text-3)',
+              border: '1px solid var(--border-soft)',
+              cursor: 'pointer',
+            }}
           >
-            Clear
+            <XIcon size={12} strokeWidth={2} />
           </button>
         </div>
-        <p style={{ fontSize: 11.5, color: 'var(--text-2)', marginTop: 6, lineHeight: 1.45 }}>
-          Describe a surveillance scenario and I'll generate a validated workflow.
-        </p>
-      </div>
-
-      {/* Mode toggle */}
-      <div className="px-3 py-2 border-b shrink-0" style={{ borderColor: 'var(--border)' }}>
-        <div className="flex items-center gap-3">
-          <label className="flex items-center gap-1.5 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={useGenerate}
-              onChange={(e) => setUseGenerate(e.target.checked)}
-              className="rounded"
-              style={{ accentColor: 'var(--accent)' }}
-            />
-            <span style={{ fontSize: 11, color: 'var(--text-1)' }}>Generate + Critic</span>
-          </label>
-          {useGenerate && (
-            <div className="flex items-center gap-1.5">
-              <span className="eyebrow" style={{ color: 'var(--text-2)' }}>Iter</span>
-              <select
-                value={criticIter}
-                onChange={(e) => setCriticIter(Number(e.target.value))}
-                className="num rounded px-1.5 py-0.5"
-                style={{
-                  fontSize: 11,
-                  background: 'var(--bg-2)',
-                  color: 'var(--text-0)',
-                  border: '1px solid var(--border)',
-                }}
-              >
-                {[1, 2, 3, 5].map((n) => <option key={n} value={n}>{n}</option>)}
-              </select>
-            </div>
-          )}
+        <div className="mt-2 font-mono" style={{ fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: 'var(--text-3)' }}>
+          {useGenerate ? `PLAN · ${criticIter} CRITIC PASSES` : 'CHAT'}
         </div>
       </div>
 
       {/* Messages */}
-      <div ref={messagesScrollRef} className="flex-1 min-h-0 overflow-y-auto px-3 pt-2 pb-3">
+      <div className="flex-1 overflow-y-auto px-4 py-4">
         {copilotMessages.length === 0 && (
-          <div className="space-y-2">
-            <p className="eyebrow text-center mb-4" style={{ color: 'var(--text-2)' }}>Try an example prompt</p>
-            {EXAMPLE_PROMPTS.map((p, i) => (
-              <button
-                key={i}
-                onClick={() => setInput(p)}
-                className="w-full text-left px-3 py-2 rounded-lg transition-colors leading-relaxed lift"
+          <div className="space-y-5">
+            {useGenerate && (
+              <div
                 style={{
-                  fontSize: 11.5,
+                  padding: '14px 14px',
+                  borderRadius: 10,
                   background: 'var(--bg-2)',
-                  color: 'var(--text-1)',
                   border: '1px solid var(--border)',
-                  lineHeight: 1.45,
                 }}
-                onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-0)' }}
-                onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-1)' }}
               >
-                {p}
-              </button>
-            ))}
+                <div className="font-mono mb-2" style={{ fontSize: 10, color: 'var(--text-3)', letterSpacing: '0.18em', textTransform: 'uppercase' }}>
+                  HOW PLAN MODE WORKS
+                </div>
+                <p style={{ fontSize: 12.5, color: 'var(--text-1)', lineHeight: 1.55 }}>
+                  The agent runs a 6-stage pipeline:{' '}
+                  <span style={{ color: 'var(--text-0)', fontWeight: 600 }}>context → template → plan → validate → repair → score</span>.
+                  Generation is constrained by the node catalog and data schema; it cannot invent types or columns. Scoring is per-rule; hard rules block, soft rules warn.
+                </p>
+              </div>
+            )}
+            <div>
+              <div className="font-mono mb-2 px-1" style={{ fontSize: 10, color: 'var(--text-3)', letterSpacing: '0.18em', textTransform: 'uppercase' }}>
+                PROMPTS
+              </div>
+              <div className="space-y-2">
+                {EXAMPLE_PROMPTS.map((p, i) => (
+                  <button
+                    key={i}
+                    onClick={() => setInput(p)}
+                    className="w-full text-left transition-colors"
+                    style={{
+                      fontSize: 12.5,
+                      padding: '12px 14px',
+                      borderRadius: 10,
+                      background: 'var(--bg-2)',
+                      color: 'var(--text-1)',
+                      border: '1px solid var(--border)',
+                      lineHeight: 1.5,
+                    }}
+                    onMouseEnter={(e) => {
+                      ;(e.currentTarget as HTMLButtonElement).style.color = 'var(--text-0)'
+                      ;(e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--border-strong)'
+                    }}
+                    onMouseLeave={(e) => {
+                      ;(e.currentTarget as HTMLButtonElement).style.color = 'var(--text-1)'
+                      ;(e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--border)'
+                    }}
+                  >
+                    {p}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         )}
 
@@ -611,7 +704,7 @@ export default function Copilot() {
             {isLoading && phases.length === 0 && (
               <div className="flex items-center gap-2 mb-3">
                 <CopilotAvatar size={24} />
-                <TypingIndicator />
+                <TypingDots />
               </div>
             )}
             <PhaseTimeline phases={phases} />
@@ -620,9 +713,10 @@ export default function Copilot() {
         {isLoading && !useGenerate && (
           <div className="flex items-center gap-2 mb-3">
             <CopilotAvatar size={24} />
-            <TypingIndicator />
+            <TypingDots />
           </div>
         )}
+        <div ref={messagesEndRef} />
       </div>
 
       {/* Input */}
@@ -652,7 +746,7 @@ export default function Copilot() {
           if (selected) {
             parts.push(`"this" = ${selected.id} (${selected.type})`)
           }
-          const label = parts.join(' — ')
+          const label = parts.join(' · ')
           const title = hints.length
             ? hints.map((h) => `${(h.kind || 'error').toUpperCase()}${h.node_id ? ' @' + h.node_id : ''}: ${h.message}`).join('\n')
             : selected
@@ -720,9 +814,32 @@ export default function Copilot() {
           </button>
         </div>
         <p className="num mt-2" style={{ fontSize: 10, color: 'var(--text-3)', letterSpacing: '0.02em' }}>
-          ⏎ send — ⇧⏎ newline
+          ⏎ send · ⇧⏎ newline
         </p>
       </div>
     </div>
+  )
+}
+
+function SegTab({ active, onClick, icon, children }: { active: boolean; onClick: () => void; icon: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex items-center gap-1.5"
+      style={{
+        height: 30,
+        padding: '0 12px',
+        borderRadius: 7,
+        fontSize: 12,
+        fontWeight: 500,
+        background: active ? 'var(--text-0)' : 'transparent',
+        color: active ? 'var(--bg-0)' : 'var(--text-2)',
+        border: active ? 'none' : '1px solid var(--border)',
+        cursor: 'pointer',
+      }}
+    >
+      {icon}
+      <span>{children}</span>
+    </button>
   )
 }

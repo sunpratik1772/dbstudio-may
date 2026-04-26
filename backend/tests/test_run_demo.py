@@ -62,8 +62,8 @@ def test_run_demo_return_json_path(client: TestClient) -> None:
     assert body["disposition"] in {"ESCALATE", "REVIEW", "DISMISS"}
     assert body["run_id"] and len(body["run_id"]) == 32
     assert body["download_url"].startswith("/report/")
-    # CSV fixtures + pipeline produce the full dataset set.
-    for expected in ("client_orders", "executions_enriched", "signals", "comms_data", "market_data"):
+    # Demo runs the v2 chassis workflow → these are the canonical dataset names.
+    for expected in ("orders", "executions", "comms", "market", "executions_signals"):
         assert expected in body["datasets"], body["datasets"]
 
 

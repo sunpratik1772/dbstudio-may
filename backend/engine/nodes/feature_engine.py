@@ -1,91 +1,193 @@
-"""Apply explicit feature operations to a DataFrame.
+"""
+FEATURE_ENGINE — one node, many ops. Replaces the urge to add a new
+node every time a scenario needs to bucket time, pivot a side, or
+derive a column.
 
-This replaces legacy enrichment booleans with a small ordered list
-of named operations. The contract is easier to extend: add a new operation
-handler here and document it in the YAML instead of growing one node with more
-flags.
+Config:
+
+    {
+      "input_name":  "executions",
+      "output_name": "executions_features",
+      "ops": [
+        { "op": "window_bucket", "time_col": "ts", "interval_ms": 1000, "out_col": "bucket" },
+        { "op": "time_slice",   "time_col": "ts",
+          "windows": [{name: "before", start: "{context.fr_start}", end: "{context.fr_end}", on_miss: "outside"}],
+          "out_col": "phase" },
+        { "op": "groupby_agg", "by": ["bucket","side"], "aggs": {"qty":"sum","px":"mean"}, "as": "ladder" },
+        { "op": "pivot",       "index": "bucket", "columns": "side", "values": "qty", "as": "ladder_pivot" },
+        { "op": "rolling",     "window": 5, "col": "px", "agg": "mean", "out_col": "px_ma5" },
+        { "op": "derive",      "out_col": "signed_qty", "expr": "qty * (1 if side=='B' else -1)" }
+      ]
+    }
+
+Ops mutate the working DataFrame in place by default; specifying `as`
+publishes the result of that op as a new dataset (so a single
+FEATURE_ENGINE run can emit the ladder pivot AND keep the raw rows).
+
+The final working DataFrame is published to ctx.datasets[output_name].
 """
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, Callable
 
 import pandas as pd
 
 from ..context import RunContext
 from ..node_spec import NodeSpec, _spec_from_yaml
+from ..refs import resolve_template
 
 
-def _rename(df: pd.DataFrame, op: dict) -> pd.DataFrame:
-    mapping = op.get("columns") or op.get("field_renames") or {}
-    return df.rename(columns=mapping) if mapping else df
+# ---------------------------------------------------------------------------
+# Op registry — one function per op. Each takes (df, op_cfg, ctx) and
+# returns (new_df, optional_published_pair). Adding an op = adding one
+# entry. NOT a generic expression engine — only ship ops with a real
+# scenario justifying them.
+# ---------------------------------------------------------------------------
+def _op_window_bucket(df: pd.DataFrame, cfg: dict, ctx: RunContext) -> pd.DataFrame:
+    time_col = cfg["time_col"]
+    interval_ms = int(cfg["interval_ms"])
+    out_col = cfg.get("out_col", "bucket")
+    series = pd.to_datetime(df[time_col], errors="coerce", utc=True)
+    df = df.copy()
+    df[out_col] = (series.astype("int64") // (interval_ms * 1_000_000)).astype("int64")
+    return df
 
 
-def _lifecycle_event(df: pd.DataFrame, op: dict) -> pd.DataFrame:
-    id_col = op.get("id_col", "order_id")
-    status_col = op.get("status_col", "status")
-    time_col = op.get("time_col") or ("order_time" if "order_time" in df.columns else df.columns[0])
-    if id_col not in df.columns or status_col not in df.columns:
-        return df
-    out = df.sort_values([id_col, time_col]).copy()
-    out["_prev_status"] = out.groupby(id_col)[status_col].shift(1)
-    out["_status_changed"] = out[status_col] != out["_prev_status"]
-    out["_lifecycle_event"] = out.apply(
-        lambda r: f"{r['_prev_status']} -> {r[status_col]}"
-        if r["_status_changed"] and pd.notna(r["_prev_status"])
-        else "",
-        axis=1,
-    )
-    return out
+def _op_time_slice(df: pd.DataFrame, cfg: dict, ctx: RunContext) -> pd.DataFrame:
+    time_col = cfg["time_col"]
+    out_col = cfg.get("out_col", "phase")
+    on_miss = cfg.get("on_miss", "outside")
+    windows = cfg.get("windows") or []
+    df = df.copy()
+    series = pd.to_datetime(df[time_col], errors="coerce", utc=True)
+    df[out_col] = on_miss
+    for w in windows:
+        name = w["name"]
+        start = pd.Timestamp(resolve_template(str(w["start"]), ctx), tz="UTC") if w.get("start") else None
+        end = pd.Timestamp(resolve_template(str(w["end"]), ctx), tz="UTC") if w.get("end") else None
+        mask = pd.Series(True, index=df.index)
+        if start is not None:
+            mask &= series >= start
+        if end is not None:
+            mask &= series <= end
+        df.loc[mask, out_col] = name
+    return df
 
 
-def _derive_signed_notional(df: pd.DataFrame, op: dict) -> pd.DataFrame:
-    qty_col = op.get("quantity_col") or next((c for c in ("exec_quantity", "quantity") if c in df.columns), None)
-    price_col = op.get("price_col") or next((c for c in ("exec_price", "limit_price") if c in df.columns), None)
-    side_col = op.get("side_col", "side")
-    output_col = op.get("output_col", "signed_notional")
-    if not (qty_col and price_col and side_col in df.columns):
-        raise ValueError(
-            "FEATURE_ENGINE derive_signed_notional requires a quantity column "
-            "(exec_quantity or quantity), a price column (exec_price or limit_price), and side. "
-            f"Found columns: {list(df.columns)}"
-        )
-    out = df.copy()
-    out[output_col] = out.apply(
-        lambda r: r[qty_col] * r[price_col] * (1 if r[side_col] == "BUY" else -1),
-        axis=1,
-    )
-    return out
+def _op_groupby_agg(df: pd.DataFrame, cfg: dict, ctx: RunContext) -> pd.DataFrame:
+    by = cfg["by"] if isinstance(cfg["by"], list) else [cfg["by"]]
+    aggs = cfg.get("aggs") or {}
+    grouped = df.groupby(by, dropna=False).agg(aggs).reset_index()
+    return grouped
 
 
-_OPS = {
-    "rename": _rename,
-    "lifecycle_event": _lifecycle_event,
-    "derive_signed_notional": _derive_signed_notional,
+def _op_pivot(df: pd.DataFrame, cfg: dict, ctx: RunContext) -> pd.DataFrame:
+    index = cfg["index"]
+    columns = cfg["columns"]
+    values = cfg["values"]
+    aggfunc = cfg.get("aggfunc", "sum")
+    pivot = df.pivot_table(index=index, columns=columns, values=values, aggfunc=aggfunc, fill_value=0)
+    pivot.columns = [str(c) for c in pivot.columns]
+    return pivot.reset_index()
+
+
+def _op_rolling(df: pd.DataFrame, cfg: dict, ctx: RunContext) -> pd.DataFrame:
+    window = int(cfg["window"])
+    col = cfg["col"]
+    agg = cfg.get("agg", "mean")
+    out_col = cfg.get("out_col", f"{col}_roll{window}_{agg}")
+    df = df.copy()
+    rolling = df[col].rolling(window=window, min_periods=1)
+    df[out_col] = getattr(rolling, agg)()
+    return df
+
+
+def _op_derive(df: pd.DataFrame, cfg: dict, ctx: RunContext) -> pd.DataFrame:
+    """Single-column derivation via DataFrame.eval (safe vectorised
+    expression). For per-row Python expressions, use `apply_expr`."""
+    out_col = cfg["out_col"]
+    expr = cfg["expr"]
+    df = df.copy()
+    df[out_col] = df.eval(expr)
+    return df
+
+
+def _op_apply_expr(df: pd.DataFrame, cfg: dict, ctx: RunContext) -> pd.DataFrame:
+    """Per-row Python expression evaluated with the row dict as locals.
+    Use sparingly (slower than `derive`). Useful for branchy logic like
+    `qty * (1 if side=='B' else -1)`."""
+    out_col = cfg["out_col"]
+    expr = cfg["expr"]
+    df = df.copy()
+    df[out_col] = df.apply(lambda row: eval(expr, {"__builtins__": {}}, row.to_dict()), axis=1)  # noqa: S307
+    return df
+
+
+def _op_rename(df: pd.DataFrame, cfg: dict, ctx: RunContext) -> pd.DataFrame:
+    """Rename columns: cfg `mapping: {old_name: new_name}`. Missing
+    source columns are silently ignored — pandas behaviour."""
+    mapping = cfg.get("mapping") or {}
+    return df.rename(columns=mapping)
+
+
+def _op_lifecycle_event(df: pd.DataFrame, cfg: dict, ctx: RunContext) -> pd.DataFrame:
+    """Tag each row with the status transition (`PLACED → FILLED`)
+    that produced it, by grouping rows by `group_by` (e.g. order_id),
+    sorting by `sort_by` (e.g. order_time), and diffing `status_col`
+    within each group. Useful for surveillance lifecycle narratives.
+    """
+    group_by = cfg["group_by"]
+    sort_by = cfg.get("sort_by")
+    status_col = cfg.get("status_col", "status")
+    out_col = cfg.get("out_col", "_lifecycle_event")
+    df = df.copy()
+    sort_cols = [group_by] + ([sort_by] if sort_by and sort_by in df.columns else [])
+    df = df.sort_values(sort_cols)
+    prev = df.groupby(group_by)[status_col].shift(1)
+    df[out_col] = [
+        f"{p} → {c}" if pd.notna(p) and p != c else ""
+        for p, c in zip(prev, df[status_col])
+    ]
+    return df
+
+
+_OPS: dict[str, Callable[..., pd.DataFrame]] = {
+    "window_bucket":    _op_window_bucket,
+    "time_slice":       _op_time_slice,
+    "groupby_agg":      _op_groupby_agg,
+    "pivot":            _op_pivot,
+    "rolling":          _op_rolling,
+    "derive":           _op_derive,
+    "apply_expr":       _op_apply_expr,
+    "rename":           _op_rename,
+    "lifecycle_event":  _op_lifecycle_event,
 }
 
 
 def handle_feature_engine(node: dict, ctx: RunContext) -> None:
     cfg = node.get("config", {})
-    input_name: str = cfg.get("input_name", "execution_data")
-    output_name: str = cfg.get("output_name", input_name)
-    operations: list[dict] = cfg.get("operations", [])
+    input_name: str = cfg.get("input_name") or ""
+    output_name: str = cfg.get("output_name") or input_name
+    ops: list[dict] = cfg.get("ops") or []
 
-    df = ctx.datasets.get(input_name)
-    if df is None:
-        raise KeyError(f"Dataset '{input_name}' not found in context")
+    src = ctx.datasets.get(input_name)
+    if src is None:
+        raise ValueError(f"FEATURE_ENGINE: input dataset '{input_name}' not found")
 
-    out = df.copy()
-    for op in operations:
-        op_name = op.get("op") or op.get("type")
-        handler = _OPS.get(op_name)
-        if handler is None:
-            raise ValueError(f"FEATURE_ENGINE unknown operation '{op_name}'")
-        out = handler(out, op)
+    df = src
+    for op_cfg in ops:
+        op_name = op_cfg.get("op")
+        if op_name not in _OPS:
+            raise ValueError(f"FEATURE_ENGINE: unknown op '{op_name}'")
+        result = _OPS[op_name](df, op_cfg, ctx)
+        publish_as = op_cfg.get("as")
+        if publish_as:
+            ctx.datasets[publish_as] = result
+        else:
+            df = result
 
-    ctx.datasets[output_name] = out
-    src = ctx.dataset_provenance.get(input_name)
-    if src:
-        ctx.dataset_provenance[output_name] = src
+    ctx.datasets[output_name] = df
 
 
 NODE_SPEC: NodeSpec = _spec_from_yaml(Path(__file__).with_suffix(".yaml"), handle_feature_engine)

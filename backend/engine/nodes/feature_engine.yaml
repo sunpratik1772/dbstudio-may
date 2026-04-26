@@ -1,44 +1,76 @@
 type_id: FEATURE_ENGINE
-description: "Apply ordered feature operations to a dataset"
+description: "Compose feature transforms (window, slice, pivot, agg, rolling, derive)"
 
 ui:
-  color: "#6366F1"
+  color: "#0EA5E9"
   icon: SlidersHorizontal
-  config_tags: [output_name]
 
 input_ports:
   - name: dataset
     type: dataframe
-    description: "Any DataFrame referenced by input_name."
+    description: "Source DataFrame referenced by input_name."
 
 output_ports:
   - name: features
     type: dataframe
-    store_at: "ctx.datasets[{output_name}]"
-    description: "Input DataFrame plus columns added or renamed by configured operations."
+    description: >-
+      Final working DataFrame after all chained ops, published as
+      ctx.datasets[output_name]. Ops with an `as` field also publish
+      intermediate datasets under that name.
 
 params:
   - name: input_name
     type: input_ref
-    description: "Source dataset name (an upstream output_name)."
+    description: "Source dataset name."
     required: true
   - name: output_name
     type: string
-    description: "Feature dataset name."
-    required: true
-  - name: operations
+    description: "Target dataset name (defaults to input_name)."
+    required: false
+  - name: ops
     type: array
     description: >-
-      Ordered operations. Supported op values: rename, lifecycle_event,
-      derive_signed_notional.
+      Ordered list of operations applied to the working DataFrame. Each
+      op is {op: <name>, ...op-specific keys, as?: <publish_name>}.
+      Supported ops:
+
+      • window_bucket {time_col, interval_ms, out_col}
+        Floor a timestamp into integer buckets of size interval_ms.
+
+      • time_slice {time_col, out_col, on_miss?, windows: [{name,start,end}]}
+        Label rows with a phase string based on which window they fall in.
+        start/end accept {context.x} or any ref grammar; missing rows get on_miss.
+
+      • groupby_agg {by, aggs: {col: agg, ...}}
+        Standard pandas groupby + agg, returns a flat reset_index frame.
+
+      • pivot {index, columns, values, aggfunc?}
+        DataFrame.pivot_table; column names cast to str; fill_value=0.
+
+      • rolling {window, col, agg, out_col?}
+        Rolling window aggregation (mean/sum/min/max/std/...) with
+        min_periods=1.
+
+      • derive {out_col, expr}
+        Vectorised DataFrame.eval expression (no Python branching).
+
+      • apply_expr {out_col, expr}
+        Per-row Python expression evaluated with the row as locals.
+        Slower; use only when `derive` cannot express the logic.
+
+      • rename {mapping: {old_name: new_name, ...}}
+        Rename columns in place.
+
+      • lifecycle_event {group_by, sort_by?, status_col?, out_col?}
+        Within each group_by partition, label rows with the
+        '<prev_status> → <status>' transition that produced them.
+        Used for order-lifecycle narratives.
     default: []
-    required: false
-    widget: json
+    required: true
 
 semantics:
   requires: []
 
 constraints:
-  - "rename uses {op:'rename', columns:{old_col:new_col}}."
-  - "lifecycle_event adds _prev_status, _status_changed, _lifecycle_event when id/status columns exist."
-  - "derive_signed_notional adds signed_notional using quantity/price/side columns."
+  - "Ops execute in declared order; mid-pipeline `as` publishes intermediate datasets without consuming them."
+  - "apply_expr runs Python eval row-by-row — keep expressions small and side-effect-free."

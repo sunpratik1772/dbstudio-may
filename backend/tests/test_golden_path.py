@@ -24,7 +24,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 
 
-FX_WORKFLOW = Path(__file__).resolve().parents[1] / "workflows" / "fx_fro_workflow.json"
+FX_WORKFLOW = Path(__file__).resolve().parents[1] / "workflows" / "fx_fro_v2_workflow.json"
 
 ALERT = {
     "trader_id": "T1",
@@ -32,6 +32,7 @@ ALERT = {
     "alert_date": "2024-01-01",
     "currency_pair": "EUR/USD",
     "alert_id": "A1",
+    "event_time": "2024-01-01 09:00",
 }
 
 
@@ -61,7 +62,7 @@ class TestGoldenPath:
     def test_disposition_is_valid(self, client, fx_dag):
         r = client.post("/run", json={"dag": fx_dag, "alert_payload": ALERT})
         data = r.json()
-        assert data["disposition"] in {"CLOSE", "REVIEW", "ESCALATE", "SAR"}
+        assert data["disposition"] in {"DISMISS", "REVIEW", "ESCALATE"}
 
     def test_report_written_to_disk(self, client, fx_dag):
         r = client.post("/run", json={"dag": fx_dag, "alert_payload": ALERT})

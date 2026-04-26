@@ -1,38 +1,40 @@
+"""
+SECTION_SUMMARY — compute per-section stats and generate a narrative.
+
+Three modes, selected by the `mode` param:
+
+* templated     — legacy-friendly. Compute stats from `field_bindings`,
+                  pass them text-joined as {stats} in the prompt.
+* fact_pack_llm — compute NAMED facts from `facts`, pass as JSON under
+                  {facts}. After generation, verify each `required_facts`
+                  name's value appears verbatim in the narrative. If any
+                  are missing, retry once with a stricter prompt.
+* event_narrative — order rows, format each via `event_template`, cap at
+                    `max_events`, pass the joined list as {events}.
+
+For richer scenarios use the optional `prompt_context` block (see
+engine/prompt_context.py) which gives you `vars` (cross-dataset refs)
+and a `dataset` block. Anything in prompt_context.vars is exposed under
+its own slot name; the serialized dataset is exposed as `{dataset}`.
+"""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pandas as pd
-from data_sources import get_registry, split_source_ref
 
 from llm import get_default_adapter
 
 from ..context import RunContext
 from ..node_spec import NodeSpec, _spec_from_yaml
-from ..signal_contract import signal_flag_column_name
+from ..prompt_context import build_slots, render_prompt
 
 
-def _column_for_field(field: str, df: pd.DataFrame, source_id: str | None) -> str | None:
-    """Resolve field_bindings field to a column present on df (direct name or semantic)."""
-    if not field or df is None:
-        return None
-    if field in df.columns:
-        return field
-    if source_id:
-        ds_id, source_name = split_source_ref(source_id)
-        ds = get_registry().get(ds_id)
-        if ds is not None:
-            phys = ds.resolve_field(field, source_name)
-            if phys and phys in df.columns:
-                return phys
-    return None
-
-
+# ---------------------------------------------------------------------------
+# LLM seam — monkey-patched in tests
+# ---------------------------------------------------------------------------
 def _llm_narrative(prompt: str) -> str:
-    # Narrative is prose, so we keep some variability (temperature=0.2)
-    # but cap tokens at the value declared in NODE_SPEC constraints.
-    # Errors degrade to a placeholder string — we must never fail the
-    # whole workflow run because Gemini is momentarily unavailable.
     try:
         return get_default_adapter().single_shot(
             prompt,
@@ -43,68 +45,178 @@ def _llm_narrative(prompt: str) -> str:
         return f"[LLM unavailable — {e}]"
 
 
+# ---------------------------------------------------------------------------
+# Mode helpers
+# ---------------------------------------------------------------------------
+def _templated_stats(df: pd.DataFrame | None, field_bindings: list[dict]) -> dict:
+    stats: dict = {}
+    if df is None:
+        return stats
+    stats["row_count"] = len(df)
+    for binding in field_bindings or []:
+        field = binding.get("field", "")
+        agg = binding.get("agg", "count")
+        if field not in df.columns:
+            continue
+        match agg:
+            case "count":   stats[field] = int(df[field].count())
+            case "sum":     stats[field] = float(df[field].sum())
+            case "mean":    stats[field] = round(float(df[field].mean()), 4)
+            case "nunique": stats[field] = int(df[field].nunique())
+            case "max":     stats[field] = str(df[field].max())
+            case "min":     stats[field] = str(df[field].min())
+    if "_signal_flag" in df.columns:
+        stats["signal_hits"] = int(df["_signal_flag"].sum())
+    if "_keyword_hit" in df.columns:
+        stats["comm_keyword_hits"] = int(df["_keyword_hit"].sum())
+    return stats
+
+
+def _compute_fact(df: pd.DataFrame, column: str, agg: str) -> object:
+    """Reducer dispatch for the fact_pack_llm mode."""
+    if df is None or column not in df.columns:
+        return None
+    series = df[column]
+    if agg == "count":         return int(series.count())
+    if agg == "sum":           return float(series.sum())
+    if agg == "mean":          return round(float(series.mean()), 4) if len(series) else 0.0
+    if agg == "nunique":       return int(series.nunique())
+    if agg == "max":           return _py_scalar(series.max())
+    if agg == "min":           return _py_scalar(series.min())
+    if agg == "unique_values": return [_py_scalar(v) for v in series.dropna().unique().tolist()]
+    if agg == "row_count":     return int(len(df))
+    if agg.startswith("count_where_"):
+        token = agg[len("count_where_"):]
+        return int((series.astype(str).str.lower() == token.lower()).sum())
+    return None
+
+
+def _py_scalar(v):
+    if hasattr(v, "item") and not isinstance(v, (str, bytes)):
+        try:
+            return v.item()
+        except (AttributeError, ValueError):
+            return v
+    return v
+
+
+def _pack_facts(df: pd.DataFrame | None, facts_cfg: list[dict]) -> dict:
+    out: dict = {}
+    for entry in facts_cfg or []:
+        name = entry.get("name")
+        col = entry.get("column", "")
+        agg = entry.get("agg", "count")
+        if not name:
+            continue
+        out[name] = _compute_fact(df, col, agg) if df is not None else None
+    return out
+
+
+def _required_missing(facts: dict, required: list[str], narrative: str) -> list[str]:
+    """Return names of required facts whose stringified value is absent
+    from the narrative. Whole-number floats also match their int form."""
+    missing: list[str] = []
+    for name in required or []:
+        if name not in facts:
+            missing.append(name)
+            continue
+        val = facts[name]
+        if val is None:
+            continue
+        needles: list[str] = [str(val)]
+        if isinstance(val, float) and val.is_integer():
+            needles.append(str(int(val)))
+        if all(n and n not in narrative for n in needles):
+            missing.append(name)
+    return missing
+
+
+def _event_lines(df: pd.DataFrame | None, sort_by: str, tmpl: str, cap: int) -> list[str]:
+    if df is None or not tmpl:
+        return []
+    working = df
+    if sort_by and sort_by in df.columns:
+        working = df.sort_values(sort_by)
+    working = working.head(max(0, int(cap or 0)))
+    from ..prompt_context import SafeMap  # local import to avoid name-shadow
+    lines: list[str] = []
+    for row in working.to_dict(orient="records"):
+        try:
+            lines.append(tmpl.format_map(SafeMap(row)))
+        except Exception:
+            continue
+    return lines
+
+
+# ---------------------------------------------------------------------------
+# Handler
+# ---------------------------------------------------------------------------
 def handle_section_summary(node: dict, ctx: RunContext) -> None:
     cfg = node.get("config", {})
     section_name: str = cfg.get("section_name", "section")
-    input_name: str = cfg.get("input_name", "execution_data")
-    field_bindings: list[dict] = cfg.get("field_bindings", [])
+    input_name: str = cfg.get("input_name", "trade_data")
+    mode: str = (cfg.get("mode") or "templated").lower()
     prompt_template: str = cfg.get(
         "llm_prompt_template",
         "Summarise this surveillance section for {section}:\n{stats}",
     )
 
     df = ctx.datasets.get(input_name)
+
+    # Common slots available to every mode
+    base_slots = {
+        "section": section_name,
+        "disposition": ctx.get("disposition", "REVIEW"),
+        "trader_id": ctx.get("trader_id", ""),
+        "currency_pair": ctx.get("currency_pair", ""),
+    }
+    # User-defined cross-dataset slots from the prompt_context block
+    base_slots.update(build_slots(cfg.get("prompt_context"), ctx))
+
     stats: dict = {}
+    narrative: str = ""
 
-    if df is not None:
-        stats["row_count"] = len(df)
-        prov = ctx.dataset_provenance.get(input_name)
-        for binding in field_bindings:
-            field: str = binding.get("field", "")
-            agg: str = binding.get("agg", "count")
-            col = _column_for_field(field, df, prov)
-            if col is None:
-                continue
-            if agg == "count":
-                stats[field] = int(df[col].count())
-            elif agg == "sum":
-                stats[field] = float(df[col].sum())
-            elif agg == "mean":
-                stats[field] = round(float(df[col].mean()), 4)
-            elif agg == "nunique":
-                stats[field] = int(df[col].nunique())
-            elif agg == "max":
-                stats[field] = str(df[col].max())
-            elif agg == "min":
-                stats[field] = str(df[col].min())
-        _sf = signal_flag_column_name()
-        if _sf in df.columns:
-            stats["signal_hits"] = int(df[_sf].sum())
-        if "_keyword_hit" in df.columns:
-            stats["comm_keyword_hits"] = int(df["_keyword_hit"].sum())
+    if mode == "fact_pack_llm":
+        facts = _pack_facts(df, cfg.get("facts") or [])
+        stats = {"row_count": int(len(df)) if df is not None else 0, **facts}
+        prompt = render_prompt(prompt_template, ctx, **base_slots,
+                               facts=json.dumps(facts, default=str, indent=2))
+        narrative = _llm_narrative(prompt)
 
-    stats_text = "\n".join(f"  • {k}: {v}" for k, v in stats.items())
+        required = list(cfg.get("required_facts") or [])
+        missing = _required_missing(facts, required, narrative)
+        if missing:
+            retry = prompt + (
+                "\n\nYour previous response omitted these required facts: "
+                + ", ".join(missing)
+                + ". Rewrite the narrative so every required fact value "
+                "appears verbatim in the text."
+            )
+            narrative = _llm_narrative(retry)
 
-    # Two-pass render to tolerate LLM-authored prompts that mix {context.xxx} placeholders
-    # with the well-known {stats}/{section}/… slots.
-    rendered = ctx.inject_template(prompt_template)
+    elif mode == "event_narrative":
+        sort_by = cfg.get("sort_by") or ""
+        event_tmpl = cfg.get("event_template") or ""
+        max_events = int(cfg.get("max_events") or 40)
+        lines = _event_lines(df, sort_by, event_tmpl, max_events)
+        stats = {
+            "row_count": int(len(df)) if df is not None else 0,
+            "event_count": len(lines),
+        }
+        events_block = "\n".join(f"  • {ln}" for ln in lines)
+        prompt = render_prompt(prompt_template, ctx, **base_slots, events=events_block)
+        narrative = _llm_narrative(prompt)
 
-    class _SafeMap(dict):
-        def __missing__(self, key):  # leave unknown placeholders as-is rather than crash
-            return "{" + key + "}"
-
-    prompt = rendered.format_map(_SafeMap(
-        stats=stats_text,
-        section=section_name,
-        disposition=ctx.get("disposition", "REVIEW"),
-        trader_id=ctx.get("trader_id", ""),
-        currency_pair=ctx.get("currency_pair", ""),
-    ))
+    else:  # templated
+        stats = _templated_stats(df, cfg.get("field_bindings") or [])
+        stats_text = "\n".join(f"  • {k}: {v}" for k, v in stats.items())
+        prompt = render_prompt(prompt_template, ctx, **base_slots, stats=stats_text)
+        narrative = _llm_narrative(prompt)
 
     ctx.sections[section_name] = {
         "name": section_name,
         "stats": stats,
-        "narrative": _llm_narrative(prompt),
+        "narrative": narrative,
         "dataset": input_name,
     }
 

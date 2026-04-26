@@ -1,6 +1,19 @@
+/**
+ * Visual representation of a single node on the canvas.
+ *
+ * Pulls colour/icon/category from the generated NODE_UI registry so
+ * adding a new backend node type only means regenerating
+ * `src/nodes/generated.ts` — no edits here. React.memo wraps the
+ * component because React Flow re-renders on every drag frame; without
+ * it a 30-node DAG drops below 60fps.
+ *
+ * Live run state (running / ok / error pulse) comes from
+ * `useNodeRunStatus(id)`, which subscribes to SSE events the backend
+ * pushes during /run/stream — so the graph animates as a workflow runs.
+ */
 import { memo } from 'react'
 import { Handle, Position, type NodeProps } from 'reactflow'
-import { getNodeMeta, type NodeType, type NodeUIMeta } from '../../nodes'
+import { getNodeMeta, getNodeDisplayName, type NodeType, type NodeUIMeta } from '../../nodes'
 import { useWorkflowStore } from '../../store/workflowStore'
 import { useNodeRunStatus } from '../../store/useNodeRunStatus'
 
@@ -67,10 +80,13 @@ export const CustomNode = memo(({ id, data }: NodeProps<NodeData>) => {
 
   return (
     <div
-      onClick={() => selectNode(id)}
+      onClick={() => {
+        selectNode(id)
+        useWorkflowStore.getState().setRightPanelMode('config')
+      }}
       className={`relative cursor-pointer lift ${isRunning ? 'run-ring' : ''}`}
       style={{
-        width: 220,
+        width: 260,
         borderRadius: 10,
         background: isRunning
           ? 'linear-gradient(180deg, color-mix(in srgb, var(--running) 8%, var(--bg-node-elev)) 0%, var(--bg-node) 100%)'
@@ -116,7 +132,7 @@ export const CustomNode = memo(({ id, data }: NodeProps<NodeData>) => {
             className="eyebrow truncate"
             style={{ color: meta.color, letterSpacing: '0.14em', fontSize: 9.5 }}
           >
-            {data.nodeType.replace(/_/g, ' ')}
+            {getNodeDisplayName(data.nodeType)}
           </div>
           <div
             className="truncate"

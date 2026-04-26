@@ -34,8 +34,12 @@ params:
   - name: rules
     type: array
     description: >-
-      Array of {condition: string (pandas eval expression),
-      colour: string (hex #RRGGBB), label: string}.
+      Array of {condition, colour, label}. `condition` is a
+      pandas.DataFrame.eval expression evaluated against the target
+      dataset's rows. The condition may include `{ref}` placeholders
+      that resolve to SCALAR values via the cross-dataset ref grammar
+      BEFORE pandas eval — e.g. `notional > {context.peak_threshold}`,
+      `bucket == {ladder.peak_bucket.first}`. `colour` is hex #RRGGBB.
     default: []
     required: false
 
@@ -43,6 +47,7 @@ semantics:
   requires: []
 
 constraints:
-  - "Conditions are evaluated with pandas DataFrame.eval()."
+  - "Conditions are evaluated with pandas DataFrame.eval after `{ref}` resolution."
   - "Rules are applied in order — last matching rule wins."
   - "Rows with no matching rule get colour #FFFFFF and empty label."
+  - "Buggy rules (unresolved refs, syntax errors, missing columns) are skipped with a warning. The run continues."

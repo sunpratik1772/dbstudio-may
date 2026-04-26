@@ -24,15 +24,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from .collector_source import COLLECTOR_TYPE_TO_SOURCE_ID, collector_source_ref
 from .dag_runner import _edge_endpoints, topological_sort
-from .node_type_ids import (
-    ALERT_TRIGGER,
-    FEATURE_ENGINE,
-    REPORT_OUTPUT,
-    SECTION_SUMMARY,
-    SIGNAL_CALCULATOR,
-)
 from .hard_rules import run_hard_rules
 from .ports import ParamType
 from .registry import NODE_SPECS, NodeSpec
@@ -162,6 +154,12 @@ def validate_dag(dag: dict) -> ValidationResult:
     # not an edit to this file.
     run_hard_rules(nodes_by_id, dag, result)
 
+    # --- MAP sub-workflow: validate nested DAGs with the same rules,
+    # minus the top-level topology check (a sub-workflow has no
+    # ALERT_TRIGGER / REPORT_OUTPUT). Issues are re-scoped under the
+    # parent MAP node's id so the UI can locate them.
+    _validate_map_sub_workflows(nodes_by_id, result)
+
     return result
 
 
@@ -263,7 +261,7 @@ def _validate_topology(
             incoming[dst] += 1
 
     # Exactly one ALERT_TRIGGER, first in the graph, id 'n01'.
-    alert_triggers = [nid for nid, n in nodes_by_id.items() if n.get("type") == ALERT_TRIGGER]
+    alert_triggers = [nid for nid, n in nodes_by_id.items() if n.get("type") == "ALERT_TRIGGER"]
     if not alert_triggers:
         result.add(_VC.NO_ENTRY, "Workflow must contain an ALERT_TRIGGER node.")
     elif len(alert_triggers) > 1:
@@ -288,7 +286,7 @@ def _validate_topology(
             )
 
     # At least one REPORT_OUTPUT at the exit.
-    report_nodes = [nid for nid, n in nodes_by_id.items() if n.get("type") == REPORT_OUTPUT]
+    report_nodes = [nid for nid, n in nodes_by_id.items() if n.get("type") == "REPORT_OUTPUT"]
     if not report_nodes:
         result.add(
             _VC.NO_EXIT,
@@ -483,17 +481,25 @@ def _validate_wiring(
         if not input_name:
             continue
 
-        # Collect all output_names produced by ancestors.
+        # Collect all output_names produced by ancestors. Some collectors
+        # publish auxiliary datasets too (e.g. COMMS_COLLECTOR with
+        # emit_hits_only=true also publishes f"{output_name}_hits").
         produced: list[tuple[str, str]] = []
         for pid in preds[nid]:
+            ptype = nodes_by_id[pid].get("type")
             pcfg = nodes_by_id[pid].get("config") or {}
-            if isinstance(pcfg, dict) and pcfg.get("output_name"):
-                produced.append((pid, pcfg["output_name"]))
+            if not isinstance(pcfg, dict):
+                continue
+            base = pcfg.get("output_name")
+            if base:
+                produced.append((pid, base))
+            if ptype == "COMMS_COLLECTOR" and base and pcfg.get("emit_hits_only"):
+                produced.append((pid, f"{base}_hits"))
 
         produced_names = {name for _, name in produced}
-        # Some upstream nodes (like FEATURE_ENGINE) pass through a
-        # dataset under the same name — so also accept cases where the
-        # named dataset matches *any* ancestor's output.
+        # Some upstream nodes pass through a dataset under the same
+        # name — so also accept cases where the named dataset matches
+        # *any* ancestor's output.
         if input_name not in produced_names:
             hint = (
                 f" Upstream produces: {sorted(produced_names)}."
@@ -512,120 +518,138 @@ def _validate_wiring(
 # ---------------------------------------------------------------------------
 # Field-binding column validation
 # ---------------------------------------------------------------------------
-# Collector → data source id: single map in `collector_source` (runtime + validator).
-# Transformers (FEATURE_ENGINE, SIGNAL_CALCULATOR) are followed backward from
-# `SECTION_SUMMARY.input_name` to recover the same base, plus well-known extras.
-_SIGNAL_EXTRAS: frozenset[str] = frozenset(
-    {
-        "_signal_flag",
-        "_signal_score",
-        "_signal_reason",
-        "_signal_type",
-        "_signal_window",
-    }
-)
-_NORMALISE_EXTRAS: frozenset[str] = frozenset(
-    {
-        "signed_notional",
-        "_prev_status",
-        "_status_changed",
-        "_lifecycle_event",
-    }
-)
-
-
-def _producing_node_for_output(
-    output_name: str, nodes_by_id: dict[str, dict]
-) -> dict[str, Any] | None:
-    for n in nodes_by_id.values():
-        if (n.get("config") or {}).get("output_name") == output_name:
-            return n
-    return None
-
-
-def _trace_dataset_to_registry(
-    dataset_name: str,
-    nodes_by_id: dict[str, dict],
-    reg: Any,
-) -> tuple[Any, str | None, set[str]]:
-    """Walk from a table name to the base :class:`DataSource` and extras."""
-    n = _producing_node_for_output(dataset_name, nodes_by_id)
-    if n is None:
-        return (None, None, set())
-    t = n.get("type", "")
-    cfg = n.get("config") or {}
-    if t in COLLECTOR_TYPE_TO_SOURCE_ID:
-        source_ref = collector_source_ref(t, cfg)
-        return (reg.get(source_ref), source_ref, set())
-    if t == SIGNAL_CALCULATOR:
-        prev = cfg.get("input_name")
-        if not prev or not isinstance(prev, str):
-            return (None, None, set())
-        ds, source_ref, ex = _trace_dataset_to_registry(prev, nodes_by_id, reg)
-        return (ds, source_ref, ex | set(_SIGNAL_EXTRAS))
-    if t == FEATURE_ENGINE:
-        prev = cfg.get("input_name")
-        if not prev or not isinstance(prev, str):
-            return (None, None, set())
-        ds, source_ref, ex = _trace_dataset_to_registry(prev, nodes_by_id, reg)
-        return (ds, source_ref, ex | set(_NORMALISE_EXTRAS))
-    return (None, None, set())
-
-
-def _field_resolves(
-    field: str,
-    ds: Any,
-    source_ref: str | None,
-    extra_cols: set[str],
-) -> bool:
-    if field in extra_cols:
-        return True
-    source_name = None
-    if source_ref and ":" in source_ref:
-        _, source_name = source_ref.split(":", 1)
-    if ds is not None and ds.resolve_field(field, source_name) is not None:
-        return True
-    return False
+# Maps the node type that *produces* a dataset to its DataSource ID in the
+# registry.  Only collector nodes are listed because transformers (NORMALISE_
+# ENRICH, SIGNAL_CALCULATOR) pass the dataset through under the same name —
+# the base schema is still the collector's schema plus appended columns.
+_COLLECTOR_SOURCE: dict[str, str] = {
+    "TRADE_DATA_COLLECTOR": "trades",
+    "ORDER_COLLECTOR": "orders",
+    "MARKET_DATA_COLLECTOR": "market",
+    "COMMS_COLLECTOR": "comms",
+    "SIGNAL_CALCULATOR": "signals",
+}
 
 
 def _validate_field_bindings(
     nodes_by_id: dict[str, dict],
     result: ValidationResult,
 ) -> None:
-    """Error when a SECTION_SUMMARY field name is not a registry column/semantic
-    (for the traced base data source) nor a well-known extra from upstream
-    transformers. Datasets that do not trace to a collector are skipped.
+    """Warn when a SECTION_SUMMARY field_bindings entry names a column that
+    doesn't exist in the resolved DataSource.
+
+    The check is intentionally a *warning* (not an error) because:
+      * FEATURE_ENGINE / SIGNAL_CALCULATOR can add columns (e.g.
+        signed_notional, _signal_*) that aren't in the base registry entry.
+      * SIGNAL_CALCULATOR appends 5 _signal_* columns to any input dataset.
+      * We only resolve datasets that trace directly to a collector node —
+        if the lineage is ambiguous we skip silently to avoid false positives.
     """
     from data_sources import get_registry
     reg = get_registry()
 
+    # Build output_name → DataSource from collector nodes only.
+    output_to_source: dict[str, Any] = {}
+    for node in nodes_by_id.values():
+        source_id = _COLLECTOR_SOURCE.get(node.get("type", ""))
+        if not source_id:
+            continue
+        ds = reg.get(source_id)
+        if ds is None:
+            continue
+        output_name = (node.get("config") or {}).get("output_name")
+        if output_name:
+            output_to_source[output_name] = ds
+
+    # Check field_bindings on every SECTION_SUMMARY node.
     for nid, node in nodes_by_id.items():
-        if node.get("type") != SECTION_SUMMARY:
+        if node.get("type") != "SECTION_SUMMARY":
             continue
         cfg = node.get("config") or {}
         input_name = cfg.get("input_name")
-        if not input_name or not isinstance(input_name, str):
-            continue
-        ds, source_ref, extras = _trace_dataset_to_registry(input_name, nodes_by_id, reg)
+        ds = output_to_source.get(input_name) if input_name else None
         if ds is None:
-            continue
+            continue  # can't resolve source — skip rather than false-positive
+
+        known = set(ds.column_names())
         for i, binding in enumerate(cfg.get("field_bindings") or []):
             if not isinstance(binding, dict):
                 continue
             field = binding.get("field")
-            if not field:
-                continue
-            if not _field_resolves(field, ds, source_ref, extras):
+            if field and field not in known:
                 result.add(
                     _VC.UNKNOWN_COLUMN,
-                    f"Node '{nid}' field_bindings[{i}].field='{field}' is not a column, "
-                    f"registered semantic, or known transformer field for the traced source "
-                    f"(`{source_ref or ds.id}`). Allowed names include registry columns, semantic tags, and "
-                    f"extras: {sorted(extras)}.",
-                    severity="error",
+                    f"Node '{nid}' field_bindings[{i}].field='{field}' is not a known "
+                    f"column of '{ds.id}'. Known: {sorted(known)}.",
+                    severity="warning",
                     node_id=nid,
                     field=f"config.field_bindings[{i}].field",
                 )
+
+
+# ---------------------------------------------------------------------------
+# MAP sub-workflow recursion
+# ---------------------------------------------------------------------------
+def _validate_map_sub_workflows(
+    nodes_by_id: dict[str, dict], result: ValidationResult
+) -> None:
+    """Recursively validate every MAP node's inline sub_workflow.
+
+    The inner DAG is a bounded scenario: its own nodes run once per
+    iteration, it has no ALERT_TRIGGER (the iteration key is injected
+    by MAP itself), and no REPORT_OUTPUT (reports are emitted by the
+    parent workflow). We skip the `_validate_topology` pass and every
+    other check still applies. Issues are prefixed with the MAP node's
+    id so the UI can point to the right place.
+    """
+    for parent_id, parent in nodes_by_id.items():
+        if parent.get("type") != "MAP":
+            continue
+        sub = (parent.get("config") or {}).get("sub_workflow")
+        if not isinstance(sub, dict):
+            continue  # shape was already flagged in _validate_node_config
+        sub_nodes = sub.get("nodes") or []
+        if not isinstance(sub_nodes, list) or not sub_nodes:
+            result.add(
+                _VC.EMPTY_WORKFLOW,
+                f"MAP node '{parent_id}' sub_workflow has no nodes.",
+                node_id=parent_id,
+                field="config.sub_workflow.nodes",
+            )
+            continue
+
+        sub_by_id = {n["id"]: n for n in sub_nodes if isinstance(n, dict) and "id" in n}
+        sub_edges = sub.get("edges") or []
+
+        # Structural: each node registered, edges endpoints valid,
+        # acyclic. Reuse the same helpers so error codes stay consistent.
+        local = ValidationResult()
+        _validate_nodes_registered(sub_by_id, local)
+        _validate_edges(sub_edges, sub_by_id, local)
+        if local.valid:
+            _validate_acyclic(sub_by_id, sub_edges, local)
+        if local.valid:
+            for nid, n in sub_by_id.items():
+                _validate_node_config(n, local)
+            # Wiring (input_name → upstream output_name) is skipped
+            # inside a sub-workflow: MAP aliases a parent dataset into
+            # the child ctx via iteration_dataset_alias, so the inner
+            # nodes legitimately reference names that no sub-workflow
+            # node produces. The parent DAG's wiring check still runs.
+            _validate_field_bindings(sub_by_id, local)
+            run_hard_rules(sub_by_id, {"nodes": sub_nodes, "edges": sub_edges}, local)
+            # Recurse one more level for nested MAPs.
+            _validate_map_sub_workflows(sub_by_id, local)
+
+        # Re-scope sub-workflow issues under the parent MAP node.
+        for issue in local.issues:
+            result.add(
+                issue.code,
+                f"[MAP '{parent_id}' sub_workflow] {issue.message}",
+                severity=issue.severity,
+                node_id=parent_id,
+                field="config.sub_workflow" if not issue.field else f"config.sub_workflow.{issue.field}",
+            )
 
 
 # ---------------------------------------------------------------------------

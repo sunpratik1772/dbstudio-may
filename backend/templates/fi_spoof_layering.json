@@ -1,0 +1,315 @@
+{
+  "name": "fi_spoof_layering",
+  "description": "Fixed-income spoof / layering chassis: nested MAP \u2014 outer over spoof instances (venue), inner over book \u2014 using only Phase 1-5 primitives.",
+  "matches": {
+    "scenarios": [
+      "spoofing",
+      "layering",
+      "fisl",
+      "spoof"
+    ],
+    "datasets": [
+      "orders"
+    ],
+    "semantics": [
+      "trader",
+      "time"
+    ]
+  },
+  "parameters": [
+    {
+      "name": "trader_id",
+      "type": "string",
+      "required": true,
+      "description": "Trader under review."
+    },
+    {
+      "name": "event_time",
+      "type": "string",
+      "required": true,
+      "description": "Reference timestamp the alert window centres on."
+    },
+    {
+      "name": "pre_minutes",
+      "type": "integer",
+      "required": false,
+      "default": 15,
+      "description": "Pre-event lookback (minutes)."
+    },
+    {
+      "name": "post_minutes",
+      "type": "integer",
+      "required": false,
+      "default": 15,
+      "description": "Post-event lookahead (minutes)."
+    }
+  ],
+  "skeleton": {
+    "schema_version": "1.0",
+    "workflow_id": "fisl_v1",
+    "name": "Fixed Income Spoof / Layering (FISL) \u2014 nested MAP proof",
+    "version": "1.0",
+    "description": "FISL scenario built entirely on Phase 1-5 chassis primitives. Nested MAP pattern: outer fan-out over spoof instances (instrument), inner fan-out over books. Demonstrates cross-scenario portability \u2014 zero new node code, only declarative wiring.",
+    "nodes": [
+      {
+        "id": "n01",
+        "type": "ALERT_TRIGGER",
+        "label": "Alert Trigger",
+        "config": {
+          "alert_fields": {
+            "trader_id": "string",
+            "alert_date": "date",
+            "alert_id": "string",
+            "event_time": "string"
+          }
+        }
+      },
+      {
+        "id": "n02",
+        "type": "TIME_WINDOW",
+        "label": "Alert Window",
+        "config": {
+          "event_time_key": "event_time",
+          "pre_minutes": 15,
+          "post_minutes": 15,
+          "output_name": "window"
+        }
+      },
+      {
+        "id": "n03",
+        "type": "ORDER_COLLECTOR",
+        "label": "Collect Orders",
+        "config": {
+          "query_template": "trader_id:{context.trader_id}",
+          "output_name": "orders",
+          "window_key": "window"
+        }
+      },
+      {
+        "id": "n04",
+        "type": "GROUP_BY",
+        "label": "Partition by Spoof Instance (venue)",
+        "config": {
+          "input_name": "orders",
+          "group_by_column": "venue",
+          "output_prefix": "orders_by_venue",
+          "keys_output_name": "venue_keys",
+          "order": "sort"
+        }
+      },
+      {
+        "id": "n05",
+        "type": "MAP",
+        "label": "Per-Instance Analysis (outer)",
+        "config": {
+          "keys_key": "venue_keys",
+          "iteration_ctx_key": "current_venue",
+          "dataset_prefix": "orders_by_venue",
+          "iteration_dataset_alias": "orders",
+          "output_name": "per_instrument",
+          "collect_values": [
+            "per_book",
+            "instance_qty_total"
+          ],
+          "collect_datasets": [
+            "orders"
+          ],
+          "sub_workflow": {
+            "nodes": [
+              {
+                "id": "s1",
+                "type": "GROUP_BY",
+                "label": "Partition by Book (inner)",
+                "config": {
+                  "input_name": "orders",
+                  "group_by_column": "book",
+                  "output_prefix": "orders_by_book",
+                  "keys_output_name": "book_keys",
+                  "order": "sort"
+                }
+              },
+              {
+                "id": "s2",
+                "type": "MAP",
+                "label": "Per-Book Analysis (inner)",
+                "config": {
+                  "keys_key": "book_keys",
+                  "iteration_ctx_key": "current_book",
+                  "dataset_prefix": "orders_by_book",
+                  "iteration_dataset_alias": "orders",
+                  "output_name": "per_book",
+                  "collect_values": [
+                    "book_qty",
+                    "book_order_count"
+                  ],
+                  "collect_datasets": [],
+                  "sub_workflow": {
+                    "nodes": [
+                      {
+                        "id": "t1",
+                        "type": "EXTRACT_SCALAR",
+                        "label": "Book qty",
+                        "config": {
+                          "input_name": "orders",
+                          "column": "quantity",
+                          "reducer": "sum",
+                          "output_name": "book_qty"
+                        }
+                      },
+                      {
+                        "id": "t2",
+                        "type": "EXTRACT_SCALAR",
+                        "label": "Book order count",
+                        "config": {
+                          "input_name": "orders",
+                          "column": "order_id",
+                          "reducer": "count",
+                          "output_name": "book_order_count"
+                        }
+                      }
+                    ],
+                    "edges": [
+                      {
+                        "from": "t1",
+                        "to": "t2"
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "id": "s3",
+                "type": "EXTRACT_SCALAR",
+                "label": "Instance qty total",
+                "config": {
+                  "input_name": "orders",
+                  "column": "quantity",
+                  "reducer": "sum",
+                  "output_name": "instance_qty_total"
+                }
+              }
+            ],
+            "edges": [
+              {
+                "from": "s1",
+                "to": "s2"
+              },
+              {
+                "from": "s1",
+                "to": "s3"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "n06",
+        "type": "SECTION_SUMMARY",
+        "label": "Orders Fact Pack",
+        "config": {
+          "section_name": "orders_overview",
+          "input_name": "orders",
+          "mode": "fact_pack_llm",
+          "facts": [
+            {
+              "name": "order_count",
+              "column": "order_id",
+              "agg": "count"
+            },
+            {
+              "name": "total_qty",
+              "column": "quantity",
+              "agg": "sum"
+            },
+            {
+              "name": "instruments",
+              "column": "instrument",
+              "agg": "unique_values"
+            },
+            {
+              "name": "books",
+              "column": "book",
+              "agg": "unique_values"
+            },
+            {
+              "name": "cancelled_count",
+              "column": "status",
+              "agg": "count_where_cancelled"
+            }
+          ],
+          "required_facts": [
+            "order_count",
+            "cancelled_count"
+          ],
+          "llm_prompt_template": "You are a fixed-income surveillance analyst.\nTrader: {trader_id}\nFacts (JSON):\n{facts}\n\nWrite a tight 2-paragraph layering / spoofing analysis referencing every fact verbatim."
+        }
+      },
+      {
+        "id": "n07",
+        "type": "CONSOLIDATED_SUMMARY",
+        "label": "Executive Summary",
+        "config": {}
+      },
+      {
+        "id": "n08",
+        "type": "REPORT_OUTPUT",
+        "label": "Generate Excel Report",
+        "config": {
+          "output_path": "output/fisl_report.xlsx",
+          "tabs": [
+            {
+              "name": "All Orders",
+              "dataset": "orders",
+              "include_highlights": false
+            },
+            {
+              "expand_from": "{context.per_instrument}",
+              "as": "key",
+              "name": "Venue {key}",
+              "dataset": "per_instrument_{key}_orders",
+              "include_highlights": false
+            }
+          ]
+        }
+      }
+    ],
+    "edges": [
+      {
+        "from": "n01",
+        "to": "n02"
+      },
+      {
+        "from": "n02",
+        "to": "n03"
+      },
+      {
+        "from": "n03",
+        "to": "n04"
+      },
+      {
+        "from": "n04",
+        "to": "n05"
+      },
+      {
+        "from": "n03",
+        "to": "n06"
+      },
+      {
+        "from": "n05",
+        "to": "n07"
+      },
+      {
+        "from": "n06",
+        "to": "n07"
+      },
+      {
+        "from": "n05",
+        "to": "n08"
+      },
+      {
+        "from": "n07",
+        "to": "n08"
+      }
+    ]
+  }
+}

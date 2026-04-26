@@ -1,3 +1,30 @@
+/**
+ * The single Zustand store that owns the workflow editor's runtime state.
+ *
+ * Anything that needs to be shared across panels (Topbar, Canvas,
+ * NodeConfig, Copilot, RightPanel) lives here. State is split into
+ * cohesive slices — read the section banners (PANE-SIZE PERSISTENCE,
+ * COPILOT, RUN STREAM, etc.) to find the right slice quickly.
+ *
+ * Architectural notes for newcomers:
+ *
+ *   • The store is mutated through *actions* declared on the same
+ *     object — `setWorkflow`, `addNode`, `updateNode`, etc. Components
+ *     never mutate state directly; that keeps undo/redo and selectors
+ *     trivial.
+ *   • Pane sizes persist to localStorage so a reload doesn't reset
+ *     the user's layout. The clamping helpers stop bad values
+ *     (NaN / negative) from sneaking in across versions.
+ *   • Run state is kept here rather than in a separate hook because
+ *     SSE events arrive from the backend out-of-band (no React event)
+ *     — funnelling them through a Zustand action means every panel
+ *     re-renders consistently.
+ *   • Copilot state is also here so the right-panel chat survives
+ *     navigation between workflows.
+ *
+ * Tip: when you grep for "where does X come from?", search the store
+ * first. ~95% of cross-component state is here.
+ */
 import { create } from 'zustand'
 import type {
   Workflow,
@@ -9,6 +36,7 @@ import type {
   RunWorkflowStreamEvent,
   ValidationIssue,
 } from '../types'
+import { getNodeDisplayName } from '../nodes'
 
 /** Auto-generate a new unique node id, honouring the "n01", "n02" scheme used by existing workflows. */
 function _nextNodeId(existing: WorkflowNode[]): string {
@@ -20,10 +48,7 @@ function _nextNodeId(existing: WorkflowNode[]): string {
 
 /** Human-friendly default label for a freshly-dropped node. */
 function _defaultLabel(type: NodeType, existing: WorkflowNode[]): string {
-  const base = type
-    .split('_')
-    .map((t) => t.charAt(0) + t.slice(1).toLowerCase())
-    .join(' ')
+  const base = getNodeDisplayName(type)
   const sameType = existing.filter((n) => n.type === type).length
   return sameType > 0 ? `${base} ${sameType + 1}` : base
 }
@@ -80,6 +105,7 @@ function _writePaneSizes(sizes: PaneSizes): void {
 }
 
 export type RightPanelTab = 'config' | 'result' | 'runlog' | 'skills'
+export type RightPanelMode = 'config' | 'runlog' | 'output' | 'copilot' | null
 
 /**
  * Minimum time a node must visibly be in 'running' state before the UI is
@@ -187,6 +213,16 @@ interface WorkflowStore {
   setRightPanelTab: (t: RightPanelTab) => void
   copilotOpen: boolean
   setCopilotOpen: (v: boolean) => void
+
+  /**
+   * Which view (if any) the unified right-side panel is showing.
+   * `null` collapses the panel down to just the activity rail.
+   * Driven by the ActivityRail buttons — clicking the active mode
+   * toggles back to `null`.
+   */
+  rightPanelMode: RightPanelMode
+  setRightPanelMode: (m: RightPanelMode) => void
+  toggleRightPanelMode: (m: RightPanelMode) => void
 
   /**
    * Pending text that the Copilot input should pick up on next mount /
@@ -562,7 +598,15 @@ export const useWorkflowStore = create<WorkflowStore>((set) => ({
   rightPanelTab: 'config',
   setRightPanelTab: (t) => set({ rightPanelTab: t }),
   copilotOpen: true,
-  setCopilotOpen: (v) => set({ copilotOpen: v }),
+  setCopilotOpen: (v) => set({ copilotOpen: v, rightPanelMode: v ? 'copilot' : null }),
+
+  rightPanelMode: 'copilot',
+  setRightPanelMode: (m) => set({ rightPanelMode: m, copilotOpen: m === 'copilot' }),
+  toggleRightPanelMode: (m) =>
+    set((s) => {
+      const next = s.rightPanelMode === m ? null : m
+      return { rightPanelMode: next, copilotOpen: next === 'copilot' }
+    }),
 
   copilotDraft: null,
   setCopilotDraft: (v) => set({ copilotDraft: v }),

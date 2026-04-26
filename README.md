@@ -8,7 +8,7 @@ regulator-grade Excel report.
 <img alt="dbSherpa" width="100%"
      src="https://img.shields.io/badge/python-3.11%2B-blue" />
 <img alt="React" src="https://img.shields.io/badge/react-18-61dafb" />
-<img alt="Tests" src="https://img.shields.io/badge/tests-69%20passing-brightgreen" />
+<img alt="Tests" src="https://img.shields.io/badge/tests-151%20passing-brightgreen" />
 <img alt="License" src="https://img.shields.io/badge/license-proprietary-lightgrey" />
 
 ---

@@ -22,7 +22,7 @@
     },
     {
       "id": "n02",
-      "type": "EXECUTION_DATA_COLLECTOR",
+      "type": "TRADE_DATA_COLLECTOR",
       "label": "Collect Order Book",
       "config": {
         "source": "hs_client_order",
@@ -33,7 +33,7 @@
     },
     {
       "id": "n03",
-      "type": "EXECUTION_DATA_COLLECTOR",
+      "type": "TRADE_DATA_COLLECTOR",
       "label": "Collect All Executions",
       "config": {
         "source": "hs_execution",
@@ -74,9 +74,9 @@
       "config": {
         "input_name": "executions",
         "output_name": "executions_enriched",
-        "operations": [
-          {"op": "lifecycle_event"},
-          {"op": "derive_signed_notional"}
+        "ops": [
+          {"op": "lifecycle_event", "group_by": "order_id", "sort_by": "exec_time", "status_col": "side"},
+          {"op": "apply_expr", "out_col": "signed_notional", "expr": "(exec_quantity * exec_price) * (1 if side == 'BUY' else -1)"}
         ]
       }
     },

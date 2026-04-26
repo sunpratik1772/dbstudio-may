@@ -10,45 +10,50 @@
 :root {
   color-scheme: dark;
 
-  /* Depth */
-  --bg-0: #050B14;
-  --bg-1: #0A1628;
-  --bg-2: #0F1F36;
-  --bg-3: #152B4A;
-  --bg-node: #0B1729;
-  --bg-node-elev: #102744;
+  /* Depth — Workflow Forge dark */
+  --bg-0: #050505;
+  --bg-1: #0B0B0C;
+  --bg-2: #131316;
+  --bg-3: #1A1A1C;
+  --bg-node: #1A1A1C;
+  --bg-node-elev: #212124;
 
   /* Dividers */
-  --border: #1B334F;
-  --border-strong: #2C5487;
-  --border-soft: #13253E;
+  --border: #27272A;
+  --border-strong: #3F3F46;
+  --border-soft: #1F1F22;
 
   /* Text */
-  --text-0: #F3F6FA;
-  --text-1: #B8C5D6;
-  --text-2: #6F819A;
-  --text-3: #405068;
+  --text-0: #FAFAFA;
+  --text-1: #D4D4D8;
+  --text-2: #A1A1AA;
+  --text-3: #71717A;
 
   /* Semantic */
-  --accent: #F59E0B;
+  --accent: #F5A623;
   --accent-hi: #FBBF24;
   --accent-lo: #B45309;
 
-  --running: #22D3EE;
+  --running: #00E5FF;
   --running-lo: #0891B2;
   --success: #10B981;
   --success-lo: #047857;
-  --danger: #F43F5E;
-  --danger-lo: #BE123C;
+  --danger: #EF4444;
+  --danger-lo: #B91C1C;
   --info: #60A5FA;
 
+  /* Port-type colours */
+  --port-dataframe: #F5A623;
+  --port-object: #00E5FF;
+  --port-scalar: #10B981;
+  --port-string-list: #A78BFA;
+  --port-workflow: #F472B6;
+
   /* Atmosphere knobs per theme */
-  --atmo-gradient:
-    radial-gradient(1200px 700px at 20% -10%, rgba(34, 211, 238, 0.06), transparent 60%),
-    radial-gradient(900px 600px at 120% 120%, rgba(245, 158, 11, 0.05), transparent 60%),
-    radial-gradient(1400px 900px at 50% 50%, transparent 55%, rgba(0,0,0,0.55) 100%);
+  --atmo-gradient: none;
   --grain-blend: overlay;
-  --grain-opacity: 0.035;
+  --grain-opacity: 0;
+  --dots-color: #52525B;
 
   /* Type scale */
   --fs-micro: 10px;
@@ -67,25 +72,25 @@
 [data-theme="light"] {
   color-scheme: light;
 
-  --bg-0: #FAF7F2;
+  --bg-0: #FAFAFA;
   --bg-1: #FFFFFF;
-  --bg-2: #FFFFFF;
-  --bg-3: #F1EBDF;
+  --bg-2: #F4F4F5;
+  --bg-3: #E4E4E7;
   --bg-node: #FFFFFF;
-  --bg-node-elev: #FFFDF8;
+  --bg-node-elev: #FAFAFA;
 
-  --border: #E7E0D2;
-  --border-strong: #C9BFAB;
-  --border-soft: #F0EADC;
+  --border: #D4D4D8;
+  --border-strong: #A1A1AA;
+  --border-soft: #E4E4E7;
 
-  --text-0: #1C1917;
-  --text-1: #44403C;
-  --text-2: #78716C;
-  --text-3: #B5ACA0;
+  --text-0: #18181B;
+  --text-1: #27272A;
+  --text-2: #52525B;
+  --text-3: #A1A1AA;
 
-  --accent: #C96442;
-  --accent-hi: #D97757;
-  --accent-lo: #8B4A32;
+  --accent: #B45309;
+  --accent-hi: #D97706;
+  --accent-lo: #92400E;
 
   --running: #0891B2;
   --running-lo: #0E7490;
@@ -95,12 +100,16 @@
   --danger-lo: #991B1B;
   --info: #1D4ED8;
 
-  --atmo-gradient:
-    radial-gradient(1200px 700px at 20% -10%, rgba(201, 100, 66, 0.07), transparent 60%),
-    radial-gradient(900px 600px at 120% 120%, rgba(8, 145, 178, 0.06), transparent 60%),
-    radial-gradient(1400px 900px at 50% 50%, transparent 60%, rgba(120, 113, 108, 0.08) 100%);
+  --port-dataframe: #B45309;
+  --port-object: #0891B2;
+  --port-scalar: #047857;
+  --port-string-list: #6D28D9;
+  --port-workflow: #BE185D;
+
+  --atmo-gradient: none;
   --grain-blend: multiply;
-  --grain-opacity: 0.05;
+  --grain-opacity: 0;
+  --dots-color: #A1A1AA;
 }
 
 /* -------------------------------------------------------------------------
@@ -113,9 +122,7 @@ body {
 }
 
 .display {
-  font-family: 'Fraunces', 'IBM Plex Serif', Georgia, serif;
-  font-optical-sizing: auto;
-  font-variation-settings: "SOFT" 50, "WONK" 0;
+  font-family: 'Chivo', system-ui, sans-serif;
   letter-spacing: -0.015em;
 }
 
@@ -128,7 +135,7 @@ body {
 }
 
 .num {
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
 }
@@ -265,7 +272,7 @@ body {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   line-height: 1;
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
 }
 .chip--idle    { background: color-mix(in srgb, var(--text-2) 10%, transparent); color: var(--text-2); border: 1px solid var(--border); }
 .chip--running { background: color-mix(in srgb, var(--running) 14%, transparent); color: var(--running); border: 1px solid color-mix(in srgb, var(--running) 40%, transparent); }
@@ -338,3 +345,26 @@ button:focus-visible, [role="button"]:focus-visible {
    where Tailwind's utilities haven't been generated yet. */
 @keyframes drawer-spin { to { transform: rotate(360deg); } }
 .animate-spin { animation: drawer-spin 0.9s linear infinite; }
+
+/* =========================================================================
+   Port-type colour classes (Workflow Forge convention)
+   ========================================================================= */
+.port-dataframe   { background: var(--port-dataframe);   border-color: var(--port-dataframe); }
+.port-object      { background: var(--port-object);      border-color: var(--port-object); }
+.port-scalar      { background: var(--port-scalar);      border-color: var(--port-scalar); }
+.port-string-list { background: var(--port-string-list); border-color: var(--port-string-list); }
+.port-workflow    { background: var(--port-workflow);    border-color: var(--port-workflow); }
+
+/* =========================================================================
+   Workflow Forge motion primitives
+   ========================================================================= */
+@keyframes blink-soft {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+.animate-blink-soft { animation: blink-soft 1.6s ease-in-out infinite; }
+
+@keyframes dashflow {
+  to { stroke-dashoffset: -20; }
+}
+.animate-dashflow { animation: dashflow 0.9s linear infinite; }

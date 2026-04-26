@@ -1,5 +1,23 @@
+/**
+ * The DAG editing canvas — wraps React Flow.
+ *
+ * Responsibilities:
+ *   • Render every workflow node with `<CustomNode />` (sibling file).
+ *   • Translate React Flow events (drag, drop, connect, delete, select)
+ *     back into workflowStore actions.
+ *   • Accept palette drops via HTML5 DnD — when a NodePanel item is
+ *     dropped onto the canvas, we compute the world coordinates and
+ *     call `addNode(type, position)`.
+ *   • Show validation errors as red badges on the offending node,
+ *     pulling from `useWorkflowStore.getState().validationIssues`.
+ *
+ * Nothing here knows the schema of a specific node type — everything
+ * goes through the generated `NODE_UI` registry under src/nodes/.
+ */
 import { useCallback, useMemo, useRef, useState, type DragEvent } from 'react'
 import ReactFlow, {
+  Background,
+  BackgroundVariant,
   Controls,
   MiniMap,
   ReactFlowProvider,
@@ -15,6 +33,7 @@ import ReactFlow, {
 } from 'reactflow'
 import 'reactflow/dist/style.css'
 
+// (icons used in empty state are inline below)
 import { CustomNode } from './CustomNode'
 import { useWorkflowStore } from '../../store/workflowStore'
 import { NODE_UI, type NodeType } from '../../nodes'
@@ -189,6 +208,52 @@ function styleEdgesByRun(edges: Edge[], log: RunLogEntry[]): Edge[] {
   })
 }
 
+function EmptyCanvas({ onDragOver, onDrop }: { onDragOver: (e: DragEvent<HTMLDivElement>) => void; onDrop: (e: DragEvent<HTMLDivElement>) => void }) {
+  const setDrawerOpen = useWorkflowStore((s) => s.setWorkflowDrawerOpen)
+  const setCopilotOpen = useWorkflowStore((s) => s.setCopilotOpen)
+  return (
+    <div
+      className="flex-1 relative flex items-center justify-center"
+      style={{ background: 'var(--bg-0)' }}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+    >
+      <div className="text-center relative z-10 max-w-md px-6" style={{ display: 'grid', gap: 18, justifyItems: 'center' }}>
+        <h2 style={{ fontFamily: 'Chivo, system-ui, sans-serif', color: 'var(--text-0)', fontSize: 32, fontWeight: 600, letterSpacing: '-0.025em', lineHeight: 1.1 }}>
+          Compose a workflow
+        </h2>
+        <p style={{ color: 'var(--text-2)', fontSize: 13.5, lineHeight: 1.55, maxWidth: 440 }}>
+          Drag nodes from the left palette, chain typed ports, or ask the{' '}
+          <span style={{ color: 'var(--text-0)', fontWeight: 600 }}>Copilot</span> to generate an entire surveillance workflow.
+        </p>
+        <div className="flex items-center gap-3 mt-1">
+          <button
+            onClick={() => setDrawerOpen(true)}
+            style={{
+              height: 40, padding: '0 18px', borderRadius: 8,
+              background: 'var(--text-0)', color: 'var(--bg-0)',
+              border: 'none', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+            }}
+          >
+            Load a template
+          </button>
+          <button
+            onClick={() => setCopilotOpen(true)}
+            style={{
+              height: 40, padding: '0 18px', borderRadius: 8,
+              background: 'transparent', color: 'var(--text-0)',
+              border: '1px solid var(--border-strong)',
+              fontSize: 13, fontWeight: 500, cursor: 'pointer',
+            }}
+          >
+            Ask copilot
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function WorkflowCanvas() {
   // ReactFlowProvider is required so the inner shell can use `useReactFlow()`
   // for screen→flow coord conversion when handling palette drops.
@@ -201,8 +266,6 @@ export default function WorkflowCanvas() {
 
 function WorkflowCanvasInner() {
   const workflow = useWorkflowStore((s) => s.workflow)
-  const setDrawerOpen = useWorkflowStore((s) => s.setWorkflowDrawerOpen)
-  const setCopilotOpen = useWorkflowStore((s) => s.setCopilotOpen)
   const runLog = useWorkflowStore((s) => s.runLog)
   const addNode = useWorkflowStore((s) => s.addNode)
   const updateNodePosition = useWorkflowStore((s) => s.updateNodePosition)
@@ -303,64 +366,7 @@ function WorkflowCanvasInner() {
 
   if (!workflow) {
     return (
-      <div
-        className="flex-1 relative flex items-center justify-center"
-        style={{ background: 'var(--bg-0)' }}
-        onDragOver={onDragOver}
-        onDrop={onDrop}
-      >
-        <div className="canvas-atmo" />
-        <div className="canvas-grain" />
-        <div className="text-center relative z-10 max-w-md px-6" style={{ display: 'grid', gap: 16 }}>
-          <div className="eyebrow" style={{ color: 'var(--text-3)', letterSpacing: '0.18em' }}>
-            EMPTY CANVAS
-          </div>
-          <h2 className="display" style={{ color: 'var(--text-0)', fontSize: 24, fontWeight: 600, letterSpacing: '-0.02em' }}>
-            Compose a workflow
-          </h2>
-          <p style={{ color: 'var(--text-2)', fontSize: 13, lineHeight: 1.6 }}>
-            Drag nodes from the left palette, chain typed ports, or ask the Copilot to generate a surveillance workflow.
-          </p>
-          <div className="flex items-center justify-center gap-2 flex-wrap">
-            <button
-              type="button"
-              onClick={() => setDrawerOpen(true)}
-              className="lift"
-              style={{
-                padding: '8px 16px',
-                borderRadius: 8,
-                fontSize: 12.5,
-                fontWeight: 600,
-                background: 'var(--text-0)',
-                color: 'var(--bg-0)',
-                border: 'none',
-                cursor: 'pointer',
-              }}
-            >
-              Load a template
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setCopilotOpen(true)
-              }}
-              className="lift"
-              style={{
-                padding: '8px 16px',
-                borderRadius: 8,
-                fontSize: 12.5,
-                fontWeight: 600,
-                background: 'transparent',
-                color: 'var(--text-0)',
-                border: '1px solid var(--border)',
-                cursor: 'pointer',
-              }}
-            >
-              Ask Copilot
-            </button>
-          </div>
-        </div>
-      </div>
+      <EmptyCanvas onDragOver={onDragOver} onDrop={onDrop} />
     )
   }
 
@@ -403,6 +409,12 @@ function WorkflowCanvasInner() {
         proOptions={{ hideAttribution: true }}
         defaultEdgeOptions={{ type: 'smoothstep' }}
       >
+        <Background
+          variant={BackgroundVariant.Dots}
+          gap={26}
+          size={1.6}
+          color="var(--dots-color)"
+        />
         <Controls
           style={{
             background: 'var(--bg-1)',
@@ -422,7 +434,7 @@ function WorkflowCanvasInner() {
             const nodeType = (n.data as { nodeType: string })?.nodeType
             return NODE_UI[nodeType as keyof typeof NODE_UI]?.color ?? 'var(--text-3)'
           }}
-          maskColor="rgba(5, 11, 20, 0.75)"
+          maskColor="rgba(5, 5, 5, 0.75)"
           pannable
           zoomable
         />

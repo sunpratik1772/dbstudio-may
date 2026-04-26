@@ -8,6 +8,60 @@
 
 ---
 
+## 0 — Junior engineer reading order (½ day to productive)
+
+If you have 2–3 years of experience and have never opened this repo, read
+files in this order. Each opens with a docstring that explains *why* it
+exists and how it fits in — that's where most of the architecture is
+encoded, not in this document.
+
+1. **`backend/engine/context.py`** (30 lines) — the one shared object
+   every node mutates. Until you understand what's on it, nothing else
+   makes sense.
+2. **`backend/engine/dag_runner.py`** — start at `run_workflow` (bottom
+   of file) and follow the loop into `execute_nodes`. ~30 minutes.
+3. **`backend/engine/registry.py` + `node_spec.py`** — how nodes plug
+   in. After this you can add a new node without editing a central
+   list.
+4. **`backend/engine/nodes/order_collector.py`** — the simplest
+   non-trivial handler. Use it as the template for your own.
+5. **`backend/engine/nodes/feature_engine.py`** + `signal_calculator.py`
+   — the DRY chassis. One node, many configs. Read the module
+   docstrings to internalise the "add a config, not a node" mindset.
+6. **`backend/engine/refs.py` + `prompt_context.py`** — the cross-dataset
+   reference grammar (`{dataset.col.agg}`, `{context.key}`). Used by
+   DECISION_RULE, DATA_HIGHLIGHTER, SECTION_SUMMARY, REPORT_OUTPUT.
+7. **`backend/engine/validator.py` + `hard_rules.py`** — pure validation.
+   Read the top-of-file docstrings; you'll know which file to edit when
+   you need to add a rule.
+8. **`backend/workflows/fx_fro_v2_workflow.json` + `fisl_workflow.json`**
+   — the two reference scenarios. Same chassis, different config.
+9. **`backend/tests/test_fro_v2_golden_path.py` + `test_fisl_golden_path.py`**
+   — golden-path integration tests. Best mental model for what a run
+   produces end-to-end.
+10. **`backend/app/main.py`** — the FastAPI router map. Each router has
+    its own docstring; read just the one whose URL you're touching.
+
+After this you should be able to ship a new scenario in a day. The
+**ONBOARDING.md** sibling doc walks through it as a worked example.
+
+### Cheat sheet
+
+| If you want to…                              | Open                                                          |
+|----------------------------------------------|---------------------------------------------------------------|
+| Add a new node type                          | `backend/engine/nodes/<name>.py` + `<name>.yaml`              |
+| Add an op to FEATURE_ENGINE                  | `backend/engine/nodes/feature_engine.py` (one new function)   |
+| Add a built-in signal family                 | `backend/engine/nodes/signal_calculator.py` (BUILT_IN dict)   |
+| Add a validation rule                        | `backend/engine/hard_rules.py` (one decorated function)       |
+| Add an auto-fix                              | `backend/engine/auto_fixer.py`                                |
+| Add a scenario template                      | `backend/templates/<name>.json`                               |
+| Add a dataset                                | `backend/data_sources/metadata/<name>.yaml`                   |
+| Change the Excel layout                      | `backend/engine/nodes/report_output.py`                       |
+| Hook a new endpoint                          | `backend/app/routers/<router>.py`                             |
+| Regenerate frontend node specs after a change| `python scripts/gen_artifacts.py`                             |
+
+---
+
 ## 1 — Mental model
 
 dbSherpa is a **deterministic, registry-driven workflow engine** wrapped
@@ -734,12 +788,107 @@ template and `.gitignore` for what stays out of the repo.
 
 ---
 
+## 8.5 — Chassis primitives
+
+The chassis is the small set of generic node types every scenario
+composes from. None of them know what an "FRO" or "FISL" is — they
+just slice, fan-out, summarise, and emit. Adding a 51st scenario is a
+new JSON workflow, not new node code.
+
+| Primitive            | Role                                                                                         |
+|----------------------|----------------------------------------------------------------------------------------------|
+| `TIME_WINDOW`        | Publishes `{start_time, end_time, buffer_minutes}` from the alert's event time.              |
+| `ORDER_COLLECTOR`    | Pulls order-lifecycle rows. Honours `window_key` so all collectors share one window.         |
+| `TRADE_DATA_COLLECTOR` / `MARKET_DATA_COLLECTOR` / `COMMS_COLLECTOR` | Same `window_key` + filter contract; `COMMS_COLLECTOR` adds `keyword_categories` and an optional `emit_hits_only` aux dataset (`<output>_hits`). |
+| `EXTRACT_SCALAR` / `EXTRACT_LIST` | Reduce a column to a scalar / sorted list. Powers cascade and ladder patterns. |
+| `GROUP_BY`           | Partitions a dataset by column → publishes `{prefix}_{key}` per group + `{values:[...]}` keys list. |
+| `MAP`                | Control-flow primitive. Forks a child `RunContext` per key, runs an inline `sub_workflow`, harvests `collect_values` / `collect_datasets` back to the parent. Composes recursively — see `fisl_workflow.json` for nested MAP. |
+| `FEATURE_ENGINE`     | One node, an op registry (`window_bucket`, `time_slice`, `groupby_agg`, `pivot`, `rolling`, `derive`, `apply_expr`). Each op publishes the working DataFrame; `as: <name>` also stashes intermediate results. Replaces the urge to add a per-scenario transform node. |
+| `SIGNAL_CALCULATOR`  | Same node, swap `signal_type` (`FRONT_RUNNING`, `WASH_TRADE`, `SPOOFING`, `LAYERING`) or `mode: upload_script`. Always emits the 5-column contract `_signal_flag/_signal_score/_signal_reason/_signal_type/_signal_window`. |
+| `DATA_HIGHLIGHTER`   | Per-row `pandas.eval` rules with `{ref}` substitution before eval — rules can pull thresholds from any upstream dataset/context (`notional > {context.peak_threshold}`). Emits `_highlight_colour/_highlight_label`; REPORT_OUTPUT auto-uses the `_highlighted` sibling when `include_highlights: true`. |
+| `DECISION_RULE`      | Threshold mode (default) **or** rules mode: ordered `[{name, when, severity, disposition}]` where `when` accepts `{ref}` (truthy) or `{ref} OP literal`. Emits `disposition / severity / score / matched_rule / output_branch`. |
+| `SECTION_SUMMARY`    | Three modes: `templated`, `fact_pack_llm` (verify-and-retry), `event_narrative`. Optional `prompt_context` block injects cross-dataset slots into the prompt. |
+| `CONSOLIDATED_SUMMARY` | LLM exec summary fed by `ctx.sections + ctx.disposition + ctx.severity`. Same `prompt_context` extensibility. |
+| `REPORT_OUTPUT`      | `tabs` for static datasets + `expand_from` for *any* iterable (context list, MAP results dict, dataset column). Each tab gets a templated `name` and `dataset` resolved against the bound `as` slot. |
+
+### Cross-cutting grammars
+
+- **Refs** (`engine/refs.py`) — single grammar used by every templating
+  node. `{dataset}`, `{dataset.col}`, `{dataset.col.agg}` (`agg ∈
+  sum|mean|max|min|count|nunique|first|last|any|all`), `{dataset.@row_count}`,
+  `{context.key.attr…}`. Resolvers raise `ResolveError` so callers can
+  decide silent-fallback vs. validation surface.
+- **`prompt_context` block** (shared by SECTION_SUMMARY +
+  CONSOLIDATED_SUMMARY): `{mode: template|dataset|mixed, vars: {name:
+  ref_expr, …}, dataset: {ref, format, max_rows, columns}}`. `vars`
+  resolve refs into named slots; the serialised dataset is exposed as
+  `{dataset}`. See `engine/prompt_context.py`.
+
+### Reference workflows
+
+Two workflows exercise the full chassis end-to-end. Same node set,
+different config — that's the proof.
+
+- `workflows/fx_fro_v2_workflow.json` — TIME_WINDOW → 4 windowed
+  collectors → GROUP_BY orders by book → MAP per-book → FEATURE_ENGINE
+  (`window_bucket` + `derive`) → SIGNAL_CALCULATOR (`FRONT_RUNNING`)
+  → DATA_HIGHLIGHTER → DECISION_RULE (rules mode) → three
+  SECTION_SUMMARYs (one per mode) → CONSOLIDATED_SUMMARY → REPORT_OUTPUT
+  with static tabs + `expand_from` per book.
+  Test: `tests/test_fro_v2_golden_path.py`.
+- `workflows/fisl_workflow.json` — same chassis, **zero new node
+  code**. Nested MAP (outer venue, inner book) for the structural
+  proof; FEATURE_ENGINE composes `window_bucket → groupby_agg →
+  pivot` to build an order-book ladder; SIGNAL_CALCULATOR runs with
+  `signal_type: SPOOFING`. Test: `tests/test_fisl_golden_path.py`.
+
+The validator recurses into every `MAP.sub_workflow` (re-scoping
+issues under the parent MAP node). It skips the topology pass inside
+sub-workflows — they have no `ALERT_TRIGGER` / `REPORT_OUTPUT` — and
+skips the `input_name → output_name` wiring check inside, because MAP
+aliases parent datasets via `iteration_dataset_alias`.
+
+## 8.6 — Workflow templates
+
+Templates are vetted scenario skeletons the planner uses as a
+starting point instead of generating a workflow from scratch. They
+live in `backend/templates/<name>.json`:
+
+```
+{
+  "name": "fx_front_running",
+  "description": "...",
+  "matches": {
+    "scenarios": ["front-running", "fro", ...],
+    "datasets": ["orders", "executions", "comms", "market"]
+  },
+  "parameters": [{"name": "trader_id", "type": "string", "required": true}, ...],
+  "skeleton": { ...full nodes + edges... }
+}
+```
+
+- `agent/templates.py` exposes `TemplateRegistry.from_directory()` and
+  `select(intent)`. The selector scores `+10` per scenario keyword
+  overlap, `+1` per dataset overlap, returns the highest-scoring
+  template (or `None` if no signal matches).
+- Every bundled template's skeleton must validate clean against
+  `validate_dag` — see `tests/test_templates.py`. That guarantees a
+  planner that drops the skeleton straight onto the runtime never
+  produces a structurally invalid workflow.
+- Adding a new scenario template: copy an existing JSON, adjust
+  `matches`, `parameters`, and `skeleton`, drop it in
+  `backend/templates/`. The registry auto-discovers it on next load.
+
+---
+
 ## 9 — Extending further
 
 Want to understand a subsystem more deeply? These are the best
 "sources of truth":
 
 - **Planner**: `backend/agent/planner.py` + `prompt_builder.py`
+- **Templates**: `backend/agent/templates.py` + `backend/templates/*.json`
+- **Chassis primitives**: `backend/engine/nodes/{time_window,group_by,map_node,extract_scalar,extract_list}.py`
 - **Validator**: `backend/engine/validator.py` + `validation_codes.py` +
   `hard_rules.py` (+ the docstring at the top of each)
 - **Node execution semantics**: `backend/engine/dag_runner.py`

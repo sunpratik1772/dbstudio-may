@@ -1,3 +1,14 @@
+/**
+ * Per-node "is it running, did it succeed, how long did it take" hook.
+ *
+ * The workflow store already keeps a flat run log — the SSE stream
+ * appends events as they arrive from the backend. This hook lifts the
+ * log into a per-node view with a live elapsed-time tick while a node
+ * is in 'running' state, so the canvas can pulse + show ms counters
+ * without every WorkflowCanvas node re-deriving the same thing.
+ *
+ * Use as: `const { status, live_ms, error } = useNodeRunStatus(nodeId)`.
+ */
 import { useEffect, useState } from 'react'
 import { useWorkflowStore } from './workflowStore'
 

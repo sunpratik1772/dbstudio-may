@@ -11,20 +11,11 @@
         "context_keys": "One context key per declared alert_field, e.g. trader_id, book, alert_date, currency_pair, alert_id."
       },
       "config_schema": {
-        "alert_fields": "Map of field_name \u2192 type (string|date|number). Non-listed payload keys in extras.standard_alert_fields are still bound when present in the alert."
+        "alert_fields": "Map of field_name \u2192 type (string|date|number). Binds standard fields trader_id, book, alert_date, currency_pair, alert_id, entity, desk."
       },
       "constraints": [
         "Must be the first node (id=n01).",
         "No dataset inputs or outputs."
-      ],
-      "standard_alert_fields": [
-        "trader_id",
-        "book",
-        "alert_date",
-        "currency_pair",
-        "alert_id",
-        "entity",
-        "desk"
       ],
       "ports": {
         "inputs": [
@@ -40,8 +31,7 @@
             "name": "context_keys",
             "type": "object",
             "description": "One context key per declared alert_field, e.g. trader_id, book, alert_date, currency_pair, alert_id.",
-            "optional": false,
-            "store_at": "ctx.values[context_keys]"
+            "optional": false
           }
         ]
       },
@@ -49,7 +39,7 @@
         {
           "name": "alert_fields",
           "type": "object",
-          "description": "Map of field_name \u2192 type (string|date|number). Non-listed payload keys in extras.standard_alert_fields are still bound when present in the alert.",
+          "description": "Map of field_name \u2192 type (string|date|number). Binds standard fields trader_id, book, alert_date, currency_pair, alert_id, entity, desk.",
           "required": false,
           "widget": "json",
           "default": {}
@@ -59,7 +49,8 @@
     "COMMS_COLLECTOR": {
       "description": "Query Oculus comms with keyword scanning",
       "inputs": {
-        "context": "Context keys referenced in query_template as {context.xxx}."
+        "context": "Context keys referenced in query_template as {context.xxx}.",
+        "window": "Optional TIME_WINDOW output; when present, filters comms by timestamp."
       },
       "outputs": {
         "comms": "DataFrame with columns: user, timestamp, display_post, event_type, _keyword_hit, _matched_keywords. Stored under ctx.datasets[output_name].",
@@ -68,8 +59,11 @@
       "config_schema": {
         "query_template": "Oculus query with {context.xxx} placeholders.",
         "keywords": "Terms to scan in display_post.",
+        "keyword_categories": "Optional {category: [kw1, kw2, ...]} map. When present, each row gains a _matched_categories list plus one _hit_<cat> boolean column. Combined with plain `keywords` (both are scanned).",
+        "emit_hits_only": "Also publish ctx.datasets[f\"{output_name}_hits\"] containing only rows with at least one keyword match. Lets downstream SECTION_SUMMARY narrate just the suspicious subset.",
         "output_name": "Dataset name in ctx.datasets.",
-        "mock_csv_path": "Demo-mode override: path to a CSV used verbatim instead of the synthetic generator. Ignored if the file is missing."
+        "mock_csv_path": "Demo-mode override: path to a CSV used verbatim instead of the synthetic generator. Ignored if the file is missing.",
+        "window_key": "ctx.values key holding the window dict (default 'window'). No-op if key is absent."
       },
       "constraints": [
         "Always adds _keyword_hit (boolean) and _matched_keywords (list[str]) columns.",
@@ -82,6 +76,12 @@
             "type": "object",
             "description": "Context keys referenced in query_template as {context.xxx}.",
             "optional": true
+          },
+          {
+            "name": "window",
+            "type": "object",
+            "description": "Optional TIME_WINDOW output; when present, filters comms by timestamp.",
+            "optional": true
           }
         ],
         "outputs": [
@@ -89,23 +89,13 @@
             "name": "comms",
             "type": "dataframe",
             "description": "DataFrame with columns: user, timestamp, display_post, event_type, _keyword_hit, _matched_keywords. Stored under ctx.datasets[output_name].",
-            "optional": false,
-            "required_columns": [
-              "user",
-              "timestamp",
-              "display_post",
-              "event_type",
-              "_keyword_hit",
-              "_matched_keywords"
-            ],
-            "store_at": "ctx.datasets[{output_name}]"
+            "optional": false
           },
           {
             "name": "keyword_hit_count",
             "type": "scalar",
             "description": "Total keyword hit count (int). Stored as {output_name}_keyword_hits.",
-            "optional": true,
-            "store_at": "ctx.values[{output_name}_keyword_hits]"
+            "optional": true
           }
         ]
       },
@@ -126,6 +116,22 @@
           "default": []
         },
         {
+          "name": "keyword_categories",
+          "type": "object",
+          "description": "Optional {category: [kw1, kw2, ...]} map. When present, each row gains a _matched_categories list plus one _hit_<cat> boolean column. Combined with plain `keywords` (both are scanned).",
+          "required": false,
+          "widget": "json",
+          "default": {}
+        },
+        {
+          "name": "emit_hits_only",
+          "type": "boolean",
+          "description": "Also publish ctx.datasets[f\"{output_name}_hits\"] containing only rows with at least one keyword match. Lets downstream SECTION_SUMMARY narrate just the suspicious subset.",
+          "required": false,
+          "widget": "checkbox",
+          "default": false
+        },
+        {
           "name": "output_name",
           "type": "string",
           "description": "Dataset name in ctx.datasets.",
@@ -140,6 +146,14 @@
           "required": false,
           "widget": "text",
           "default": ""
+        },
+        {
+          "name": "window_key",
+          "type": "string",
+          "description": "ctx.values key holding the window dict (default 'window'). No-op if key is absent.",
+          "required": false,
+          "widget": "text",
+          "default": "window"
         }
       ]
     },
@@ -152,7 +166,8 @@
         "executive_summary": "Multi-paragraph executive summary. Stored as context.executive_summary."
       },
       "config_schema": {
-        "llm_prompt_template": "Custom prompt with {section_text}, {trader_id}, {currency_pair}, {disposition}, {flag_count} placeholders. Falls back to the built-in template when empty."
+        "llm_prompt_template": "Custom prompt with {section_text}, {trader_id}, {currency_pair}, {disposition}, {flag_count} placeholders, plus any vars defined under prompt_context.vars and (when mode=dataset|mixed) {dataset}. Cross-dataset refs like {executions.notional.sum} resolve inline. Falls back to the built-in template when empty.",
+        "prompt_context": "Optional structured slot block: {mode: template|dataset|mixed, vars: {name: ref_expr, ...}, dataset: {ref, format, max_rows, columns}}. Same shape as SECTION_SUMMARY.prompt_context."
       },
       "constraints": [
         "LLM model: claude-sonnet-4-6, max_tokens: 1000.",
@@ -172,8 +187,7 @@
             "name": "executive_summary",
             "type": "text",
             "description": "Multi-paragraph executive summary. Stored as context.executive_summary.",
-            "optional": false,
-            "store_at": "ctx.executive_summary"
+            "optional": false
           }
         ]
       },
@@ -181,9 +195,17 @@
         {
           "name": "llm_prompt_template",
           "type": "string",
-          "description": "Custom prompt with {section_text}, {trader_id}, {currency_pair}, {disposition}, {flag_count} placeholders. Falls back to the built-in template when empty.",
+          "description": "Custom prompt with {section_text}, {trader_id}, {currency_pair}, {disposition}, {flag_count} placeholders, plus any vars defined under prompt_context.vars and (when mode=dataset|mixed) {dataset}. Cross-dataset refs like {executions.notional.sum} resolve inline. Falls back to the built-in template when empty.",
           "required": false,
           "widget": "textarea"
+        },
+        {
+          "name": "prompt_context",
+          "type": "object",
+          "description": "Optional structured slot block: {mode: template|dataset|mixed, vars: {name: ref_expr, ...}, dataset: {ref, format, max_rows, columns}}. Same shape as SECTION_SUMMARY.prompt_context.",
+          "required": false,
+          "widget": "json",
+          "default": {}
         }
       ]
     },
@@ -198,12 +220,13 @@
       "config_schema": {
         "input_name": "Source dataset.",
         "output_name": "Highlighted dataset name (convention: input_name + '_highlighted').",
-        "rules": "Array of {condition: string (pandas eval expression), colour: string (hex #RRGGBB), label: string}."
+        "rules": "Array of {condition, colour, label}. `condition` is a pandas.DataFrame.eval expression evaluated against the target dataset's rows. The condition may include `{ref}` placeholders that resolve to SCALAR values via the cross-dataset ref grammar BEFORE pandas eval \u2014 e.g. `notional > {context.peak_threshold}`, `bucket == {ladder.peak_bucket.first}`. `colour` is hex #RRGGBB."
       },
       "constraints": [
-        "Conditions are evaluated with pandas DataFrame.eval().",
+        "Conditions are evaluated with pandas DataFrame.eval after `{ref}` resolution.",
         "Rules are applied in order \u2014 last matching rule wins.",
-        "Rows with no matching rule get colour #FFFFFF and empty label."
+        "Rows with no matching rule get colour #FFFFFF and empty label.",
+        "Refs that fail to resolve leave the placeholder intact, causing pandas.eval to fail loudly (the rule is skipped, not silently true)."
       ],
       "ports": {
         "inputs": [
@@ -219,12 +242,7 @@
             "name": "highlighted",
             "type": "dataframe",
             "description": "Input DataFrame + _highlight_colour (hex) + _highlight_label (str). Stored under ctx.datasets[output_name].",
-            "optional": false,
-            "required_columns": [
-              "_highlight_colour",
-              "_highlight_label"
-            ],
-            "store_at": "ctx.datasets[{output_name}]"
+            "optional": false
           }
         ]
       },
@@ -246,7 +264,7 @@
         {
           "name": "rules",
           "type": "array",
-          "description": "Array of {condition: string (pandas eval expression), colour: string (hex #RRGGBB), label: string}.",
+          "description": "Array of {condition, colour, label}. `condition` is a pandas.DataFrame.eval expression evaluated against the target dataset's rows. The condition may include `{ref}` placeholders that resolve to SCALAR values via the cross-dataset ref grammar BEFORE pandas eval \u2014 e.g. `notional > {context.peak_threshold}`, `bucket == {ladder.peak_bucket.first}`. `colour` is hex #RRGGBB.",
           "required": false,
           "widget": "json",
           "default": []
@@ -254,33 +272,38 @@
       ]
     },
     "DECISION_RULE": {
-      "description": "Evaluate flag_count \u2192 ESCALATE/REVIEW/DISMISS",
+      "description": "Evaluate flag_count or rules \u2192 ESCALATE/REVIEW/DISMISS + severity",
       "inputs": {
         "dataset": "Signal DataFrame with _signal_flag column.",
         "flag_count": "Flag count from SIGNAL_CALCULATOR (read from ctx.values[{input_name}_flag_count] if the dataset isn't available)."
       },
       "outputs": {
         "disposition": "'ESCALATE' | 'REVIEW' | 'DISMISS'. Stored as context.disposition.",
+        "severity": "'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW'. Stored as context.severity.",
+        "score": "Normalised severity score in [0, 1]. Stored as context.score.",
         "flag_count": "Total signal hits (int). Stored as context.flag_count.",
-        "output_branch": "Branch name to route to. Stored as context.output_branch."
+        "output_branch": "Branch name to route to. Stored as context.output_branch.",
+        "matched_rule": "Name of the rule that fired (rule mode only; empty in threshold mode). Stored as context.matched_rule."
       },
       "config_schema": {
         "input_name": "Signal dataset name.",
-        "flag_count_expr": "Python expression using 'flag_count' variable, e.g. 'flag_count > 0'. Overrides escalate/review thresholds when supplied.",
-        "escalate_threshold": "flag_count >= this \u2192 ESCALATE.",
-        "review_threshold": "flag_count >= this \u2192 REVIEW, else DISMISS.",
+        "escalate_threshold": "flag_count >= this \u2192 ESCALATE (threshold mode).",
+        "review_threshold": "flag_count >= this \u2192 REVIEW (threshold mode).",
+        "rules": "Optional rules list, evaluated top-to-bottom; first match wins. Each rule: {name, when, severity?, disposition?}. `when` accepts `{ref}` (truthy test) or `{ref} OP literal` where OP \u2208 {>=,<=,==,!=,>,<}. Refs use the cross-dataset grammar \u2014 e.g. `{executions._signal_flag.sum} >= 10`, `{ladder.symmetry.max} > 0.85`, `{context.book_count} > 1`.",
+        "severity_map": "Override severity per disposition. Defaults: {ESCALATE: HIGH, REVIEW: MEDIUM, DISMISS: LOW}.",
         "output_branches": "Map of disposition \u2192 branch_name string."
       },
+      "constraints": [
+        "Threshold mode (default) requires escalate_threshold >= review_threshold.",
+        "Rule mode short-circuits: first matching rule sets disposition + severity."
+      ],
       "ports": {
         "inputs": [
           {
             "name": "dataset",
             "type": "dataframe",
             "description": "Signal DataFrame with _signal_flag column.",
-            "optional": false,
-            "required_columns": [
-              "_signal_flag"
-            ]
+            "optional": false
           },
           {
             "name": "flag_count",
@@ -294,22 +317,37 @@
             "name": "disposition",
             "type": "text",
             "description": "'ESCALATE' | 'REVIEW' | 'DISMISS'. Stored as context.disposition.",
-            "optional": false,
-            "store_at": "ctx.disposition"
+            "optional": false
+          },
+          {
+            "name": "severity",
+            "type": "text",
+            "description": "'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW'. Stored as context.severity.",
+            "optional": false
+          },
+          {
+            "name": "score",
+            "type": "scalar",
+            "description": "Normalised severity score in [0, 1]. Stored as context.score.",
+            "optional": false
           },
           {
             "name": "flag_count",
             "type": "scalar",
             "description": "Total signal hits (int). Stored as context.flag_count.",
-            "optional": false,
-            "store_at": "ctx.values[flag_count]"
+            "optional": false
           },
           {
             "name": "output_branch",
             "type": "text",
             "description": "Branch name to route to. Stored as context.output_branch.",
-            "optional": false,
-            "store_at": "ctx.output_branch"
+            "optional": false
+          },
+          {
+            "name": "matched_rule",
+            "type": "text",
+            "description": "Name of the rule that fired (rule mode only; empty in threshold mode). Stored as context.matched_rule.",
+            "optional": false
           }
         ]
       },
@@ -322,16 +360,9 @@
           "widget": "input_ref"
         },
         {
-          "name": "flag_count_expr",
-          "type": "string",
-          "description": "Python expression using 'flag_count' variable, e.g. 'flag_count > 0'. Overrides escalate/review thresholds when supplied.",
-          "required": false,
-          "widget": "text"
-        },
-        {
           "name": "escalate_threshold",
           "type": "integer",
-          "description": "flag_count >= this \u2192 ESCALATE.",
+          "description": "flag_count >= this \u2192 ESCALATE (threshold mode).",
           "required": false,
           "widget": "number",
           "default": 1
@@ -339,10 +370,26 @@
         {
           "name": "review_threshold",
           "type": "integer",
-          "description": "flag_count >= this \u2192 REVIEW, else DISMISS.",
+          "description": "flag_count >= this \u2192 REVIEW (threshold mode).",
           "required": false,
           "widget": "number",
           "default": 1
+        },
+        {
+          "name": "rules",
+          "type": "array",
+          "description": "Optional rules list, evaluated top-to-bottom; first match wins. Each rule: {name, when, severity?, disposition?}. `when` accepts `{ref}` (truthy test) or `{ref} OP literal` where OP \u2208 {>=,<=,==,!=,>,<}. Refs use the cross-dataset grammar \u2014 e.g. `{executions._signal_flag.sum} >= 10`, `{ladder.symmetry.max} > 0.85`, `{context.book_count} > 1`.",
+          "required": false,
+          "widget": "json",
+          "default": []
+        },
+        {
+          "name": "severity_map",
+          "type": "object",
+          "description": "Override severity per disposition. Defaults: {ESCALATE: HIGH, REVIEW: MEDIUM, DISMISS: LOW}.",
+          "required": false,
+          "widget": "json",
+          "default": {}
         },
         {
           "name": "output_branches",
@@ -354,216 +401,39 @@
         }
       ]
     },
-    "EXECUTION_DATA_COLLECTOR": {
-      "description": "Query Solr for client orders, executions, trades, and quotes",
+    "EXTRACT_LIST": {
+      "description": "Emit the unique values of a column as an ordered list \u2014 cascade primitive for fan-out keys.",
       "inputs": {
-        "context": "Context keys referenced in query_template as {context.xxx}"
+        "dataset": "Source DataFrame (by input_name)."
       },
       "outputs": {
-        "executions": "Order/execution rows. Stored in ctx.datasets under the configured output_name.",
-        "row_count": "Integer row count. Stored in ctx.values as {output_name}_count."
+        "values": "{values: [...]} \u2014 published under ctx.values[output_name]."
       },
       "config_schema": {
-        "source": "Which Solr collection to query.",
-        "query_template": "Solr query; use {context.xxx} placeholders for alert fields.",
-        "output_name": "Dataset name in ctx.datasets.",
-        "loop_over_books": "Repeat the query for each book in the books list.",
-        "books": "Book names when loop_over_books=true.",
-        "mock_csv_path": "Demo-mode override: path to a CSV used verbatim instead of the synthetic generator. Ignored if the file is missing. CSV columns are not re-checked against the lists below; synthetic rows are."
+        "input_name": "Dataset name in ctx.datasets.",
+        "column": "Column to enumerate.",
+        "output_name": "ctx.values key to publish {values: [...]} under.",
+        "order": "sort: ascending, desc: descending, first_seen: original order.",
+        "dropna": "Exclude NaN values."
       },
       "constraints": [
-        "When source reads versioned trades/fills, trade_version:1 MUST be hard-coded in query_template \u2014 never from context.",
-        "Output DataFrame will always include trade_version=1 for hs_execution, hs_trades, and hs_orders_and_executions synthetic reads."
-      ],
-      "source_keyed_schema_port": "executions",
-      "source_param_for_schema": "source",
-      "source_schema_default": "hs_client_order",
-      "output_columns_by_source": {
-        "hs_client_order": [
-          "order_id",
-          "trader_id",
-          "book",
-          "currency_pair",
-          "order_time",
-          "order_type",
-          "side",
-          "quantity",
-          "limit_price",
-          "status",
-          "venue"
-        ],
-        "hs_execution": [
-          "exec_id",
-          "order_id",
-          "trader_id",
-          "book",
-          "currency_pair",
-          "exec_time",
-          "side",
-          "exec_quantity",
-          "exec_price",
-          "venue",
-          "counterparty",
-          "notional_usd",
-          "trade_version"
-        ],
-        "hs_trades": [
-          "trade_id",
-          "trader_id",
-          "book",
-          "currency_pair",
-          "trade_time",
-          "side",
-          "trade_quantity",
-          "trade_price",
-          "counterparty",
-          "trade_version"
-        ],
-        "hs_orders_and_executions": [
-          "order_id",
-          "exec_id",
-          "trader_id",
-          "book",
-          "currency_pair",
-          "order_time",
-          "exec_time",
-          "side",
-          "quantity",
-          "exec_quantity",
-          "limit_price",
-          "exec_price",
-          "status",
-          "trade_version"
-        ],
-        "hs_quotes": [
-          "quote_id",
-          "trader_id",
-          "currency_pair",
-          "quote_time",
-          "bid",
-          "ask",
-          "bid_size",
-          "ask_size",
-          "venue"
-        ]
-      },
-      "ports": {
-        "inputs": [
-          {
-            "name": "context",
-            "type": "object",
-            "description": "Context keys referenced in query_template as {context.xxx}",
-            "optional": true
-          }
-        ],
-        "outputs": [
-          {
-            "name": "executions",
-            "type": "dataframe",
-            "description": "Order/execution rows. Stored in ctx.datasets under the configured output_name.",
-            "optional": false,
-            "store_at": "ctx.datasets[{output_name}]"
-          },
-          {
-            "name": "row_count",
-            "type": "scalar",
-            "description": "Integer row count. Stored in ctx.values as {output_name}_count.",
-            "optional": true,
-            "store_at": "ctx.values[{output_name}_count]"
-          }
-        ]
-      },
-      "params": [
-        {
-          "name": "source",
-          "type": "enum",
-          "description": "Which Solr collection to query.",
-          "required": true,
-          "widget": "select",
-          "default": "hs_client_order",
-          "enum": [
-            "hs_client_order",
-            "hs_execution",
-            "hs_trades",
-            "hs_orders_and_executions",
-            "hs_quotes"
-          ]
-        },
-        {
-          "name": "query_template",
-          "type": "string",
-          "description": "Solr query; use {context.xxx} placeholders for alert fields.",
-          "required": true,
-          "widget": "textarea"
-        },
-        {
-          "name": "output_name",
-          "type": "string",
-          "description": "Dataset name in ctx.datasets.",
-          "required": true,
-          "widget": "text",
-          "default": "execution_data"
-        },
-        {
-          "name": "loop_over_books",
-          "type": "boolean",
-          "description": "Repeat the query for each book in the books list.",
-          "required": false,
-          "widget": "checkbox",
-          "default": false
-        },
-        {
-          "name": "books",
-          "type": "string_list",
-          "description": "Book names when loop_over_books=true.",
-          "required": false,
-          "widget": "chips",
-          "default": []
-        },
-        {
-          "name": "mock_csv_path",
-          "type": "string",
-          "description": "Demo-mode override: path to a CSV used verbatim instead of the synthetic generator. Ignored if the file is missing. CSV columns are not re-checked against the lists below; synthetic rows are.",
-          "required": false,
-          "widget": "text",
-          "default": ""
-        }
-      ]
-    },
-    "FEATURE_ENGINE": {
-      "description": "Apply ordered feature operations to a dataset",
-      "inputs": {
-        "dataset": "Any DataFrame referenced by input_name."
-      },
-      "outputs": {
-        "features": "Input DataFrame plus columns added or renamed by configured operations."
-      },
-      "config_schema": {
-        "input_name": "Source dataset name (an upstream output_name).",
-        "output_name": "Feature dataset name.",
-        "operations": "Ordered operations. Supported op values: rename, lifecycle_event, derive_signed_notional."
-      },
-      "constraints": [
-        "rename uses {op:'rename', columns:{old_col:new_col}}.",
-        "lifecycle_event adds _prev_status, _status_changed, _lifecycle_event when id/status columns exist.",
-        "derive_signed_notional adds signed_notional using quantity/price/side columns."
+        "Typical use: EXTRACT_LIST(executions, 'book') \u2192 fan-out keys for GROUP_BY_BOOK or MAP."
       ],
       "ports": {
         "inputs": [
           {
             "name": "dataset",
             "type": "dataframe",
-            "description": "Any DataFrame referenced by input_name.",
+            "description": "Source DataFrame (by input_name).",
             "optional": false
           }
         ],
         "outputs": [
           {
-            "name": "features",
-            "type": "dataframe",
-            "description": "Input DataFrame plus columns added or renamed by configured operations.",
-            "optional": false,
-            "store_at": "ctx.datasets[{output_name}]"
+            "name": "values",
+            "type": "object",
+            "description": "{values: [...]} \u2014 published under ctx.values[output_name].",
+            "optional": false
           }
         ]
       },
@@ -571,31 +441,398 @@
         {
           "name": "input_name",
           "type": "input_ref",
-          "description": "Source dataset name (an upstream output_name).",
+          "description": "Dataset name in ctx.datasets.",
+          "required": true,
+          "widget": "input_ref"
+        },
+        {
+          "name": "column",
+          "type": "string",
+          "description": "Column to enumerate.",
+          "required": true,
+          "widget": "text"
+        },
+        {
+          "name": "output_name",
+          "type": "string",
+          "description": "ctx.values key to publish {values: [...]} under.",
+          "required": true,
+          "widget": "text"
+        },
+        {
+          "name": "order",
+          "type": "enum",
+          "description": "sort: ascending, desc: descending, first_seen: original order.",
+          "required": false,
+          "widget": "select",
+          "default": "first_seen",
+          "enum": [
+            "sort",
+            "desc",
+            "first_seen"
+          ]
+        },
+        {
+          "name": "dropna",
+          "type": "boolean",
+          "description": "Exclude NaN values.",
+          "required": false,
+          "widget": "checkbox",
+          "default": true
+        }
+      ]
+    },
+    "EXTRACT_SCALAR": {
+      "description": "Reduce a column of an upstream DataFrame to a single scalar (first, unique_single, max, min, count, sum, mean).",
+      "inputs": {
+        "dataset": "Source DataFrame (by input_name)."
+      },
+      "outputs": {
+        "value": "Published under ctx.values[output_name]."
+      },
+      "config_schema": {
+        "input_name": "Dataset name in ctx.datasets.",
+        "column": "Column to reduce.",
+        "reducer": "How to collapse the column to a single value.",
+        "output_name": "ctx.values key to publish the scalar under.",
+        "fail_on_ambiguous": "When reducer=unique_single, raise if the column has more than one distinct value (default false \u2014 take the first)."
+      },
+      "constraints": [
+        "Typical use: EXTRACT_SCALAR(orders, 'trader_id', unique_single) \u2192 feeds a downstream collector's trader_filter_key."
+      ],
+      "ports": {
+        "inputs": [
+          {
+            "name": "dataset",
+            "type": "dataframe",
+            "description": "Source DataFrame (by input_name).",
+            "optional": false
+          }
+        ],
+        "outputs": [
+          {
+            "name": "value",
+            "type": "scalar",
+            "description": "Published under ctx.values[output_name].",
+            "optional": true
+          }
+        ]
+      },
+      "params": [
+        {
+          "name": "input_name",
+          "type": "input_ref",
+          "description": "Dataset name in ctx.datasets.",
+          "required": true,
+          "widget": "input_ref"
+        },
+        {
+          "name": "column",
+          "type": "string",
+          "description": "Column to reduce.",
+          "required": true,
+          "widget": "text"
+        },
+        {
+          "name": "reducer",
+          "type": "enum",
+          "description": "How to collapse the column to a single value.",
+          "required": true,
+          "widget": "select",
+          "default": "unique_single",
+          "enum": [
+            "first",
+            "unique_single",
+            "max",
+            "min",
+            "count",
+            "sum",
+            "mean"
+          ]
+        },
+        {
+          "name": "output_name",
+          "type": "string",
+          "description": "ctx.values key to publish the scalar under.",
+          "required": true,
+          "widget": "text"
+        },
+        {
+          "name": "fail_on_ambiguous",
+          "type": "boolean",
+          "description": "When reducer=unique_single, raise if the column has more than one distinct value (default false \u2014 take the first).",
+          "required": false,
+          "widget": "checkbox",
+          "default": false
+        }
+      ]
+    },
+    "FEATURE_ENGINE": {
+      "description": "Compose feature transforms (window, slice, pivot, agg, rolling, derive)",
+      "inputs": {
+        "dataset": "Source DataFrame referenced by input_name."
+      },
+      "outputs": {
+        "features": "Final working DataFrame after all chained ops, published as ctx.datasets[output_name]. Ops with an `as` field also publish intermediate datasets under that name."
+      },
+      "config_schema": {
+        "input_name": "Source dataset name.",
+        "output_name": "Target dataset name (defaults to input_name).",
+        "ops": "Ordered list of operations applied to the working DataFrame. Each op is {op: <name>, ...op-specific keys, as?: <publish_name>}. Supported ops:\n\u2022 window_bucket {time_col, interval_ms, out_col}\n  Floor a timestamp into integer buckets of size interval_ms.\n\n\u2022 time_slice {time_col, out_col, on_miss?, windows: [{name,start,end}]}\n  Label rows with a phase string based on which window they fall in.\n  start/end accept {context.x} or any ref grammar; missing rows get on_miss.\n\n\u2022 groupby_agg {by, aggs: {col: agg, ...}}\n  Standard pandas groupby + agg, returns a flat reset_index frame.\n\n\u2022 pivot {index, columns, values, aggfunc?}\n  DataFrame.pivot_table; column names cast to str; fill_value=0.\n\n\u2022 rolling {window, col, agg, out_col?}\n  Rolling window aggregation (mean/sum/min/max/std/...) with\n  min_periods=1.\n\n\u2022 derive {out_col, expr}\n  Vectorised DataFrame.eval expression (no Python branching).\n\n\u2022 apply_expr {out_col, expr}\n  Per-row Python expression evaluated with the row as locals.\n  Slower; use only when `derive` cannot express the logic."
+      },
+      "constraints": [
+        "Ops execute in declared order; mid-pipeline `as` publishes intermediate datasets without consuming them.",
+        "apply_expr runs Python eval row-by-row \u2014 keep expressions small and side-effect-free."
+      ],
+      "ports": {
+        "inputs": [
+          {
+            "name": "dataset",
+            "type": "dataframe",
+            "description": "Source DataFrame referenced by input_name.",
+            "optional": false
+          }
+        ],
+        "outputs": [
+          {
+            "name": "features",
+            "type": "dataframe",
+            "description": "Final working DataFrame after all chained ops, published as ctx.datasets[output_name]. Ops with an `as` field also publish intermediate datasets under that name.",
+            "optional": false
+          }
+        ]
+      },
+      "params": [
+        {
+          "name": "input_name",
+          "type": "input_ref",
+          "description": "Source dataset name.",
           "required": true,
           "widget": "input_ref"
         },
         {
           "name": "output_name",
           "type": "string",
-          "description": "Feature dataset name.",
+          "description": "Target dataset name (defaults to input_name).",
+          "required": false,
+          "widget": "text"
+        },
+        {
+          "name": "ops",
+          "type": "array",
+          "description": "Ordered list of operations applied to the working DataFrame. Each op is {op: <name>, ...op-specific keys, as?: <publish_name>}. Supported ops:\n\u2022 window_bucket {time_col, interval_ms, out_col}\n  Floor a timestamp into integer buckets of size interval_ms.\n\n\u2022 time_slice {time_col, out_col, on_miss?, windows: [{name,start,end}]}\n  Label rows with a phase string based on which window they fall in.\n  start/end accept {context.x} or any ref grammar; missing rows get on_miss.\n\n\u2022 groupby_agg {by, aggs: {col: agg, ...}}\n  Standard pandas groupby + agg, returns a flat reset_index frame.\n\n\u2022 pivot {index, columns, values, aggfunc?}\n  DataFrame.pivot_table; column names cast to str; fill_value=0.\n\n\u2022 rolling {window, col, agg, out_col?}\n  Rolling window aggregation (mean/sum/min/max/std/...) with\n  min_periods=1.\n\n\u2022 derive {out_col, expr}\n  Vectorised DataFrame.eval expression (no Python branching).\n\n\u2022 apply_expr {out_col, expr}\n  Per-row Python expression evaluated with the row as locals.\n  Slower; use only when `derive` cannot express the logic.",
+          "required": true,
+          "widget": "json",
+          "default": []
+        }
+      ]
+    },
+    "GROUP_BY": {
+      "description": "Split a dataset by column value into one DataFrame per group",
+      "inputs": {
+        "dataset": "Upstream dataset to partition."
+      },
+      "outputs": {
+        "keys": "{values: [...]} list of distinct group keys. Stored in ctx.values under keys_output_name (default '{input_name}_keys').",
+        "groups": "Each group slice is published as ctx.datasets[f\"{output_prefix}_{key}\"]. Conceptual bucket \u2014 runtime stores one dataset per key."
+      },
+      "config_schema": {
+        "input_name": "Name of the dataset to partition.",
+        "group_by_column": "Column whose distinct values define group boundaries.",
+        "output_prefix": "Prefix for per-group dataset names. For key='BOOK_A' and prefix 'orders_by_book', the slice is published as ctx.datasets['orders_by_book_BOOK_A'].",
+        "keys_output_name": "ctx.values key for the {values: [...]} list. Defaults to '{input_name}_keys' when blank.",
+        "dropna": "Drop rows where the group_by_column is null before partitioning.",
+        "order": "Key order: first_seen, sort (ascending), desc."
+      },
+      "constraints": [
+        "Output dataset names contain the raw key value \u2014 keep keys filesystem-safe."
+      ],
+      "ports": {
+        "inputs": [
+          {
+            "name": "dataset",
+            "type": "dataframe",
+            "description": "Upstream dataset to partition.",
+            "optional": false
+          }
+        ],
+        "outputs": [
+          {
+            "name": "keys",
+            "type": "object",
+            "description": "{values: [...]} list of distinct group keys. Stored in ctx.values under keys_output_name (default '{input_name}_keys').",
+            "optional": false
+          },
+          {
+            "name": "groups",
+            "type": "object",
+            "description": "Each group slice is published as ctx.datasets[f\"{output_prefix}_{key}\"]. Conceptual bucket \u2014 runtime stores one dataset per key.",
+            "optional": false
+          }
+        ]
+      },
+      "params": [
+        {
+          "name": "input_name",
+          "type": "string",
+          "description": "Name of the dataset to partition.",
           "required": true,
           "widget": "text"
         },
         {
-          "name": "operations",
-          "type": "array",
-          "description": "Ordered operations. Supported op values: rename, lifecycle_event, derive_signed_notional.",
+          "name": "group_by_column",
+          "type": "string",
+          "description": "Column whose distinct values define group boundaries.",
+          "required": true,
+          "widget": "text"
+        },
+        {
+          "name": "output_prefix",
+          "type": "string",
+          "description": "Prefix for per-group dataset names. For key='BOOK_A' and prefix 'orders_by_book', the slice is published as ctx.datasets['orders_by_book_BOOK_A'].",
+          "required": true,
+          "widget": "text"
+        },
+        {
+          "name": "keys_output_name",
+          "type": "string",
+          "description": "ctx.values key for the {values: [...]} list. Defaults to '{input_name}_keys' when blank.",
           "required": false,
-          "widget": "json",
+          "widget": "text",
+          "default": ""
+        },
+        {
+          "name": "dropna",
+          "type": "boolean",
+          "description": "Drop rows where the group_by_column is null before partitioning.",
+          "required": false,
+          "widget": "checkbox",
+          "default": true
+        },
+        {
+          "name": "order",
+          "type": "enum",
+          "description": "Key order: first_seen, sort (ascending), desc.",
+          "required": false,
+          "widget": "select",
+          "default": "first_seen",
+          "enum": [
+            "first_seen",
+            "sort",
+            "desc"
+          ]
+        }
+      ]
+    },
+    "MAP": {
+      "description": "Fan out a sub-workflow over a list of keys; aggregate results",
+      "inputs": {
+        "keys": "{values: [...]} list \u2014 typically from EXTRACT_LIST or GROUP_BY."
+      },
+      "outputs": {
+        "results": "{results: {<key>: {<collected_name>: value, ...}}} \u2014 stored in ctx.values[output_name]. Per-iteration datasets listed in collect_datasets are ALSO published at the top level as ctx.datasets[f\"{output_name}_{key}_{dataset_name}\"] so downstream nodes can address them directly."
+      },
+      "config_schema": {
+        "keys_key": "ctx.values key holding the {values: [...]} list to iterate.",
+        "iteration_ctx_key": "ctx.values key where the current iteration's key is written for each sub-workflow run. Lets sub-workflow collectors template queries against the current group.",
+        "dataset_prefix": "Optional prefix used by an upstream GROUP_BY. When set, the per-iteration dataset ctx.datasets[f\"{dataset_prefix}_{key}\"] is aliased into the child ctx under iteration_dataset_alias.",
+        "iteration_dataset_alias": "Alias name for the per-iteration dataset inside the child ctx. No-op when dataset_prefix is blank.",
+        "sub_workflow": "Nested DAG: {nodes: [...], edges: [...]}. Runs once per key.",
+        "collect_values": "ctx.values keys to harvest from each iteration into results[key].",
+        "collect_datasets": "ctx.datasets names to harvest from each iteration. They become both results[key][name] and ctx.datasets[f\"{output_name}_{key}_{name}\"].",
+        "output_name": "ctx.values key for the aggregated {results: {...}} dict."
+      },
+      "constraints": [
+        "sub_workflow is executed in topological order per iteration; child ctx is a shallow copy of parent.",
+        "Iteration-local writes do NOT leak back to the parent ctx except via collect_values / collect_datasets."
+      ],
+      "ports": {
+        "inputs": [
+          {
+            "name": "keys",
+            "type": "object",
+            "description": "{values: [...]} list \u2014 typically from EXTRACT_LIST or GROUP_BY.",
+            "optional": true
+          }
+        ],
+        "outputs": [
+          {
+            "name": "results",
+            "type": "object",
+            "description": "{results: {<key>: {<collected_name>: value, ...}}} \u2014 stored in ctx.values[output_name]. Per-iteration datasets listed in collect_datasets are ALSO published at the top level as ctx.datasets[f\"{output_name}_{key}_{dataset_name}\"] so downstream nodes can address them directly.",
+            "optional": false
+          }
+        ]
+      },
+      "params": [
+        {
+          "name": "keys_key",
+          "type": "string",
+          "description": "ctx.values key holding the {values: [...]} list to iterate.",
+          "required": true,
+          "widget": "text"
+        },
+        {
+          "name": "iteration_ctx_key",
+          "type": "string",
+          "description": "ctx.values key where the current iteration's key is written for each sub-workflow run. Lets sub-workflow collectors template queries against the current group.",
+          "required": true,
+          "widget": "text"
+        },
+        {
+          "name": "dataset_prefix",
+          "type": "string",
+          "description": "Optional prefix used by an upstream GROUP_BY. When set, the per-iteration dataset ctx.datasets[f\"{dataset_prefix}_{key}\"] is aliased into the child ctx under iteration_dataset_alias.",
+          "required": false,
+          "widget": "text",
+          "default": ""
+        },
+        {
+          "name": "iteration_dataset_alias",
+          "type": "string",
+          "description": "Alias name for the per-iteration dataset inside the child ctx. No-op when dataset_prefix is blank.",
+          "required": false,
+          "widget": "text",
+          "default": ""
+        },
+        {
+          "name": "sub_workflow",
+          "type": "object",
+          "description": "Nested DAG: {nodes: [...], edges: [...]}. Runs once per key.",
+          "required": true,
+          "widget": "json"
+        },
+        {
+          "name": "collect_values",
+          "type": "string_list",
+          "description": "ctx.values keys to harvest from each iteration into results[key].",
+          "required": false,
+          "widget": "chips",
           "default": []
+        },
+        {
+          "name": "collect_datasets",
+          "type": "string_list",
+          "description": "ctx.datasets names to harvest from each iteration. They become both results[key][name] and ctx.datasets[f\"{output_name}_{key}_{name}\"].",
+          "required": false,
+          "widget": "chips",
+          "default": []
+        },
+        {
+          "name": "output_name",
+          "type": "string",
+          "description": "ctx.values key for the aggregated {results: {...}} dict.",
+          "required": true,
+          "widget": "text",
+          "default": "map_results"
         }
       ]
     },
     "MARKET_DATA_COLLECTOR": {
       "description": "Query EBS/Mercury tick data, normalise timestamps",
       "inputs": {
-        "context": "Context keys referenced in query_template as {context.xxx}."
+        "context": "Context keys referenced in query_template as {context.xxx}.",
+        "window": "Optional TIME_WINDOW output; when present, filters ticks by timestamp."
       },
       "outputs": {
         "ticks": "DataFrame with columns: timestamp (ISO str), symbol (str), bid, ask, mid, spread_pips, bid_size, ask_size, venue_name, seq_no. Stored under ctx.datasets[output_name].",
@@ -605,7 +842,8 @@
         "source": "Which tick feed to query.",
         "query_template": "Query with {context.xxx} placeholders.",
         "output_name": "Dataset name in ctx.datasets.",
-        "mock_csv_path": "Demo-mode override: path to a CSV used verbatim instead of the synthetic generator. Ignored if the file is missing."
+        "mock_csv_path": "Demo-mode override: path to a CSV used verbatim instead of the synthetic generator. Ignored if the file is missing.",
+        "window_key": "ctx.values key holding the window dict (default 'window'). No-op if key is absent."
       },
       "constraints": [
         "Normalises raw_timestamp (nanosecond int) \u2192 ISO-8601 string.",
@@ -618,6 +856,12 @@
             "type": "object",
             "description": "Context keys referenced in query_template as {context.xxx}.",
             "optional": true
+          },
+          {
+            "name": "window",
+            "type": "object",
+            "description": "Optional TIME_WINDOW output; when present, filters ticks by timestamp.",
+            "optional": true
           }
         ],
         "outputs": [
@@ -625,27 +869,13 @@
             "name": "ticks",
             "type": "dataframe",
             "description": "DataFrame with columns: timestamp (ISO str), symbol (str), bid, ask, mid, spread_pips, bid_size, ask_size, venue_name, seq_no. Stored under ctx.datasets[output_name].",
-            "optional": false,
-            "required_columns": [
-              "timestamp",
-              "symbol",
-              "bid",
-              "ask",
-              "mid",
-              "spread_pips",
-              "bid_size",
-              "ask_size",
-              "venue_name",
-              "seq_no"
-            ],
-            "store_at": "ctx.datasets[{output_name}]"
+            "optional": false
           },
           {
             "name": "tick_count",
             "type": "scalar",
             "description": "Tick count (int). Stored as {output_name}_tick_count.",
-            "optional": true,
-            "store_at": "ctx.values[{output_name}_tick_count]"
+            "optional": true
           }
         ]
       },
@@ -684,98 +914,149 @@
           "required": false,
           "widget": "text",
           "default": ""
+        },
+        {
+          "name": "window_key",
+          "type": "string",
+          "description": "ctx.values key holding the window dict (default 'window'). No-op if key is absent.",
+          "required": false,
+          "widget": "text",
+          "default": "window"
         }
       ]
     },
-    "ORACLE_DATA_COLLECTOR": {
-      "description": "Query Oracle surveillance warehouse order/execution extracts",
+    "NORMALISE_ENRICH": {
+      "description": "Rename fields, lifecycle tracking, signed_notional",
       "inputs": {
-        "context": "Context keys referenced in query_template as {context.xxx}"
+        "dataset": "Any trade DataFrame referenced by input_name."
       },
       "outputs": {
-        "rows": "Oracle extract rows. Stored in ctx.datasets under the configured output_name.",
-        "row_count": "Integer row count. Stored in ctx.values as {output_name}_count."
+        "enriched": "Enriched DataFrame. May add: _prev_status, _status_changed, _lifecycle_event, signed_notional."
       },
       "config_schema": {
-        "source": "Which Oracle extract to query.",
-        "query_template": "Oracle SQL template; use {context.xxx} placeholders for alert fields.",
-        "output_name": "Dataset name in ctx.datasets.",
-        "mock_csv_path": "Demo-mode override: path to a CSV used verbatim instead of the synthetic generator."
-      },
-      "source_keyed_schema_port": "rows",
-      "source_param_for_schema": "source",
-      "source_schema_default": "oracle_orders",
-      "output_columns_by_source": {
-        "oracle_orders": [
-          "oracle_order_id",
-          "trader_id",
-          "book",
-          "instrument",
-          "order_time",
-          "side",
-          "quantity",
-          "limit_price",
-          "order_status"
-        ],
-        "oracle_executions": [
-          "oracle_exec_id",
-          "oracle_order_id",
-          "trader_id",
-          "book",
-          "instrument",
-          "exec_time",
-          "side",
-          "exec_quantity",
-          "exec_price",
-          "counterparty"
-        ]
+        "input_name": "Source dataset name (an upstream output_name).",
+        "output_name": "Enriched dataset name.",
+        "field_renames": "Map of old_col_name \u2192 new_col_name.",
+        "track_lifecycle": "Adds _prev_status, _status_changed, _lifecycle_event (requires order_id, status columns).",
+        "compute_signed_notional": "Adds signed_notional = qty * price * \u00b11 based on side (BUY=+1, SELL=-1)."
       },
       "ports": {
         "inputs": [
           {
-            "name": "context",
-            "type": "object",
-            "description": "Context keys referenced in query_template as {context.xxx}",
-            "optional": true
+            "name": "dataset",
+            "type": "dataframe",
+            "description": "Any trade DataFrame referenced by input_name.",
+            "optional": false
           }
         ],
         "outputs": [
           {
-            "name": "rows",
+            "name": "enriched",
             "type": "dataframe",
-            "description": "Oracle extract rows. Stored in ctx.datasets under the configured output_name.",
-            "optional": false,
-            "store_at": "ctx.datasets[{output_name}]"
-          },
-          {
-            "name": "row_count",
-            "type": "scalar",
-            "description": "Integer row count. Stored in ctx.values as {output_name}_count.",
-            "optional": true,
-            "store_at": "ctx.values[{output_name}_count]"
+            "description": "Enriched DataFrame. May add: _prev_status, _status_changed, _lifecycle_event, signed_notional.",
+            "optional": false
           }
         ]
       },
       "params": [
         {
-          "name": "source",
-          "type": "enum",
-          "description": "Which Oracle extract to query.",
+          "name": "input_name",
+          "type": "input_ref",
+          "description": "Source dataset name (an upstream output_name).",
           "required": true,
-          "widget": "select",
-          "default": "oracle_orders",
-          "enum": [
-            "oracle_orders",
-            "oracle_executions"
-          ]
+          "widget": "input_ref"
         },
+        {
+          "name": "output_name",
+          "type": "string",
+          "description": "Enriched dataset name.",
+          "required": true,
+          "widget": "text"
+        },
+        {
+          "name": "field_renames",
+          "type": "object",
+          "description": "Map of old_col_name \u2192 new_col_name.",
+          "required": false,
+          "widget": "json",
+          "default": {}
+        },
+        {
+          "name": "track_lifecycle",
+          "type": "boolean",
+          "description": "Adds _prev_status, _status_changed, _lifecycle_event (requires order_id, status columns).",
+          "required": false,
+          "widget": "checkbox",
+          "default": false
+        },
+        {
+          "name": "compute_signed_notional",
+          "type": "boolean",
+          "description": "Adds signed_notional = qty * price * \u00b11 based on side (BUY=+1, SELL=-1).",
+          "required": false,
+          "widget": "checkbox",
+          "default": false
+        }
+      ]
+    },
+    "ORDER_COLLECTOR": {
+      "description": "Query Solr hs_client_order for order-lifecycle rows filtered by trader and time window.",
+      "inputs": {
+        "context": "Context keys referenced in query_template as {context.xxx}.",
+        "window": "Optional TIME_WINDOW output (start_time, end_time) \u2014 when wired, filters rows to the window."
+      },
+      "outputs": {
+        "orders": "Order lifecycle rows. Stored in ctx.datasets under the configured output_name.",
+        "row_count": "Integer row count. Stored as {output_name}_count."
+      },
+      "config_schema": {
+        "query_template": "Solr query template; use {context.xxx} placeholders.",
+        "output_name": "Dataset name in ctx.datasets.",
+        "window_key": "ctx.values key holding the window dict (default: 'window'). Used when the window input is wired.",
+        "trader_filter_key": "ctx.values key whose value is used to filter by trader_id. Empty = no trader filter.",
+        "mock_csv_path": "Demo-mode override: path to a CSV used verbatim instead of the synthetic generator."
+      },
+      "constraints": [
+        "Columns guaranteed: order_id, trader_id, book, instrument, side, order_time, quantity, status.",
+        "When window is wired, rows outside [window.start_time, window.end_time] are filtered out."
+      ],
+      "ports": {
+        "inputs": [
+          {
+            "name": "context",
+            "type": "object",
+            "description": "Context keys referenced in query_template as {context.xxx}.",
+            "optional": true
+          },
+          {
+            "name": "window",
+            "type": "object",
+            "description": "Optional TIME_WINDOW output (start_time, end_time) \u2014 when wired, filters rows to the window.",
+            "optional": true
+          }
+        ],
+        "outputs": [
+          {
+            "name": "orders",
+            "type": "dataframe",
+            "description": "Order lifecycle rows. Stored in ctx.datasets under the configured output_name.",
+            "optional": false
+          },
+          {
+            "name": "row_count",
+            "type": "scalar",
+            "description": "Integer row count. Stored as {output_name}_count.",
+            "optional": true
+          }
+        ]
+      },
+      "params": [
         {
           "name": "query_template",
           "type": "string",
-          "description": "Oracle SQL template; use {context.xxx} placeholders for alert fields.",
-          "required": false,
-          "widget": "textarea",
-          "default": ""
+          "description": "Solr query template; use {context.xxx} placeholders.",
+          "required": true,
+          "widget": "textarea"
         },
         {
           "name": "output_name",
@@ -783,7 +1064,23 @@
           "description": "Dataset name in ctx.datasets.",
           "required": true,
           "widget": "text",
-          "default": "oracle_data"
+          "default": "orders"
+        },
+        {
+          "name": "window_key",
+          "type": "string",
+          "description": "ctx.values key holding the window dict (default: 'window'). Used when the window input is wired.",
+          "required": false,
+          "widget": "text",
+          "default": "window"
+        },
+        {
+          "name": "trader_filter_key",
+          "type": "string",
+          "description": "ctx.values key whose value is used to filter by trader_id. Empty = no trader filter.",
+          "required": false,
+          "widget": "text",
+          "default": "trader_id"
         },
         {
           "name": "mock_csv_path",
@@ -808,7 +1105,8 @@
       },
       "config_schema": {
         "output_path": "File path for the Excel output (e.g. 'output/report.xlsx').",
-        "tabs": "Array of {name: string (max 31 chars), dataset: string, include_highlights: boolean}. When empty, all context.datasets are included."
+        "tabs": "Array of tab specs. Each tab is one of:\n\u2022 Static tab \u2014 {name, dataset, include_highlights?}.\n  Renders the named dataset under the given sheet name.\n\n\u2022 Expanded tab \u2014 {expand_from, as?, name, dataset, include_highlights?}.\n  `expand_from` is a single `{ref}` resolving to a list, dict,\n  Series, or MAP-result. One tab is emitted per item, with the\n  item bound under `as` (default `item`) and substituted into both\n  `name` and `dataset` templates via `.format_map`. Examples:\n\n    expand_from: \"{context.book_list}\"\n    as: book\n    name: \"Executions \u00b7 {book}\"\n    dataset: \"executions_{book}\"\n\n    expand_from: \"{per_book.results}\"   # MAP result dict\n    as: key\n    name: \"Per-book {key}\"\n    dataset: \"per_book_{key}_executions\"\n\nWhen `tabs` is empty, all context.datasets are included as auto-named tabs.",
+        "summary_position": "Cover/Exec/Sections placement relative to data tabs."
       },
       "constraints": [
         "Tab names truncated to 31 characters (Excel limit).",
@@ -849,8 +1147,7 @@
             "name": "report_path",
             "type": "text",
             "description": "Absolute path to the written .xlsx file. Stored as context.report_path.",
-            "optional": false,
-            "store_at": "ctx.report_path"
+            "optional": false
           }
         ]
       },
@@ -865,10 +1162,22 @@
         {
           "name": "tabs",
           "type": "array",
-          "description": "Array of {name: string (max 31 chars), dataset: string, include_highlights: boolean}. When empty, all context.datasets are included.",
+          "description": "Array of tab specs. Each tab is one of:\n\u2022 Static tab \u2014 {name, dataset, include_highlights?}.\n  Renders the named dataset under the given sheet name.\n\n\u2022 Expanded tab \u2014 {expand_from, as?, name, dataset, include_highlights?}.\n  `expand_from` is a single `{ref}` resolving to a list, dict,\n  Series, or MAP-result. One tab is emitted per item, with the\n  item bound under `as` (default `item`) and substituted into both\n  `name` and `dataset` templates via `.format_map`. Examples:\n\n    expand_from: \"{context.book_list}\"\n    as: book\n    name: \"Executions \u00b7 {book}\"\n    dataset: \"executions_{book}\"\n\n    expand_from: \"{per_book.results}\"   # MAP result dict\n    as: key\n    name: \"Per-book {key}\"\n    dataset: \"per_book_{key}_executions\"\n\nWhen `tabs` is empty, all context.datasets are included as auto-named tabs.",
           "required": false,
           "widget": "json",
           "default": []
+        },
+        {
+          "name": "summary_position",
+          "type": "enum",
+          "description": "Cover/Exec/Sections placement relative to data tabs.",
+          "required": false,
+          "widget": "select",
+          "default": "first",
+          "enum": [
+            "first",
+            "last"
+          ]
         }
       ]
     },
@@ -884,11 +1193,19 @@
       "config_schema": {
         "section_name": "Unique section identifier.",
         "input_name": "Source dataset.",
-        "field_bindings": "Array of {field: string, agg: 'count'|'sum'|'mean'|'nunique'|'max'|'min'}.",
-        "llm_prompt_template": "Prompt with {stats}, {section}, {disposition}, {trader_id}, {currency_pair} placeholders."
+        "mode": "templated     \u2014 legacy stats-in-prompt flow. fact_pack_llm \u2014 pre-compute named facts, pass as JSON, verify each\n                required fact appears in narrative (retry once).\nevent_narrative \u2014 format one line per row into a chronological list,\n                  then stitch with an LLM.",
+        "field_bindings": "Array of {field: string, agg: 'count'|'sum'|'mean'|'nunique'|'max'|'min'}. Used in templated mode.",
+        "facts": "Array of {name, column, agg} for fact_pack_llm mode. Example: [{name: 'buy_count', column: 'side', agg: 'count_where_buy'}].",
+        "required_facts": "Fact names whose values MUST appear verbatim in the generated narrative. A retry is triggered once if any are missing.",
+        "sort_by": "Column used to order rows for event_narrative mode.",
+        "event_template": "Python format string used to render each event row in event_narrative mode. Row columns are passed as keyword args. Example: '{timestamp}  {side} {quantity} @ {limit_price}'.",
+        "max_events": "Cap events passed to the LLM in event_narrative mode.",
+        "llm_prompt_template": "Prompt with {stats}, {facts}, {events}, {section}, {disposition}, {trader_id}, {currency_pair} placeholders, plus any vars defined under prompt_context.vars and (when mode=dataset|mixed) {dataset}. Cross-dataset refs like {executions.notional.sum} resolve inline.",
+        "prompt_context": "Optional structured slot block: {mode: template|dataset|mixed, vars: {name: ref_expr, ...}, dataset: {ref, format, max_rows, columns}}. vars resolve cross-dataset refs into named slots; the serialized dataset (csv/json/markdown) is exposed as {dataset}."
       },
       "constraints": [
-        "LLM model: claude-sonnet-4-6, max_tokens: 600."
+        "LLM model: claude-sonnet-4-6, max_tokens: 600.",
+        "fact_pack_llm retries at most once when required facts are missing from the narrative."
       ],
       "ports": {
         "inputs": [
@@ -910,14 +1227,7 @@
             "name": "section",
             "type": "object",
             "description": "{name, stats, narrative, dataset}. Stored under context.sections[section_name].",
-            "optional": false,
-            "required_keys": [
-              "name",
-              "stats",
-              "narrative",
-              "dataset"
-            ],
-            "store_at": "ctx.sections[{section_name}]"
+            "optional": false
           }
         ]
       },
@@ -937,29 +1247,90 @@
           "widget": "input_ref"
         },
         {
+          "name": "mode",
+          "type": "enum",
+          "description": "templated     \u2014 legacy stats-in-prompt flow. fact_pack_llm \u2014 pre-compute named facts, pass as JSON, verify each\n                required fact appears in narrative (retry once).\nevent_narrative \u2014 format one line per row into a chronological list,\n                  then stitch with an LLM.",
+          "required": false,
+          "widget": "select",
+          "default": "templated",
+          "enum": [
+            "templated",
+            "fact_pack_llm",
+            "event_narrative"
+          ]
+        },
+        {
           "name": "field_bindings",
           "type": "array",
-          "description": "Array of {field: string, agg: 'count'|'sum'|'mean'|'nunique'|'max'|'min'}.",
+          "description": "Array of {field: string, agg: 'count'|'sum'|'mean'|'nunique'|'max'|'min'}. Used in templated mode.",
           "required": false,
           "widget": "json",
           "default": []
         },
         {
+          "name": "facts",
+          "type": "array",
+          "description": "Array of {name, column, agg} for fact_pack_llm mode. Example: [{name: 'buy_count', column: 'side', agg: 'count_where_buy'}].",
+          "required": false,
+          "widget": "json",
+          "default": []
+        },
+        {
+          "name": "required_facts",
+          "type": "string_list",
+          "description": "Fact names whose values MUST appear verbatim in the generated narrative. A retry is triggered once if any are missing.",
+          "required": false,
+          "widget": "chips",
+          "default": []
+        },
+        {
+          "name": "sort_by",
+          "type": "string",
+          "description": "Column used to order rows for event_narrative mode.",
+          "required": false,
+          "widget": "text",
+          "default": ""
+        },
+        {
+          "name": "event_template",
+          "type": "string",
+          "description": "Python format string used to render each event row in event_narrative mode. Row columns are passed as keyword args. Example: '{timestamp}  {side} {quantity} @ {limit_price}'.",
+          "required": false,
+          "widget": "text",
+          "default": ""
+        },
+        {
+          "name": "max_events",
+          "type": "integer",
+          "description": "Cap events passed to the LLM in event_narrative mode.",
+          "required": false,
+          "widget": "number",
+          "default": 40
+        },
+        {
           "name": "llm_prompt_template",
           "type": "string",
-          "description": "Prompt with {stats}, {section}, {disposition}, {trader_id}, {currency_pair} placeholders.",
+          "description": "Prompt with {stats}, {facts}, {events}, {section}, {disposition}, {trader_id}, {currency_pair} placeholders, plus any vars defined under prompt_context.vars and (when mode=dataset|mixed) {dataset}. Cross-dataset refs like {executions.notional.sum} resolve inline.",
           "required": false,
           "widget": "textarea"
+        },
+        {
+          "name": "prompt_context",
+          "type": "object",
+          "description": "Optional structured slot block: {mode: template|dataset|mixed, vars: {name: ref_expr, ...}, dataset: {ref, format, max_rows, columns}}. vars resolve cross-dataset refs into named slots; the serialized dataset (csv/json/markdown) is exposed as {dataset}.",
+          "required": false,
+          "widget": "json",
+          "default": {}
         }
       ]
     },
     "SIGNAL_CALCULATOR": {
       "description": "Compute signals \u2014 always outputs 5 columns",
       "inputs": {
-        "dataset": "Trade/execution DataFrame, often after FEATURE_ENGINE."
+        "dataset": "Trade/execution DataFrame (typically after NORMALISE_ENRICH)."
       },
       "outputs": {
-        "signals": "Input DataFrame + exactly 5 signal columns: _signal_flag (bool), _signal_score (float 0-1), _signal_reason (str), _signal_type (str), _signal_window (str).",
+        "signals": "Input DataFrame + exactly 5 signal columns: _signal_flag (bool), _signal_score (float 0-10), _signal_reason (str), _signal_type (str), _signal_window (str).",
         "flag_count": "Number of rows where _signal_flag == True. Stored as {output_name}_flag_count."
       },
       "config_schema": {
@@ -976,29 +1347,6 @@
         "Missing signal columns are auto-filled with defaults (False, 0.0, '', '', '').",
         "Custom scripts must operate on local variable 'df' and leave result in 'df'."
       ],
-      "signal_output_columns": [
-        "_signal_flag",
-        "_signal_score",
-        "_signal_reason",
-        "_signal_type",
-        "_signal_window"
-      ],
-      "built_in_required_columns": {
-        "FRONT_RUNNING": [
-          "exec_time",
-          "exec_price"
-        ],
-        "WASH_TRADE": [
-          "side"
-        ],
-        "SPOOFING": [
-          "status"
-        ],
-        "LAYERING": [
-          "order_type",
-          "side"
-        ]
-      },
       "built_in_signal_params": {
         "FRONT_RUNNING": {
           "window_minutes": 5,
@@ -1022,7 +1370,7 @@
           {
             "name": "dataset",
             "type": "dataframe",
-            "description": "Trade/execution DataFrame, often after FEATURE_ENGINE.",
+            "description": "Trade/execution DataFrame (typically after NORMALISE_ENRICH).",
             "optional": false
           }
         ],
@@ -1030,23 +1378,14 @@
           {
             "name": "signals",
             "type": "dataframe",
-            "description": "Input DataFrame + exactly 5 signal columns: _signal_flag (bool), _signal_score (float 0-1), _signal_reason (str), _signal_type (str), _signal_window (str).",
-            "optional": false,
-            "required_columns": [
-              "_signal_flag",
-              "_signal_score",
-              "_signal_reason",
-              "_signal_type",
-              "_signal_window"
-            ],
-            "store_at": "ctx.datasets[{output_name}]"
+            "description": "Input DataFrame + exactly 5 signal columns: _signal_flag (bool), _signal_score (float 0-10), _signal_reason (str), _signal_type (str), _signal_window (str).",
+            "optional": false
           },
           {
             "name": "flag_count",
             "type": "scalar",
             "description": "Number of rows where _signal_flag == True. Stored as {output_name}_flag_count.",
-            "optional": true,
-            "store_at": "ctx.values[{output_name}_flag_count]"
+            "optional": true
           }
         ]
       },
@@ -1111,6 +1450,219 @@
           "description": "Inline Python snippet operating on local variable `df` (upload_script mode).",
           "required": false,
           "widget": "code"
+        }
+      ]
+    },
+    "TIME_WINDOW": {
+      "description": "Expand an event time into a [start_time, end_time] window for downstream filtering.",
+      "inputs": {
+        "context": "Context keys referenced in event_time_key / end_time_key."
+      },
+      "outputs": {
+        "window": "{start_time, end_time, buffer_minutes}. Published under ctx.values[output_name]."
+      },
+      "config_schema": {
+        "event_time_key": "ctx.values key holding the anchor time (e.g. 'fr_start' from the alert). Required unless start_time_literal is set.",
+        "end_time_key": "ctx.values key holding the end anchor (e.g. 'fr_end'). If empty, end = start.",
+        "start_time_literal": "Literal ISO start time. Used when the window anchor isn't in ctx.values.",
+        "end_time_literal": "Literal ISO end time.",
+        "pre_minutes": "Subtract this many minutes from the start anchor.",
+        "post_minutes": "Add this many minutes to the end anchor.",
+        "output_name": "ctx.values key under which to publish the window dict (default 'window')."
+      },
+      "constraints": [
+        "Output dict keys: start_time (ISO str), end_time (ISO str), buffer_minutes {pre, post}.",
+        "If the event time cannot be resolved, publishes an empty dict \u2014 downstream collectors treat that as no-filter."
+      ],
+      "ports": {
+        "inputs": [
+          {
+            "name": "context",
+            "type": "object",
+            "description": "Context keys referenced in event_time_key / end_time_key.",
+            "optional": true
+          }
+        ],
+        "outputs": [
+          {
+            "name": "window",
+            "type": "object",
+            "description": "{start_time, end_time, buffer_minutes}. Published under ctx.values[output_name].",
+            "optional": false
+          }
+        ]
+      },
+      "params": [
+        {
+          "name": "event_time_key",
+          "type": "string",
+          "description": "ctx.values key holding the anchor time (e.g. 'fr_start' from the alert). Required unless start_time_literal is set.",
+          "required": false,
+          "widget": "text",
+          "default": ""
+        },
+        {
+          "name": "end_time_key",
+          "type": "string",
+          "description": "ctx.values key holding the end anchor (e.g. 'fr_end'). If empty, end = start.",
+          "required": false,
+          "widget": "text",
+          "default": ""
+        },
+        {
+          "name": "start_time_literal",
+          "type": "string",
+          "description": "Literal ISO start time. Used when the window anchor isn't in ctx.values.",
+          "required": false,
+          "widget": "text",
+          "default": ""
+        },
+        {
+          "name": "end_time_literal",
+          "type": "string",
+          "description": "Literal ISO end time.",
+          "required": false,
+          "widget": "text",
+          "default": ""
+        },
+        {
+          "name": "pre_minutes",
+          "type": "integer",
+          "description": "Subtract this many minutes from the start anchor.",
+          "required": false,
+          "widget": "number",
+          "default": 0
+        },
+        {
+          "name": "post_minutes",
+          "type": "integer",
+          "description": "Add this many minutes to the end anchor.",
+          "required": false,
+          "widget": "number",
+          "default": 0
+        },
+        {
+          "name": "output_name",
+          "type": "string",
+          "description": "ctx.values key under which to publish the window dict (default 'window').",
+          "required": true,
+          "widget": "text",
+          "default": "window"
+        }
+      ]
+    },
+    "TRADE_DATA_COLLECTOR": {
+      "description": "Query Solr trade data (orders/executions)",
+      "inputs": {
+        "context": "Context keys referenced in query_template as {context.xxx}",
+        "window": "Optional TIME_WINDOW output; when present, filters rows by exec_time/order_time."
+      },
+      "outputs": {
+        "trades": "Order / execution rows. Stored in ctx.datasets under the configured output_name.",
+        "row_count": "Integer row count. Stored in ctx.values as {output_name}_count."
+      },
+      "config_schema": {
+        "source": "Which Solr collection to query.",
+        "query_template": "Solr query; use {context.xxx} placeholders for alert fields.",
+        "output_name": "Dataset name in ctx.datasets.",
+        "loop_over_books": "Repeat the query for each book in the books list.",
+        "books": "Book names when loop_over_books=true.",
+        "mock_csv_path": "Demo-mode override: path to a CSV used verbatim instead of the synthetic generator. Ignored if the file is missing.",
+        "window_key": "ctx.values key holding the window dict (default 'window'). No-op if key is absent."
+      },
+      "constraints": [
+        "When source='hs_execution', trade_version:1 MUST be hard-coded in query_template \u2014 never from context.",
+        "Output DataFrame will always include trade_version=1 column for hs_execution."
+      ],
+      "ports": {
+        "inputs": [
+          {
+            "name": "context",
+            "type": "object",
+            "description": "Context keys referenced in query_template as {context.xxx}",
+            "optional": true
+          },
+          {
+            "name": "window",
+            "type": "object",
+            "description": "Optional TIME_WINDOW output; when present, filters rows by exec_time/order_time.",
+            "optional": true
+          }
+        ],
+        "outputs": [
+          {
+            "name": "trades",
+            "type": "dataframe",
+            "description": "Order / execution rows. Stored in ctx.datasets under the configured output_name.",
+            "optional": false
+          },
+          {
+            "name": "row_count",
+            "type": "scalar",
+            "description": "Integer row count. Stored in ctx.values as {output_name}_count.",
+            "optional": true
+          }
+        ]
+      },
+      "params": [
+        {
+          "name": "source",
+          "type": "enum",
+          "description": "Which Solr collection to query.",
+          "required": true,
+          "widget": "select",
+          "default": "hs_client_order",
+          "enum": [
+            "hs_client_order",
+            "hs_execution"
+          ]
+        },
+        {
+          "name": "query_template",
+          "type": "string",
+          "description": "Solr query; use {context.xxx} placeholders for alert fields.",
+          "required": true,
+          "widget": "textarea"
+        },
+        {
+          "name": "output_name",
+          "type": "string",
+          "description": "Dataset name in ctx.datasets.",
+          "required": true,
+          "widget": "text",
+          "default": "trade_data"
+        },
+        {
+          "name": "loop_over_books",
+          "type": "boolean",
+          "description": "Repeat the query for each book in the books list.",
+          "required": false,
+          "widget": "checkbox",
+          "default": false
+        },
+        {
+          "name": "books",
+          "type": "string_list",
+          "description": "Book names when loop_over_books=true.",
+          "required": false,
+          "widget": "chips",
+          "default": []
+        },
+        {
+          "name": "mock_csv_path",
+          "type": "string",
+          "description": "Demo-mode override: path to a CSV used verbatim instead of the synthetic generator. Ignored if the file is missing.",
+          "required": false,
+          "widget": "text",
+          "default": ""
+        },
+        {
+          "name": "window_key",
+          "type": "string",
+          "description": "ctx.values key holding the window dict (default 'window'). No-op if key is absent.",
+          "required": false,
+          "widget": "text",
+          "default": "window"
         }
       ]
     }

@@ -1,3 +1,18 @@
+/**
+ * Thin HTTP client for every backend endpoint the UI calls.
+ *
+ * Conventions:
+ *   • One async function per endpoint; named after the action, not the
+ *     URL ("listWorkflows" not "getWorkflows").
+ *   • All requests go through `request()` so error parsing,
+ *     ValidationError raising, and JSON content-type are centralised.
+ *   • Streaming endpoints (/run/stream, /copilot/stream) return an
+ *     async iterable of typed SSE events — components consume them
+ *     with `for await (const ev of streamRun(...))`.
+ *
+ * Vite's dev server proxies `/api/*` to the FastAPI backend at
+ * localhost:8000 (see vite.config.ts), so BASE stays relative.
+ */
 import type {
   Workflow,
   RunResult,

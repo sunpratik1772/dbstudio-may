@@ -129,7 +129,7 @@ class ValidationErrorCode(str, Enum):
     """Custom signal references a `script_path` that doesn't exist on disk."""
 
     UPLOAD_SCRIPT_DISABLED = "UPLOAD_SCRIPT_DISABLED"
-    """SIGNAL_CALCULATOR upload_script mode is disabled by environment policy."""
+    """SIGNAL_CALCULATOR.upload_script is disabled in this environment (DBSHERPA_ALLOW_UPLOAD_SCRIPT not set)."""
 
 
 # Backwards-compat alias: some older imports reached for `ErrorCode`.

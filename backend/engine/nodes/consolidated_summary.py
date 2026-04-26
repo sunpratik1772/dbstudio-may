@@ -1,12 +1,33 @@
+"""
+CONSOLIDATED_SUMMARY — final executive narrative for the report.
+
+Reads the small narratives that SECTION_SUMMARY nodes left in
+`ctx.sections`, plus the disposition / severity from DECISION_RULE,
+and asks the LLM to stitch them into a 5-paragraph executive summary.
+
+Why a separate node: keeping section narratives independent makes
+each one cheap to retry and easy to swap. The exec summary just
+glues them; it does no fact-pack verification of its own.
+
+The `prompt_context` block on this node is shared with
+SECTION_SUMMARY (see engine/prompt_context.py) — set
+`prompt_context.vars` to inject any cross-dataset slot you want to
+reference in the prompt template.
+
+The `_llm_summary` indirection exists so tests can monkey-patch the
+LLM seam to deterministic prose (see test_fro_v2_golden_path.py).
+"""
 from pathlib import Path
 
 from llm import get_default_adapter
 
 from ..context import RunContext
 from ..node_spec import NodeSpec, _spec_from_yaml
+from ..prompt_context import build_slots, render_prompt
 
 
 def _llm_summary(prompt: str) -> str:
+    """LLM seam — monkey-patched in tests to return deterministic text."""
     try:
         return get_default_adapter().single_shot(
             prompt,
@@ -17,20 +38,7 @@ def _llm_summary(prompt: str) -> str:
         return f"[LLM unavailable — {e}]"
 
 
-def handle_consolidated_summary(node: dict, ctx: RunContext) -> None:
-    cfg = node.get("config", {})
-    prompt_template: str = cfg.get("llm_prompt_template", "")
-
-    section_text = "\n\n".join(
-        f"### {name}\n{s['narrative']}" for name, s in ctx.sections.items()
-    )
-
-    trader_id = ctx.get("trader_id", "Unknown")
-    currency_pair = ctx.get("currency_pair", "N/A")
-    disposition = ctx.get("disposition", "REVIEW")
-    flag_count = ctx.get("flag_count", 0)
-
-    default_prompt = f"""You are a senior financial surveillance analyst at a global bank.
+_DEFAULT_PROMPT = """You are a senior financial surveillance analyst at a global bank.
 
 Write a concise executive summary for the following trade surveillance alert.
 
@@ -51,23 +59,25 @@ Structure your summary across these paragraphs:
 
 Be precise, analytical, and reference specific statistics from the section findings."""
 
-    if prompt_template:
-        rendered = ctx.inject_template(prompt_template)
 
-        class _SafeMap(dict):
-            def __missing__(self, key):
-                return "{" + key + "}"
+def handle_consolidated_summary(node: dict, ctx: RunContext) -> None:
+    cfg = node.get("config", {})
+    template: str = cfg.get("llm_prompt_template") or _DEFAULT_PROMPT
 
-        prompt = rendered.format_map(_SafeMap(
-            section_text=section_text,
-            trader_id=trader_id,
-            currency_pair=currency_pair,
-            disposition=disposition,
-            flag_count=flag_count,
-        ))
-    else:
-        prompt = default_prompt
+    section_text = "\n\n".join(
+        f"### {name}\n{s['narrative']}" for name, s in ctx.sections.items()
+    )
 
+    slots = {
+        "section_text": section_text,
+        "trader_id":    ctx.get("trader_id", "Unknown"),
+        "currency_pair": ctx.get("currency_pair", "N/A"),
+        "disposition":  ctx.get("disposition", "REVIEW"),
+        "flag_count":   ctx.get("flag_count", 0),
+    }
+    slots.update(build_slots(cfg.get("prompt_context"), ctx))
+
+    prompt = render_prompt(template, ctx, **slots)
     ctx.executive_summary = _llm_summary(prompt)
     ctx.set("executive_summary", ctx.executive_summary)
 

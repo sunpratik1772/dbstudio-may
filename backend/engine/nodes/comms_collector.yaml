@@ -43,6 +43,22 @@ params:
     description: "Terms to scan in display_post."
     default: []
     required: false
+  - name: keyword_categories
+    type: object
+    description: >-
+      Optional {category: [kw1, kw2, ...]} map. When present, each row
+      gains a _matched_categories list plus one _hit_<cat> boolean column.
+      Combined with plain `keywords` (both are scanned).
+    default: {}
+    required: false
+  - name: emit_hits_only
+    type: boolean
+    description: >-
+      Also publish ctx.datasets[f"{output_name}_hits"] containing only rows
+      with at least one keyword match. Lets downstream SECTION_SUMMARY
+      narrate just the suspicious subset.
+    default: false
+    required: false
   - name: output_name
     type: string
     description: "Dataset name in ctx.datasets."
