@@ -1,0 +1,385 @@
+{
+  "schema_version": "1.0",
+  "workflow_id": "fi_wash_001",
+  "name": "Fixed Income Wash Trade Detection",
+  "description": "Detects wash trading in fixed income \u2014 offsetting buy/sell transactions between related accounts to create artificial volume",
+  "nodes": [
+    {
+      "id": "n01",
+      "type": "ALERT_TRIGGER",
+      "label": "Alert Trigger",
+      "config": {
+        "alert_fields": {
+          "trader_id": "string",
+          "book": "string",
+          "alert_date": "date",
+          "instrument": "string",
+          "cusip": "string",
+          "alert_id": "string"
+        }
+      }
+    },
+    {
+      "id": "n02",
+      "type": "EXECUTION_DATA_COLLECTOR",
+      "label": "Collect Order Book",
+      "config": {
+        "source": "hs_client_order",
+        "query_template": "trader_id:{context.trader_id} AND book:{context.book} AND order_time:[{context.alert_date}T00:00:00Z TO {context.alert_date}T23:59:59Z]",
+        "output_name": "orders",
+        "loop_over_books": false
+      }
+    },
+    {
+      "id": "n03",
+      "type": "EXECUTION_DATA_COLLECTOR",
+      "label": "Collect All Executions",
+      "config": {
+        "source": "hs_execution",
+        "query_template": "trader_id:{context.trader_id} AND book:{context.book} AND exec_time:[{context.alert_date}T00:00:00Z TO {context.alert_date}T23:59:59Z] AND trade_version:1",
+        "output_name": "executions",
+        "loop_over_books": true,
+        "books": [
+          "FI-CREDIT",
+          "FI-RATES",
+          "FI-GOVT"
+        ]
+      }
+    },
+    {
+      "id": "n04",
+      "type": "COMMS_COLLECTOR",
+      "label": "Collect Communications",
+      "config": {
+        "query_template": "user:{context.trader_id} AND timestamp:[{context.alert_date}T00:00:00Z TO {context.alert_date}T23:59:59Z]",
+        "keywords": [
+          "wash",
+          "offset",
+          "back-to-back",
+          "round-trip",
+          "volume",
+          "artificial",
+          "related account",
+          "step-out",
+          "rotate"
+        ],
+        "output_name": "comms_data"
+      }
+    },
+    {
+      "id": "n05",
+      "type": "FEATURE_ENGINE",
+      "label": "Normalise Executions",
+      "config": {
+        "input_name": "executions",
+        "output_name": "executions_enriched",
+        "operations": [
+          {
+            "op": "lifecycle_event"
+          },
+          {
+            "op": "derive_signed_notional"
+          }
+        ]
+      }
+    },
+    {
+      "id": "n06",
+      "type": "SIGNAL_CALCULATOR",
+      "label": "Wash Trade Signal",
+      "config": {
+        "mode": "configure",
+        "signal_type": "WASH_TRADE",
+        "input_name": "executions_enriched",
+        "output_name": "signals",
+        "params": {
+          "window_minutes": 10,
+          "ratio_threshold": 0.8
+        }
+      }
+    },
+    {
+      "id": "n07",
+      "type": "DECISION_RULE",
+      "label": "Disposition Router",
+      "config": {
+        "input_name": "signals",
+        "flag_count_expr": "flag_count > 0",
+        "escalate_threshold": 3,
+        "review_threshold": 1,
+        "output_branches": {
+          "ESCALATE": "escalate_branch",
+          "REVIEW": "review_branch",
+          "DISMISS": "dismiss_branch"
+        }
+      }
+    },
+    {
+      "id": "n08",
+      "type": "DATA_HIGHLIGHTER",
+      "label": "Highlight Signals",
+      "config": {
+        "input_name": "signals",
+        "output_name": "signals_highlighted",
+        "rules": [
+          {
+            "condition": "_signal_flag == True",
+            "colour": "#FF4444",
+            "label": "WASH SIGNAL"
+          }
+        ]
+      }
+    },
+    {
+      "id": "n09",
+      "type": "SECTION_SUMMARY",
+      "label": "Execution Analysis Section",
+      "config": {
+        "section_name": "execution_analysis",
+        "input_name": "signals",
+        "field_bindings": [
+          {
+            "field": "exec_quantity",
+            "agg": "sum"
+          },
+          {
+            "field": "signed_notional",
+            "agg": "sum"
+          },
+          {
+            "field": "counterparty",
+            "agg": "nunique"
+          },
+          {
+            "field": "venue",
+            "agg": "nunique"
+          }
+        ],
+        "llm_prompt_template": "You are a senior financial surveillance analyst.\n\nAnalyse the following FI execution statistics for potential wash trading:\n\nTrader: {trader_id}\nDisposition: {disposition}\n\nStatistics:\n{stats}\n\nWrite a focused 2-paragraph analysis identifying wash trade patterns."
+      }
+    },
+    {
+      "id": "n10",
+      "type": "SECTION_SUMMARY",
+      "label": "Communications Analysis Section",
+      "config": {
+        "section_name": "comms_analysis",
+        "input_name": "comms_data",
+        "field_bindings": [
+          {
+            "field": "display_post",
+            "agg": "count"
+          },
+          {
+            "field": "_keyword_hit",
+            "agg": "sum"
+          }
+        ],
+        "llm_prompt_template": "You are a senior financial surveillance analyst.\n\nReview communications for wash trade coordination evidence:\n\nTrader: {trader_id}\nDisposition: {disposition}\n\nStatistics:\n{stats}\n\nWrite a 2-paragraph summary of communication patterns."
+      }
+    },
+    {
+      "id": "n11",
+      "type": "CONSOLIDATED_SUMMARY",
+      "label": "Executive Summary",
+      "config": {}
+    },
+    {
+      "id": "n12",
+      "type": "REPORT_OUTPUT",
+      "label": "Generate Excel Report",
+      "config": {
+        "output_path": "output/fi_wash_report.xlsx",
+        "tabs": [
+          {
+            "name": "Orders",
+            "dataset": "orders_highlighted",
+            "include_highlights": false
+          },
+          {
+            "name": "Executions",
+            "dataset": "executions_highlighted",
+            "include_highlights": false
+          },
+          {
+            "name": "Signals",
+            "dataset": "signals_highlighted",
+            "include_highlights": false
+          },
+          {
+            "name": "Communications",
+            "dataset": "comms_data_highlighted",
+            "include_highlights": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "n13",
+      "type": "SECTION_SUMMARY",
+      "label": "Counterparty Analysis Section",
+      "config": {
+        "section_name": "counterparty_analysis",
+        "input_name": "executions_enriched",
+        "field_bindings": [
+          {
+            "field": "counterparty",
+            "agg": "nunique"
+          },
+          {
+            "field": "trader_id",
+            "agg": "nunique"
+          },
+          {
+            "field": "exec_id",
+            "agg": "count"
+          }
+        ],
+        "llm_prompt_template": "You are a senior financial surveillance analyst.\n\nAnalyse the counterparty relationships for potential wash trading:\n\nTrader: {trader_id}\nDisposition: {disposition}\n\nStatistics:\n{stats}\n\nWrite a 2-paragraph summary of counterparty patterns."
+      }
+    },
+    {
+      "id": "n14",
+      "type": "DATA_HIGHLIGHTER",
+      "label": "Highlight Communications",
+      "config": {
+        "input_name": "comms_data",
+        "output_name": "comms_data_highlighted",
+        "rules": [
+          {
+            "condition": "_keyword_hit == True",
+            "colour": "#FF8C00",
+            "label": "COMM ALERT"
+          }
+        ]
+      }
+    },
+    {
+      "id": "n15",
+      "type": "DATA_HIGHLIGHTER",
+      "label": "Highlight Orders",
+      "config": {
+        "input_name": "orders",
+        "output_name": "orders_highlighted",
+        "rules": [
+          {
+            "condition": "status == 'CANCELLED'",
+            "colour": "#FFD700",
+            "label": "CANCELLED"
+          }
+        ]
+      }
+    },
+    {
+      "id": "n16",
+      "type": "DATA_HIGHLIGHTER",
+      "label": "Highlight Executions",
+      "config": {
+        "input_name": "executions_enriched",
+        "output_name": "executions_highlighted",
+        "rules": [
+          {
+            "condition": "side == 'BUY'",
+            "colour": "#90EE90",
+            "label": "BUY"
+          },
+          {
+            "condition": "side == 'SELL'",
+            "colour": "#87CEEB",
+            "label": "SELL"
+          }
+        ]
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "n01",
+      "to": "n02"
+    },
+    {
+      "from": "n01",
+      "to": "n03"
+    },
+    {
+      "from": "n01",
+      "to": "n04"
+    },
+    {
+      "from": "n03",
+      "to": "n05"
+    },
+    {
+      "from": "n05",
+      "to": "n06"
+    },
+    {
+      "from": "n06",
+      "to": "n07"
+    },
+    {
+      "from": "n06",
+      "to": "n08"
+    },
+    {
+      "from": "n06",
+      "to": "n09"
+    },
+    {
+      "from": "n04",
+      "to": "n10"
+    },
+    {
+      "from": "n09",
+      "to": "n11"
+    },
+    {
+      "from": "n10",
+      "to": "n11"
+    },
+    {
+      "from": "n07",
+      "to": "n12"
+    },
+    {
+      "from": "n08",
+      "to": "n12"
+    },
+    {
+      "from": "n11",
+      "to": "n12"
+    },
+    {
+      "from": "n02",
+      "to": "n15"
+    },
+    {
+      "from": "n04",
+      "to": "n14"
+    },
+    {
+      "from": "n05",
+      "to": "n13"
+    },
+    {
+      "from": "n05",
+      "to": "n16"
+    },
+    {
+      "from": "n13",
+      "to": "n11"
+    },
+    {
+      "from": "n14",
+      "to": "n12"
+    },
+    {
+      "from": "n15",
+      "to": "n12"
+    },
+    {
+      "from": "n16",
+      "to": "n12"
+    }
+  ]
+}

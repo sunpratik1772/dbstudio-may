@@ -26,6 +26,7 @@ input_ports:
 output_ports:
   - name: report_path
     type: text
+    store_at: "ctx.report_path"
     description: "Absolute path to the written .xlsx file. Stored as context.report_path."
 
 params:

@@ -1,7 +1,5 @@
 import { useCallback, useMemo, useRef, useState, type DragEvent } from 'react'
 import ReactFlow, {
-  Background,
-  BackgroundVariant,
   Controls,
   MiniMap,
   ReactFlowProvider,
@@ -17,7 +15,6 @@ import ReactFlow, {
 } from 'reactflow'
 import 'reactflow/dist/style.css'
 
-import { Radar } from 'lucide-react'
 import { CustomNode } from './CustomNode'
 import { useWorkflowStore } from '../../store/workflowStore'
 import { NODE_UI, type NodeType } from '../../nodes'
@@ -204,6 +201,8 @@ export default function WorkflowCanvas() {
 
 function WorkflowCanvasInner() {
   const workflow = useWorkflowStore((s) => s.workflow)
+  const setDrawerOpen = useWorkflowStore((s) => s.setWorkflowDrawerOpen)
+  const setCopilotOpen = useWorkflowStore((s) => s.setCopilotOpen)
   const runLog = useWorkflowStore((s) => s.runLog)
   const addNode = useWorkflowStore((s) => s.addNode)
   const updateNodePosition = useWorkflowStore((s) => s.updateNodePosition)
@@ -312,26 +311,54 @@ function WorkflowCanvasInner() {
       >
         <div className="canvas-atmo" />
         <div className="canvas-grain" />
-        <div className="text-center relative z-10 max-w-sm px-6" style={{ display: 'grid', gap: 16 }}>
-          <div
-            className="mx-auto rounded-xl flex items-center justify-center"
-            style={{
-              width: 60, height: 60,
-              background: 'color-mix(in srgb, var(--accent) 12%, transparent)',
-              border: '1px solid color-mix(in srgb, var(--accent) 30%, var(--border))',
-              color: 'var(--accent)',
-              boxShadow: '0 20px 60px -20px color-mix(in srgb, var(--accent) 45%, transparent)',
-            }}
-          >
-            <Radar size={28} strokeWidth={1.5} />
+        <div className="text-center relative z-10 max-w-md px-6" style={{ display: 'grid', gap: 16 }}>
+          <div className="eyebrow" style={{ color: 'var(--text-3)', letterSpacing: '0.18em' }}>
+            EMPTY CANVAS
           </div>
-          <div className="eyebrow" style={{ color: 'var(--accent)' }}>Surveillance Console</div>
-          <h2 className="display" style={{ color: 'var(--text-0)', fontSize: 24, fontWeight: 500, letterSpacing: '-0.015em' }}>
-            No workflow loaded
+          <h2 className="display" style={{ color: 'var(--text-0)', fontSize: 24, fontWeight: 600, letterSpacing: '-0.02em' }}>
+            Compose a workflow
           </h2>
           <p style={{ color: 'var(--text-2)', fontSize: 13, lineHeight: 1.6 }}>
-            Load a workflow from the toolbar, drop a node from the palette, or ask the Copilot to generate one from a plain-English scenario.
+            Drag nodes from the left palette, chain typed ports, or ask the Copilot to generate a surveillance workflow.
           </p>
+          <div className="flex items-center justify-center gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={() => setDrawerOpen(true)}
+              className="lift"
+              style={{
+                padding: '8px 16px',
+                borderRadius: 8,
+                fontSize: 12.5,
+                fontWeight: 600,
+                background: 'var(--text-0)',
+                color: 'var(--bg-0)',
+                border: 'none',
+                cursor: 'pointer',
+              }}
+            >
+              Load a template
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setCopilotOpen(true)
+              }}
+              className="lift"
+              style={{
+                padding: '8px 16px',
+                borderRadius: 8,
+                fontSize: 12.5,
+                fontWeight: 600,
+                background: 'transparent',
+                color: 'var(--text-0)',
+                border: '1px solid var(--border)',
+                cursor: 'pointer',
+              }}
+            >
+              Ask Copilot
+            </button>
+          </div>
         </div>
       </div>
     )
@@ -376,12 +403,6 @@ function WorkflowCanvasInner() {
         proOptions={{ hideAttribution: true }}
         defaultEdgeOptions={{ type: 'smoothstep' }}
       >
-        <Background
-          variant={BackgroundVariant.Dots}
-          gap={26}
-          size={1}
-          color="#1B334F"
-        />
         <Controls
           style={{
             background: 'var(--bg-1)',

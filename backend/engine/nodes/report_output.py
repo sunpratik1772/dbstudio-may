@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import re
 from pathlib import Path
@@ -91,9 +93,6 @@ def handle_report_output(node: dict, ctx: RunContext) -> None:
             norm = norm[len("output/"):]
         output_path = os.path.join(output_root, norm)
     tabs: list[dict] = cfg.get("tabs", [])
-    # "first" (default) keeps Cover → Exec Summary → Section Summaries → data tabs.
-    # "last" emits data tabs first, then summary sheets at the end.
-    summary_position: str = cfg.get("summary_position", "first")
 
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 
@@ -174,12 +173,8 @@ def handle_report_output(node: dict, ctx: RunContext) -> None:
             ws = wb.create_sheet(tab_name)
             _write_df(ws, _df_for_excel(df))
 
-    if summary_position == "last":
-        build_data_tabs()
-        build_summary_sheets()
-    else:
-        build_summary_sheets()
-        build_data_tabs()
+    build_summary_sheets()
+    build_data_tabs()
 
     wb.save(output_path)
     ctx.report_path = output_path

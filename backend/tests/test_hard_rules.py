@@ -135,12 +135,12 @@ def _minimal_workflow(extra_nodes: list[dict]) -> dict:
 def test_trade_version_pin_fires_without_pin() -> None:
     dag = _minimal_workflow([{
         "id": "n02",
-        "type": "TRADE_DATA_COLLECTOR",
-        "label": "trades",
+        "type": "EXECUTION_DATA_COLLECTOR",
+        "label": "Executions",
         "config": {
             "source": "hs_execution",
             "query_template": "region:EMEA",
-            "output_name": "trades",
+            "output_name": "execution_data",
         },
     }])
     result = validate_dag(dag)
@@ -151,12 +151,12 @@ def test_trade_version_pin_fires_without_pin() -> None:
 def test_trade_version_pin_passes_with_pin() -> None:
     dag = _minimal_workflow([{
         "id": "n02",
-        "type": "TRADE_DATA_COLLECTOR",
-        "label": "trades",
+        "type": "EXECUTION_DATA_COLLECTOR",
+        "label": "Executions",
         "config": {
             "source": "hs_execution",
             "query_template": "trade_version:1 AND region:EMEA",
-            "output_name": "trades",
+            "output_name": "execution_data",
         },
     }])
     result = validate_dag(dag)
@@ -171,13 +171,14 @@ def test_signal_script_missing_both_fires_error() -> None:
         "label": "signal",
         "config": {
             "mode": "upload_script",
-            "input_name": "trades",
+            "input_name": "execution_data",
             "output_name": "signal",
         },
     }])
     result = validate_dag(dag)
     codes = [i.code for i in result.issues]
     assert ValidationErrorCode.MISSING_SCRIPT in codes
+    assert ValidationErrorCode.UPLOAD_SCRIPT_DISABLED in codes
 
 
 def test_signal_script_path_only_fires_warning() -> None:
@@ -188,10 +189,26 @@ def test_signal_script_path_only_fires_warning() -> None:
         "config": {
             "mode": "upload_script",
             "script_path": "/tmp/foo.py",
-            "input_name": "trades",
+            "input_name": "execution_data",
             "output_name": "signal",
         },
     }])
     result = validate_dag(dag)
     warnings = [i for i in result.issues if i.severity == "warning"]
     assert any(i.code == ValidationErrorCode.SCRIPT_PATH_ONLY for i in warnings)
+
+
+def test_signal_script_disabled_by_default() -> None:
+    dag = _minimal_workflow([{
+        "id": "n02",
+        "type": "SIGNAL_CALCULATOR",
+        "label": "signal",
+        "config": {
+            "mode": "upload_script",
+            "script_content": "df = df",
+            "input_name": "execution_data",
+            "output_name": "signal",
+        },
+    }])
+    result = validate_dag(dag)
+    assert any(i.code == ValidationErrorCode.UPLOAD_SCRIPT_DISABLED for i in result.errors)

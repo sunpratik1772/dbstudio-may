@@ -11,11 +11,20 @@
         "context_keys": "One context key per declared alert_field, e.g. trader_id, book, alert_date, currency_pair, alert_id."
       },
       "config_schema": {
-        "alert_fields": "Map of field_name \u2192 type (string|date|number). Binds standard fields trader_id, book, alert_date, currency_pair, alert_id, entity, desk."
+        "alert_fields": "Map of field_name \u2192 type (string|date|number). Non-listed payload keys in extras.standard_alert_fields are still bound when present in the alert."
       },
       "constraints": [
         "Must be the first node (id=n01).",
         "No dataset inputs or outputs."
+      ],
+      "standard_alert_fields": [
+        "trader_id",
+        "book",
+        "alert_date",
+        "currency_pair",
+        "alert_id",
+        "entity",
+        "desk"
       ],
       "ports": {
         "inputs": [
@@ -31,7 +40,8 @@
             "name": "context_keys",
             "type": "object",
             "description": "One context key per declared alert_field, e.g. trader_id, book, alert_date, currency_pair, alert_id.",
-            "optional": false
+            "optional": false,
+            "store_at": "ctx.values[context_keys]"
           }
         ]
       },
@@ -39,7 +49,7 @@
         {
           "name": "alert_fields",
           "type": "object",
-          "description": "Map of field_name \u2192 type (string|date|number). Binds standard fields trader_id, book, alert_date, currency_pair, alert_id, entity, desk.",
+          "description": "Map of field_name \u2192 type (string|date|number). Non-listed payload keys in extras.standard_alert_fields are still bound when present in the alert.",
           "required": false,
           "widget": "json",
           "default": {}
@@ -58,7 +68,8 @@
       "config_schema": {
         "query_template": "Oculus query with {context.xxx} placeholders.",
         "keywords": "Terms to scan in display_post.",
-        "output_name": "Dataset name in ctx.datasets."
+        "output_name": "Dataset name in ctx.datasets.",
+        "mock_csv_path": "Demo-mode override: path to a CSV used verbatim instead of the synthetic generator. Ignored if the file is missing."
       },
       "constraints": [
         "Always adds _keyword_hit (boolean) and _matched_keywords (list[str]) columns.",
@@ -78,13 +89,23 @@
             "name": "comms",
             "type": "dataframe",
             "description": "DataFrame with columns: user, timestamp, display_post, event_type, _keyword_hit, _matched_keywords. Stored under ctx.datasets[output_name].",
-            "optional": false
+            "optional": false,
+            "required_columns": [
+              "user",
+              "timestamp",
+              "display_post",
+              "event_type",
+              "_keyword_hit",
+              "_matched_keywords"
+            ],
+            "store_at": "ctx.datasets[{output_name}]"
           },
           {
             "name": "keyword_hit_count",
             "type": "scalar",
             "description": "Total keyword hit count (int). Stored as {output_name}_keyword_hits.",
-            "optional": true
+            "optional": true,
+            "store_at": "ctx.values[{output_name}_keyword_hits]"
           }
         ]
       },
@@ -111,6 +132,14 @@
           "required": true,
           "widget": "text",
           "default": "comms"
+        },
+        {
+          "name": "mock_csv_path",
+          "type": "string",
+          "description": "Demo-mode override: path to a CSV used verbatim instead of the synthetic generator. Ignored if the file is missing.",
+          "required": false,
+          "widget": "text",
+          "default": ""
         }
       ]
     },
@@ -143,7 +172,8 @@
             "name": "executive_summary",
             "type": "text",
             "description": "Multi-paragraph executive summary. Stored as context.executive_summary.",
-            "optional": false
+            "optional": false,
+            "store_at": "ctx.executive_summary"
           }
         ]
       },
@@ -189,7 +219,12 @@
             "name": "highlighted",
             "type": "dataframe",
             "description": "Input DataFrame + _highlight_colour (hex) + _highlight_label (str). Stored under ctx.datasets[output_name].",
-            "optional": false
+            "optional": false,
+            "required_columns": [
+              "_highlight_colour",
+              "_highlight_label"
+            ],
+            "store_at": "ctx.datasets[{output_name}]"
           }
         ]
       },
@@ -242,7 +277,10 @@
             "name": "dataset",
             "type": "dataframe",
             "description": "Signal DataFrame with _signal_flag column.",
-            "optional": false
+            "optional": false,
+            "required_columns": [
+              "_signal_flag"
+            ]
           },
           {
             "name": "flag_count",
@@ -256,19 +294,22 @@
             "name": "disposition",
             "type": "text",
             "description": "'ESCALATE' | 'REVIEW' | 'DISMISS'. Stored as context.disposition.",
-            "optional": false
+            "optional": false,
+            "store_at": "ctx.disposition"
           },
           {
             "name": "flag_count",
             "type": "scalar",
             "description": "Total signal hits (int). Stored as context.flag_count.",
-            "optional": false
+            "optional": false,
+            "store_at": "ctx.values[flag_count]"
           },
           {
             "name": "output_branch",
             "type": "text",
             "description": "Branch name to route to. Stored as context.output_branch.",
-            "optional": false
+            "optional": false,
+            "store_at": "ctx.output_branch"
           }
         ]
       },
@@ -313,6 +354,244 @@
         }
       ]
     },
+    "EXECUTION_DATA_COLLECTOR": {
+      "description": "Query Solr for client orders, executions, trades, and quotes",
+      "inputs": {
+        "context": "Context keys referenced in query_template as {context.xxx}"
+      },
+      "outputs": {
+        "executions": "Order/execution rows. Stored in ctx.datasets under the configured output_name.",
+        "row_count": "Integer row count. Stored in ctx.values as {output_name}_count."
+      },
+      "config_schema": {
+        "source": "Which Solr collection to query.",
+        "query_template": "Solr query; use {context.xxx} placeholders for alert fields.",
+        "output_name": "Dataset name in ctx.datasets.",
+        "loop_over_books": "Repeat the query for each book in the books list.",
+        "books": "Book names when loop_over_books=true.",
+        "mock_csv_path": "Demo-mode override: path to a CSV used verbatim instead of the synthetic generator. Ignored if the file is missing. CSV columns are not re-checked against the lists below; synthetic rows are."
+      },
+      "constraints": [
+        "When source reads versioned trades/fills, trade_version:1 MUST be hard-coded in query_template \u2014 never from context.",
+        "Output DataFrame will always include trade_version=1 for hs_execution, hs_trades, and hs_orders_and_executions synthetic reads."
+      ],
+      "source_keyed_schema_port": "executions",
+      "source_param_for_schema": "source",
+      "source_schema_default": "hs_client_order",
+      "output_columns_by_source": {
+        "hs_client_order": [
+          "order_id",
+          "trader_id",
+          "book",
+          "currency_pair",
+          "order_time",
+          "order_type",
+          "side",
+          "quantity",
+          "limit_price",
+          "status",
+          "venue"
+        ],
+        "hs_execution": [
+          "exec_id",
+          "order_id",
+          "trader_id",
+          "book",
+          "currency_pair",
+          "exec_time",
+          "side",
+          "exec_quantity",
+          "exec_price",
+          "venue",
+          "counterparty",
+          "notional_usd",
+          "trade_version"
+        ],
+        "hs_trades": [
+          "trade_id",
+          "trader_id",
+          "book",
+          "currency_pair",
+          "trade_time",
+          "side",
+          "trade_quantity",
+          "trade_price",
+          "counterparty",
+          "trade_version"
+        ],
+        "hs_orders_and_executions": [
+          "order_id",
+          "exec_id",
+          "trader_id",
+          "book",
+          "currency_pair",
+          "order_time",
+          "exec_time",
+          "side",
+          "quantity",
+          "exec_quantity",
+          "limit_price",
+          "exec_price",
+          "status",
+          "trade_version"
+        ],
+        "hs_quotes": [
+          "quote_id",
+          "trader_id",
+          "currency_pair",
+          "quote_time",
+          "bid",
+          "ask",
+          "bid_size",
+          "ask_size",
+          "venue"
+        ]
+      },
+      "ports": {
+        "inputs": [
+          {
+            "name": "context",
+            "type": "object",
+            "description": "Context keys referenced in query_template as {context.xxx}",
+            "optional": true
+          }
+        ],
+        "outputs": [
+          {
+            "name": "executions",
+            "type": "dataframe",
+            "description": "Order/execution rows. Stored in ctx.datasets under the configured output_name.",
+            "optional": false,
+            "store_at": "ctx.datasets[{output_name}]"
+          },
+          {
+            "name": "row_count",
+            "type": "scalar",
+            "description": "Integer row count. Stored in ctx.values as {output_name}_count.",
+            "optional": true,
+            "store_at": "ctx.values[{output_name}_count]"
+          }
+        ]
+      },
+      "params": [
+        {
+          "name": "source",
+          "type": "enum",
+          "description": "Which Solr collection to query.",
+          "required": true,
+          "widget": "select",
+          "default": "hs_client_order",
+          "enum": [
+            "hs_client_order",
+            "hs_execution",
+            "hs_trades",
+            "hs_orders_and_executions",
+            "hs_quotes"
+          ]
+        },
+        {
+          "name": "query_template",
+          "type": "string",
+          "description": "Solr query; use {context.xxx} placeholders for alert fields.",
+          "required": true,
+          "widget": "textarea"
+        },
+        {
+          "name": "output_name",
+          "type": "string",
+          "description": "Dataset name in ctx.datasets.",
+          "required": true,
+          "widget": "text",
+          "default": "execution_data"
+        },
+        {
+          "name": "loop_over_books",
+          "type": "boolean",
+          "description": "Repeat the query for each book in the books list.",
+          "required": false,
+          "widget": "checkbox",
+          "default": false
+        },
+        {
+          "name": "books",
+          "type": "string_list",
+          "description": "Book names when loop_over_books=true.",
+          "required": false,
+          "widget": "chips",
+          "default": []
+        },
+        {
+          "name": "mock_csv_path",
+          "type": "string",
+          "description": "Demo-mode override: path to a CSV used verbatim instead of the synthetic generator. Ignored if the file is missing. CSV columns are not re-checked against the lists below; synthetic rows are.",
+          "required": false,
+          "widget": "text",
+          "default": ""
+        }
+      ]
+    },
+    "FEATURE_ENGINE": {
+      "description": "Apply ordered feature operations to a dataset",
+      "inputs": {
+        "dataset": "Any DataFrame referenced by input_name."
+      },
+      "outputs": {
+        "features": "Input DataFrame plus columns added or renamed by configured operations."
+      },
+      "config_schema": {
+        "input_name": "Source dataset name (an upstream output_name).",
+        "output_name": "Feature dataset name.",
+        "operations": "Ordered operations. Supported op values: rename, lifecycle_event, derive_signed_notional."
+      },
+      "constraints": [
+        "rename uses {op:'rename', columns:{old_col:new_col}}.",
+        "lifecycle_event adds _prev_status, _status_changed, _lifecycle_event when id/status columns exist.",
+        "derive_signed_notional adds signed_notional using quantity/price/side columns."
+      ],
+      "ports": {
+        "inputs": [
+          {
+            "name": "dataset",
+            "type": "dataframe",
+            "description": "Any DataFrame referenced by input_name.",
+            "optional": false
+          }
+        ],
+        "outputs": [
+          {
+            "name": "features",
+            "type": "dataframe",
+            "description": "Input DataFrame plus columns added or renamed by configured operations.",
+            "optional": false,
+            "store_at": "ctx.datasets[{output_name}]"
+          }
+        ]
+      },
+      "params": [
+        {
+          "name": "input_name",
+          "type": "input_ref",
+          "description": "Source dataset name (an upstream output_name).",
+          "required": true,
+          "widget": "input_ref"
+        },
+        {
+          "name": "output_name",
+          "type": "string",
+          "description": "Feature dataset name.",
+          "required": true,
+          "widget": "text"
+        },
+        {
+          "name": "operations",
+          "type": "array",
+          "description": "Ordered operations. Supported op values: rename, lifecycle_event, derive_signed_notional.",
+          "required": false,
+          "widget": "json",
+          "default": []
+        }
+      ]
+    },
     "MARKET_DATA_COLLECTOR": {
       "description": "Query EBS/Mercury tick data, normalise timestamps",
       "inputs": {
@@ -325,7 +604,8 @@
       "config_schema": {
         "source": "Which tick feed to query.",
         "query_template": "Query with {context.xxx} placeholders.",
-        "output_name": "Dataset name in ctx.datasets."
+        "output_name": "Dataset name in ctx.datasets.",
+        "mock_csv_path": "Demo-mode override: path to a CSV used verbatim instead of the synthetic generator. Ignored if the file is missing."
       },
       "constraints": [
         "Normalises raw_timestamp (nanosecond int) \u2192 ISO-8601 string.",
@@ -345,13 +625,27 @@
             "name": "ticks",
             "type": "dataframe",
             "description": "DataFrame with columns: timestamp (ISO str), symbol (str), bid, ask, mid, spread_pips, bid_size, ask_size, venue_name, seq_no. Stored under ctx.datasets[output_name].",
-            "optional": false
+            "optional": false,
+            "required_columns": [
+              "timestamp",
+              "symbol",
+              "bid",
+              "ask",
+              "mid",
+              "spread_pips",
+              "bid_size",
+              "ask_size",
+              "venue_name",
+              "seq_no"
+            ],
+            "store_at": "ctx.datasets[{output_name}]"
           },
           {
             "name": "tick_count",
             "type": "scalar",
             "description": "Tick count (int). Stored as {output_name}_tick_count.",
-            "optional": true
+            "optional": true,
+            "store_at": "ctx.values[{output_name}_tick_count]"
           }
         ]
       },
@@ -382,80 +676,122 @@
           "required": true,
           "widget": "text",
           "default": "market_data"
+        },
+        {
+          "name": "mock_csv_path",
+          "type": "string",
+          "description": "Demo-mode override: path to a CSV used verbatim instead of the synthetic generator. Ignored if the file is missing.",
+          "required": false,
+          "widget": "text",
+          "default": ""
         }
       ]
     },
-    "NORMALISE_ENRICH": {
-      "description": "Rename fields, lifecycle tracking, signed_notional",
+    "ORACLE_DATA_COLLECTOR": {
+      "description": "Query Oracle surveillance warehouse order/execution extracts",
       "inputs": {
-        "dataset": "Any trade DataFrame referenced by input_name."
+        "context": "Context keys referenced in query_template as {context.xxx}"
       },
       "outputs": {
-        "enriched": "Enriched DataFrame. May add: _prev_status, _status_changed, _lifecycle_event, signed_notional."
+        "rows": "Oracle extract rows. Stored in ctx.datasets under the configured output_name.",
+        "row_count": "Integer row count. Stored in ctx.values as {output_name}_count."
       },
       "config_schema": {
-        "input_name": "Source dataset name (an upstream output_name).",
-        "output_name": "Enriched dataset name.",
-        "field_renames": "Map of old_col_name \u2192 new_col_name.",
-        "track_lifecycle": "Adds _prev_status, _status_changed, _lifecycle_event (requires order_id, status columns).",
-        "compute_signed_notional": "Adds signed_notional = qty * price * \u00b11 based on side (BUY=+1, SELL=-1)."
+        "source": "Which Oracle extract to query.",
+        "query_template": "Oracle SQL template; use {context.xxx} placeholders for alert fields.",
+        "output_name": "Dataset name in ctx.datasets.",
+        "mock_csv_path": "Demo-mode override: path to a CSV used verbatim instead of the synthetic generator."
+      },
+      "source_keyed_schema_port": "rows",
+      "source_param_for_schema": "source",
+      "source_schema_default": "oracle_orders",
+      "output_columns_by_source": {
+        "oracle_orders": [
+          "oracle_order_id",
+          "trader_id",
+          "book",
+          "instrument",
+          "order_time",
+          "side",
+          "quantity",
+          "limit_price",
+          "order_status"
+        ],
+        "oracle_executions": [
+          "oracle_exec_id",
+          "oracle_order_id",
+          "trader_id",
+          "book",
+          "instrument",
+          "exec_time",
+          "side",
+          "exec_quantity",
+          "exec_price",
+          "counterparty"
+        ]
       },
       "ports": {
         "inputs": [
           {
-            "name": "dataset",
-            "type": "dataframe",
-            "description": "Any trade DataFrame referenced by input_name.",
-            "optional": false
+            "name": "context",
+            "type": "object",
+            "description": "Context keys referenced in query_template as {context.xxx}",
+            "optional": true
           }
         ],
         "outputs": [
           {
-            "name": "enriched",
+            "name": "rows",
             "type": "dataframe",
-            "description": "Enriched DataFrame. May add: _prev_status, _status_changed, _lifecycle_event, signed_notional.",
-            "optional": false
+            "description": "Oracle extract rows. Stored in ctx.datasets under the configured output_name.",
+            "optional": false,
+            "store_at": "ctx.datasets[{output_name}]"
+          },
+          {
+            "name": "row_count",
+            "type": "scalar",
+            "description": "Integer row count. Stored in ctx.values as {output_name}_count.",
+            "optional": true,
+            "store_at": "ctx.values[{output_name}_count]"
           }
         ]
       },
       "params": [
         {
-          "name": "input_name",
-          "type": "input_ref",
-          "description": "Source dataset name (an upstream output_name).",
+          "name": "source",
+          "type": "enum",
+          "description": "Which Oracle extract to query.",
           "required": true,
-          "widget": "input_ref"
+          "widget": "select",
+          "default": "oracle_orders",
+          "enum": [
+            "oracle_orders",
+            "oracle_executions"
+          ]
+        },
+        {
+          "name": "query_template",
+          "type": "string",
+          "description": "Oracle SQL template; use {context.xxx} placeholders for alert fields.",
+          "required": false,
+          "widget": "textarea",
+          "default": ""
         },
         {
           "name": "output_name",
           "type": "string",
-          "description": "Enriched dataset name.",
+          "description": "Dataset name in ctx.datasets.",
           "required": true,
-          "widget": "text"
+          "widget": "text",
+          "default": "oracle_data"
         },
         {
-          "name": "field_renames",
-          "type": "object",
-          "description": "Map of old_col_name \u2192 new_col_name.",
+          "name": "mock_csv_path",
+          "type": "string",
+          "description": "Demo-mode override: path to a CSV used verbatim instead of the synthetic generator.",
           "required": false,
-          "widget": "json",
-          "default": {}
-        },
-        {
-          "name": "track_lifecycle",
-          "type": "boolean",
-          "description": "Adds _prev_status, _status_changed, _lifecycle_event (requires order_id, status columns).",
-          "required": false,
-          "widget": "checkbox",
-          "default": false
-        },
-        {
-          "name": "compute_signed_notional",
-          "type": "boolean",
-          "description": "Adds signed_notional = qty * price * \u00b11 based on side (BUY=+1, SELL=-1).",
-          "required": false,
-          "widget": "checkbox",
-          "default": false
+          "widget": "text",
+          "default": ""
         }
       ]
     },
@@ -513,7 +849,8 @@
             "name": "report_path",
             "type": "text",
             "description": "Absolute path to the written .xlsx file. Stored as context.report_path.",
-            "optional": false
+            "optional": false,
+            "store_at": "ctx.report_path"
           }
         ]
       },
@@ -573,7 +910,14 @@
             "name": "section",
             "type": "object",
             "description": "{name, stats, narrative, dataset}. Stored under context.sections[section_name].",
-            "optional": false
+            "optional": false,
+            "required_keys": [
+              "name",
+              "stats",
+              "narrative",
+              "dataset"
+            ],
+            "store_at": "ctx.sections[{section_name}]"
           }
         ]
       },
@@ -612,10 +956,10 @@
     "SIGNAL_CALCULATOR": {
       "description": "Compute signals \u2014 always outputs 5 columns",
       "inputs": {
-        "dataset": "Trade/execution DataFrame (typically after NORMALISE_ENRICH)."
+        "dataset": "Trade/execution DataFrame, often after FEATURE_ENGINE."
       },
       "outputs": {
-        "signals": "Input DataFrame + exactly 5 signal columns: _signal_flag (bool), _signal_score (float 0-10), _signal_reason (str), _signal_type (str), _signal_window (str).",
+        "signals": "Input DataFrame + exactly 5 signal columns: _signal_flag (bool), _signal_score (float 0-1), _signal_reason (str), _signal_type (str), _signal_window (str).",
         "flag_count": "Number of rows where _signal_flag == True. Stored as {output_name}_flag_count."
       },
       "config_schema": {
@@ -632,6 +976,29 @@
         "Missing signal columns are auto-filled with defaults (False, 0.0, '', '', '').",
         "Custom scripts must operate on local variable 'df' and leave result in 'df'."
       ],
+      "signal_output_columns": [
+        "_signal_flag",
+        "_signal_score",
+        "_signal_reason",
+        "_signal_type",
+        "_signal_window"
+      ],
+      "built_in_required_columns": {
+        "FRONT_RUNNING": [
+          "exec_time",
+          "exec_price"
+        ],
+        "WASH_TRADE": [
+          "side"
+        ],
+        "SPOOFING": [
+          "status"
+        ],
+        "LAYERING": [
+          "order_type",
+          "side"
+        ]
+      },
       "built_in_signal_params": {
         "FRONT_RUNNING": {
           "window_minutes": 5,
@@ -655,7 +1022,7 @@
           {
             "name": "dataset",
             "type": "dataframe",
-            "description": "Trade/execution DataFrame (typically after NORMALISE_ENRICH).",
+            "description": "Trade/execution DataFrame, often after FEATURE_ENGINE.",
             "optional": false
           }
         ],
@@ -663,14 +1030,23 @@
           {
             "name": "signals",
             "type": "dataframe",
-            "description": "Input DataFrame + exactly 5 signal columns: _signal_flag (bool), _signal_score (float 0-10), _signal_reason (str), _signal_type (str), _signal_window (str).",
-            "optional": false
+            "description": "Input DataFrame + exactly 5 signal columns: _signal_flag (bool), _signal_score (float 0-1), _signal_reason (str), _signal_type (str), _signal_window (str).",
+            "optional": false,
+            "required_columns": [
+              "_signal_flag",
+              "_signal_score",
+              "_signal_reason",
+              "_signal_type",
+              "_signal_window"
+            ],
+            "store_at": "ctx.datasets[{output_name}]"
           },
           {
             "name": "flag_count",
             "type": "scalar",
             "description": "Number of rows where _signal_flag == True. Stored as {output_name}_flag_count.",
-            "optional": true
+            "optional": true,
+            "store_at": "ctx.values[{output_name}_flag_count]"
           }
         ]
       },
@@ -735,96 +1111,6 @@
           "description": "Inline Python snippet operating on local variable `df` (upload_script mode).",
           "required": false,
           "widget": "code"
-        }
-      ]
-    },
-    "TRADE_DATA_COLLECTOR": {
-      "description": "Query Solr trade data (orders/executions)",
-      "inputs": {
-        "context": "Context keys referenced in query_template as {context.xxx}"
-      },
-      "outputs": {
-        "trades": "Order / execution rows. Stored in ctx.datasets under the configured output_name.",
-        "row_count": "Integer row count. Stored in ctx.values as {output_name}_count."
-      },
-      "config_schema": {
-        "source": "Which Solr collection to query.",
-        "query_template": "Solr query; use {context.xxx} placeholders for alert fields.",
-        "output_name": "Dataset name in ctx.datasets.",
-        "loop_over_books": "Repeat the query for each book in the books list.",
-        "books": "Book names when loop_over_books=true."
-      },
-      "constraints": [
-        "When source='hs_execution', trade_version:1 MUST be hard-coded in query_template \u2014 never from context.",
-        "Output DataFrame will always include trade_version=1 column for hs_execution."
-      ],
-      "ports": {
-        "inputs": [
-          {
-            "name": "context",
-            "type": "object",
-            "description": "Context keys referenced in query_template as {context.xxx}",
-            "optional": true
-          }
-        ],
-        "outputs": [
-          {
-            "name": "trades",
-            "type": "dataframe",
-            "description": "Order / execution rows. Stored in ctx.datasets under the configured output_name.",
-            "optional": false
-          },
-          {
-            "name": "row_count",
-            "type": "scalar",
-            "description": "Integer row count. Stored in ctx.values as {output_name}_count.",
-            "optional": true
-          }
-        ]
-      },
-      "params": [
-        {
-          "name": "source",
-          "type": "enum",
-          "description": "Which Solr collection to query.",
-          "required": true,
-          "widget": "select",
-          "default": "hs_client_order",
-          "enum": [
-            "hs_client_order",
-            "hs_execution"
-          ]
-        },
-        {
-          "name": "query_template",
-          "type": "string",
-          "description": "Solr query; use {context.xxx} placeholders for alert fields.",
-          "required": true,
-          "widget": "textarea"
-        },
-        {
-          "name": "output_name",
-          "type": "string",
-          "description": "Dataset name in ctx.datasets.",
-          "required": true,
-          "widget": "text",
-          "default": "trade_data"
-        },
-        {
-          "name": "loop_over_books",
-          "type": "boolean",
-          "description": "Repeat the query for each book in the books list.",
-          "required": false,
-          "widget": "checkbox",
-          "default": false
-        },
-        {
-          "name": "books",
-          "type": "string_list",
-          "description": "Book names when loop_over_books=true.",
-          "required": false,
-          "widget": "chips",
-          "default": []
         }
       ]
     }

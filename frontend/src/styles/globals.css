@@ -49,7 +49,6 @@
     radial-gradient(1400px 900px at 50% 50%, transparent 55%, rgba(0,0,0,0.55) 100%);
   --grain-blend: overlay;
   --grain-opacity: 0.035;
-  --dots-color: #1B334F;
 
   /* Type scale */
   --fs-micro: 10px;
@@ -102,7 +101,6 @@
     radial-gradient(1400px 900px at 50% 50%, transparent 60%, rgba(120, 113, 108, 0.08) 100%);
   --grain-blend: multiply;
   --grain-opacity: 0.05;
-  --dots-color: #D6CDBC;
 }
 
 /* -------------------------------------------------------------------------

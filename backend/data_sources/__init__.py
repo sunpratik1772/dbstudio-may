@@ -21,7 +21,16 @@ from .registry import (
     ColumnSpec,
     DataSource,
     DataSourceRegistry,
+    SourceSchema,
     get_registry,
+    split_source_ref,
 )
 
-__all__ = ["ColumnSpec", "DataSource", "DataSourceRegistry", "get_registry"]
+__all__ = [
+    "ColumnSpec",
+    "DataSource",
+    "DataSourceRegistry",
+    "SourceSchema",
+    "get_registry",
+    "split_source_ref",
+]

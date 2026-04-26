@@ -1,0 +1,461 @@
+{
+  "schema_version": "1.0",
+  "workflow_id": "fxfronew_001",
+  "name": "FX Front-Running \u2014 fxfronew (demo fixtures)",
+  "description": "Same DAG shape as the bundled FX FRO demo, saved as fxfronew. Collectors use CSVs under backend/demo_data/; POST /run and /validate resolve those paths so the UI can POST the on-disk JSON without depending on process cwd.",
+  "nodes": [
+    {
+      "id": "n01",
+      "type": "ALERT_TRIGGER",
+      "label": "Alert Trigger",
+      "config": {
+        "alert_fields": {
+          "trader_id": "string",
+          "book": "string",
+          "alert_date": "date",
+          "currency_pair": "string",
+          "alert_id": "string"
+        }
+      }
+    },
+    {
+      "id": "n02",
+      "type": "EXECUTION_DATA_COLLECTOR",
+      "label": "Collect Client Orders (CSV)",
+      "config": {
+        "source": "hs_client_order",
+        "query_template": "trader_id:{context.trader_id} AND book:{context.book}",
+        "output_name": "client_orders",
+        "loop_over_books": false,
+        "mock_csv_path": "demo_data/trades_hs_client_order.csv"
+      }
+    },
+    {
+      "id": "n03",
+      "type": "EXECUTION_DATA_COLLECTOR",
+      "label": "Collect Proprietary Executions (CSV)",
+      "config": {
+        "source": "hs_execution",
+        "query_template": "trader_id:{context.trader_id} AND book:{context.book} AND trade_version:1",
+        "output_name": "executions",
+        "loop_over_books": false,
+        "mock_csv_path": "demo_data/trades_hs_execution.csv"
+      }
+    },
+    {
+      "id": "n04",
+      "type": "COMMS_COLLECTOR",
+      "label": "Collect Communications (CSV)",
+      "config": {
+        "query_template": "user:{context.trader_id}",
+        "keywords": [
+          "fix",
+          "benchmark",
+          "front-run",
+          "ahead",
+          "before the move",
+          "WM fix",
+          "cover",
+          "rotate",
+          "push through",
+          "client order",
+          "step-out"
+        ],
+        "output_name": "comms_data",
+        "mock_csv_path": "demo_data/comms.csv"
+      }
+    },
+    {
+      "id": "n05",
+      "type": "MARKET_DATA_COLLECTOR",
+      "label": "Collect EBS Tick Data (CSV)",
+      "config": {
+        "source": "EBS",
+        "query_template": "symbol:{context.currency_pair}",
+        "output_name": "market_data",
+        "mock_csv_path": "demo_data/market.csv"
+      }
+    },
+    {
+      "id": "n06",
+      "type": "FEATURE_ENGINE",
+      "label": "Enrich Executions",
+      "config": {
+        "input_name": "executions",
+        "output_name": "executions_enriched",
+        "operations": [
+          {
+            "op": "derive_signed_notional"
+          }
+        ]
+      }
+    },
+    {
+      "id": "n07",
+      "type": "SIGNAL_CALCULATOR",
+      "label": "FRO Signal \u2014 Price Move Detection",
+      "config": {
+        "mode": "configure",
+        "signal_type": "FRONT_RUNNING",
+        "input_name": "executions_enriched",
+        "output_name": "signals",
+        "params": {
+          "window_minutes": 5,
+          "price_move_threshold": 0.0003
+        }
+      }
+    },
+    {
+      "id": "n08",
+      "type": "DECISION_RULE",
+      "label": "Disposition Router",
+      "config": {
+        "input_name": "signals",
+        "flag_count_expr": "ctx.values.signals_flag_count + ctx.values.timing_signals_flag_count + ctx.values.comms_signals_flag_count",
+        "escalate_threshold": 5,
+        "review_threshold": 1,
+        "output_branches": {
+          "ESCALATE": "escalate_branch",
+          "REVIEW": "review_branch",
+          "DISMISS": "dismiss_branch"
+        }
+      }
+    },
+    {
+      "id": "n09",
+      "type": "DATA_HIGHLIGHTER",
+      "label": "Highlight FRO Signals",
+      "config": {
+        "input_name": "signals",
+        "output_name": "signals_highlighted",
+        "rules": [
+          {
+            "condition": "_signal_flag == True",
+            "colour": "#FF4444",
+            "label": "FRO SIGNAL"
+          },
+          {
+            "condition": "side == 'BUY'",
+            "colour": "#90EE90",
+            "label": "BUY"
+          },
+          {
+            "condition": "side == 'SELL'",
+            "colour": "#87CEEB",
+            "label": "SELL"
+          }
+        ]
+      }
+    },
+    {
+      "id": "n10",
+      "type": "SECTION_SUMMARY",
+      "label": "Trade Analysis Section",
+      "config": {
+        "section_name": "trade_analysis",
+        "input_name": "signals",
+        "field_bindings": [
+          {
+            "field": "exec_quantity",
+            "agg": "sum"
+          },
+          {
+            "field": "exec_price",
+            "agg": "mean"
+          },
+          {
+            "field": "venue",
+            "agg": "nunique"
+          },
+          {
+            "field": "signed_notional",
+            "agg": "sum"
+          }
+        ],
+        "llm_prompt_template": "You are a senior financial surveillance analyst.\n\nAnalyse the following FX execution statistics for potential front-running behavior:\n\nTrader: {trader_id}\nCurrency Pair: {currency_pair}\nDisposition: {disposition}\n\nStatistics:\n{stats}\n\nWrite a focused 2-paragraph analysis of the trading pattern, referencing specific numbers."
+      }
+    },
+    {
+      "id": "n11",
+      "type": "SECTION_SUMMARY",
+      "label": "Communications Analysis Section",
+      "config": {
+        "section_name": "comms_analysis",
+        "input_name": "comms_data",
+        "field_bindings": [
+          {
+            "field": "display_post",
+            "agg": "count"
+          },
+          {
+            "field": "event_type",
+            "agg": "nunique"
+          },
+          {
+            "field": "_keyword_hit",
+            "agg": "sum"
+          }
+        ],
+        "llm_prompt_template": "You are a senior financial surveillance analyst.\n\nReview the following communications metadata for a trader under investigation:\n\nTrader: {trader_id}\nDisposition: {disposition}\n\nStatistics:\n{stats}\n\nWrite a focused 2-paragraph summary of communication patterns and any concerning language."
+      }
+    },
+    {
+      "id": "n12",
+      "type": "CONSOLIDATED_SUMMARY",
+      "label": "Executive Summary",
+      "config": {}
+    },
+    {
+      "id": "n13",
+      "type": "REPORT_OUTPUT",
+      "label": "Generate Excel Report",
+      "config": {
+        "output_path": "output/fxfronew_report.xlsx",
+        "tabs": [
+          {
+            "name": "Client Orders",
+            "dataset": "client_orders",
+            "include_highlights": false
+          },
+          {
+            "name": "Executions",
+            "dataset": "executions_enriched",
+            "include_highlights": true
+          },
+          {
+            "name": "FRO Signals",
+            "dataset": "signals_highlighted",
+            "include_highlights": true
+          },
+          {
+            "name": "Timing Signals",
+            "dataset": "timing_signals_highlighted",
+            "include_highlights": true
+          },
+          {
+            "name": "Communications",
+            "dataset": "comms_data_highlighted",
+            "include_highlights": true
+          },
+          {
+            "name": "Market Data (EBS)",
+            "dataset": "market_data",
+            "include_highlights": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "n14",
+      "type": "SIGNAL_CALCULATOR",
+      "label": "FRO Signal \u2014 Timing Correlation",
+      "config": {
+        "mode": "upload_script",
+        "input_name": "executions_enriched",
+        "output_name": "timing_signals",
+        "script_content": "import pandas as pd\nif all(c in df.columns for c in ['exec_time', 'order_time']):\n    df['exec_time'] = pd.to_datetime(df['exec_time'])\n    df['order_time'] = pd.to_datetime(df['order_time'])\n    df['_time_delta_mins'] = (df['exec_time'] - df['order_time']).dt.total_seconds() / 60\n    df['_signal_flag'] = df['_time_delta_mins'].abs() < 3\n    df['_signal_score'] = (3 - df['_time_delta_mins'].abs().clip(0, 3)).clip(0, 10).round(2)\n    df['_signal_reason'] = df.apply(\n        lambda r: f\"Prop trade {abs(r['_time_delta_mins']):.1f}m before client order\" if r['_signal_flag'] else \"\", axis=1\n    )\nelse:\n    df['_signal_flag'] = False\n    df['_signal_score'] = 0.0\n    df['_signal_reason'] = ''\ndf['_signal_type'] = 'TIMING_CORRELATION'\ndf['_signal_window'] = '3m'"
+      }
+    },
+    {
+      "id": "n15",
+      "type": "SIGNAL_CALCULATOR",
+      "label": "FRO Signal \u2014 Comms Keyword Density",
+      "config": {
+        "mode": "upload_script",
+        "input_name": "comms_data",
+        "output_name": "comms_signals",
+        "script_content": "import pandas as pd\nif '_keyword_hit' in df.columns:\n    df['_signal_flag'] = df['_keyword_hit']\n    df['_signal_score'] = df['_keyword_hit'].astype(float) * 5\n    df['_signal_reason'] = df.apply(\n        lambda r: \"Keyword hit detected\" if r['_signal_flag'] else \"\", axis=1\n    )\nelse:\n    df['_signal_flag'] = False\n    df['_signal_score'] = 0.0\n    df['_signal_reason'] = ''\ndf['_signal_type'] = 'COMM_KEYWORD_DENSITY'\ndf['_signal_window'] = '1d'"
+      }
+    },
+    {
+      "id": "n16",
+      "type": "DATA_HIGHLIGHTER",
+      "label": "Highlight Timing Signals",
+      "config": {
+        "input_name": "timing_signals",
+        "output_name": "timing_signals_highlighted",
+        "rules": [
+          {
+            "condition": "_signal_flag == True",
+            "colour": "#FF4444",
+            "label": "FRO SIGNAL"
+          }
+        ]
+      }
+    },
+    {
+      "id": "n17",
+      "type": "DATA_HIGHLIGHTER",
+      "label": "Highlight Comms Data",
+      "config": {
+        "input_name": "comms_data",
+        "output_name": "comms_data_highlighted",
+        "rules": [
+          {
+            "condition": "_keyword_hit == True",
+            "colour": "#FF8C00",
+            "label": "COMM ALERT"
+          }
+        ]
+      }
+    },
+    {
+      "id": "n18",
+      "type": "SECTION_SUMMARY",
+      "label": "Timing Analysis Section",
+      "config": {
+        "section_name": "timing_analysis",
+        "input_name": "timing_signals",
+        "field_bindings": [
+          {
+            "field": "_signal_score",
+            "agg": "mean"
+          },
+          {
+            "field": "_signal_flag",
+            "agg": "sum"
+          }
+        ],
+        "llm_prompt_template": "You are a senior financial surveillance analyst.\n\nAnalyse the following timing correlation statistics for potential front-running behavior:\n\nTrader: {trader_id}\nCurrency Pair: {currency_pair}\nDisposition: {disposition}\n\nStatistics:\n{stats}\n\nWrite a focused 2-paragraph analysis of the timing patterns."
+      }
+    },
+    {
+      "id": "n19",
+      "type": "SECTION_SUMMARY",
+      "label": "Market Analysis Section",
+      "config": {
+        "section_name": "market_analysis",
+        "input_name": "market_data",
+        "field_bindings": [
+          {
+            "field": "mid",
+            "agg": "mean"
+          },
+          {
+            "field": "spread_pips",
+            "agg": "mean"
+          }
+        ],
+        "llm_prompt_template": "You are a senior financial surveillance analyst.\n\nReview the following market data statistics for the currency pair {currency_pair} during the alert period:\n\nTrader: {trader_id}\nDisposition: {disposition}\n\nStatistics:\n{stats}\n\nWrite a focused 2-paragraph summary of market movements and any unusual activity."
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "n01",
+      "to": "n02"
+    },
+    {
+      "from": "n01",
+      "to": "n03"
+    },
+    {
+      "from": "n01",
+      "to": "n04"
+    },
+    {
+      "from": "n01",
+      "to": "n05"
+    },
+    {
+      "from": "n03",
+      "to": "n06"
+    },
+    {
+      "from": "n06",
+      "to": "n07"
+    },
+    {
+      "from": "n07",
+      "to": "n08"
+    },
+    {
+      "from": "n07",
+      "to": "n09"
+    },
+    {
+      "from": "n07",
+      "to": "n10"
+    },
+    {
+      "from": "n04",
+      "to": "n11"
+    },
+    {
+      "from": "n10",
+      "to": "n12"
+    },
+    {
+      "from": "n11",
+      "to": "n12"
+    },
+    {
+      "from": "n08",
+      "to": "n13"
+    },
+    {
+      "from": "n09",
+      "to": "n13"
+    },
+    {
+      "from": "n12",
+      "to": "n13"
+    },
+    {
+      "from": "n02",
+      "to": "n13"
+    },
+    {
+      "from": "n06",
+      "to": "n14"
+    },
+    {
+      "from": "n04",
+      "to": "n15"
+    },
+    {
+      "from": "n14",
+      "to": "n08"
+    },
+    {
+      "from": "n15",
+      "to": "n08"
+    },
+    {
+      "from": "n14",
+      "to": "n16"
+    },
+    {
+      "from": "n04",
+      "to": "n17"
+    },
+    {
+      "from": "n14",
+      "to": "n18"
+    },
+    {
+      "from": "n05",
+      "to": "n19"
+    },
+    {
+      "from": "n16",
+      "to": "n13"
+    },
+    {
+      "from": "n17",
+      "to": "n13"
+    },
+    {
+      "from": "n18",
+      "to": "n12"
+    },
+    {
+      "from": "n19",
+      "to": "n12"
+    },
+    {
+      "from": "n05",
+      "to": "n13"
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+name: Generated artifacts drift check
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt pyyaml
+
+      - name: Regenerate node artifacts
+        run: python backend/scripts/gen_artifacts.py
+
+      - name: Fail if generated files were stale
+        run: |
+          git diff --exit-code -- backend/engine/node_type_ids.py \
+            backend/contracts/node_contracts.json \
+            frontend/src/nodes/generated.ts

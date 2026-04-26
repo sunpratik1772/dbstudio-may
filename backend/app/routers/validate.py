@@ -11,6 +11,7 @@ from fastapi import APIRouter
 
 from engine.validator import validate_dag
 
+from .run import _resolve_workflow_mock_csv_paths
 from ..schemas import ValidateWorkflowRequest
 
 router = APIRouter(tags=["validate"])
@@ -25,4 +26,5 @@ def validate(req: ValidateWorkflowRequest) -> dict:
     the endpoint idempotent and safe for the copilot to spam during a
     self-correction loop.
     """
-    return validate_dag(req.dag).to_json()
+    dag = _resolve_workflow_mock_csv_paths(req.dag)
+    return validate_dag(dag).to_json()

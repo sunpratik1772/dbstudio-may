@@ -1,0 +1,387 @@
+{
+  "workflow_id": "fx_front_running_t001_eur_usd",
+  "name": "FX Front-Running for T001 EUR/USD",
+  "schema_version": "1.0",
+  "description": "Detects FX front-running for trader T001 in EUR/USD using trade, comms, and market data signals.",
+  "nodes": [
+    {
+      "id": "n01",
+      "type": "ALERT_TRIGGER",
+      "label": "Alert Trigger",
+      "config": {
+        "alert_fields": {
+          "trader_id": "string",
+          "currency_pair": "string",
+          "alert_date": "date",
+          "alert_id": "string"
+        }
+      }
+    },
+    {
+      "id": "n02",
+      "type": "EXECUTION_DATA_COLLECTOR",
+      "label": "Collect Client Orders",
+      "config": {
+        "source": "hs_client_order",
+        "query_template": "trader_id:{context.trader_id} AND currency_pair:{context.currency_pair} AND order_date:{context.alert_date}",
+        "output_name": "client_orders"
+      }
+    },
+    {
+      "id": "n03",
+      "type": "EXECUTION_DATA_COLLECTOR",
+      "label": "Collect Prop Executions",
+      "config": {
+        "source": "hs_execution",
+        "query_template": "trader_id:{context.trader_id} AND currency_pair:{context.currency_pair} AND exec_date:{context.alert_date} AND trade_version:1",
+        "output_name": "prop_executions"
+      }
+    },
+    {
+      "id": "n04",
+      "type": "FEATURE_ENGINE",
+      "label": "Enrich Prop Executions",
+      "config": {
+        "input_name": "prop_executions",
+        "output_name": "enriched_prop_executions",
+        "operations": [
+          {
+            "op": "lifecycle_event"
+          },
+          {
+            "op": "derive_signed_notional"
+          }
+        ]
+      }
+    },
+    {
+      "id": "n05",
+      "type": "COMMS_COLLECTOR",
+      "label": "Collect Communications",
+      "config": {
+        "query_template": "user:{context.trader_id} AND date:{context.alert_date}",
+        "keywords": [
+          "fix",
+          "benchmark",
+          "front-run",
+          "ahead",
+          "before the move",
+          "WM fix",
+          "cover",
+          "rotate",
+          "push through",
+          "client order",
+          "step-out",
+          "pull"
+        ],
+        "output_name": "comms_data"
+      }
+    },
+    {
+      "id": "n06",
+      "type": "MARKET_DATA_COLLECTOR",
+      "label": "Collect Market Data",
+      "config": {
+        "source": "EBS",
+        "query_template": "symbol:{context.currency_pair} AND date:{context.alert_date}",
+        "output_name": "market_data"
+      }
+    },
+    {
+      "id": "n07",
+      "type": "SIGNAL_CALCULATOR",
+      "label": "Signal: FRONT_RUNNING",
+      "config": {
+        "mode": "configure",
+        "signal_type": "FRONT_RUNNING",
+        "input_name": "enriched_prop_executions",
+        "output_name": "fro_signals",
+        "params": {
+          "window_minutes": 5,
+          "price_move_threshold": 0.0003
+        }
+      }
+    },
+    {
+      "id": "n08",
+      "type": "SIGNAL_CALCULATOR",
+      "label": "Signal: TIMING_CORRELATION",
+      "config": {
+        "mode": "upload_script",
+        "input_name": "enriched_prop_executions",
+        "output_name": "timing_correlation_signals",
+        "script_content": "import pandas as pd\nif all(c in df.columns for c in ['exec_time', 'order_time']):\n    df['_time_delta_mins'] = (\n        pd.to_datetime(df['exec_time']) - pd.to_datetime(df['order_time'])\n    ).dt.total_seconds() / 60\n    df['_signal_flag'] = df['_time_delta_mins'].abs() < 3\n    df['_signal_score'] = (3 - df['_time_delta_mins'].clip(0, 3)).clip(0, 10).round(2)\n    df['_signal_reason'] = df.apply(\n        lambda r: f\"Prop trade {abs(r['_time_delta_mins']):.1f}m before client order\" if r['_signal_flag'] else \"\", axis=1\n    )\nelse:\n    df['_signal_flag'] = False\n    df['_signal_score'] = 0.0\n    df['_signal_reason'] = 'Required columns (exec_time, order_time) not found for timing correlation.'\ndf['_signal_type'] = 'TIMING_CORRELATION'\ndf['_signal_window'] = '3m'"
+      }
+    },
+    {
+      "id": "n09",
+      "type": "SIGNAL_CALCULATOR",
+      "label": "Signal: COMM_KEYWORD_DENSITY",
+      "config": {
+        "mode": "upload_script",
+        "input_name": "comms_data",
+        "output_name": "comms_keyword_signals",
+        "script_content": "import pandas as pd\nif '_keyword_hit' in df.columns:\n    df['_signal_flag'] = df['_keyword_hit']\n    df['_signal_score'] = df['_keyword_hit'].astype(float) * 10\n    df['_signal_reason'] = df.apply(\n        lambda r: \"Keyword hit in communication\" if r['_signal_flag'] else \"\", axis=1\n    )\nelse:\n    df['_signal_flag'] = False\n    df['_signal_score'] = 0.0\n    df['_signal_reason'] = 'No keyword hits detected'\ndf['_signal_type'] = 'COMM_KEYWORD_DENSITY'\ndf['_signal_window'] = '1d'"
+      }
+    },
+    {
+      "id": "n10",
+      "type": "DATA_HIGHLIGHTER",
+      "label": "Highlight Executions",
+      "config": {
+        "input_name": "fro_signals",
+        "output_name": "fro_signals_highlighted",
+        "rules": [
+          {
+            "condition": "_signal_flag == True",
+            "colour": "#FF4444",
+            "label": "FRO SIGNAL"
+          },
+          {
+            "condition": "side == 'BUY'",
+            "colour": "#90EE90",
+            "label": "BUY"
+          },
+          {
+            "condition": "side == 'SELL'",
+            "colour": "#87CEEB",
+            "label": "SELL"
+          }
+        ]
+      }
+    },
+    {
+      "id": "n11",
+      "type": "DATA_HIGHLIGHTER",
+      "label": "Highlight Comms",
+      "config": {
+        "input_name": "comms_keyword_signals",
+        "output_name": "comms_signals_highlighted",
+        "rules": [
+          {
+            "condition": "_signal_flag == True",
+            "colour": "#FF8C00",
+            "label": "COMM ALERT"
+          }
+        ]
+      }
+    },
+    {
+      "id": "n12",
+      "type": "DECISION_RULE",
+      "label": "Determine Disposition",
+      "config": {
+        "input_name": "fro_signals",
+        "escalate_threshold": 5,
+        "review_threshold": 1
+      }
+    },
+    {
+      "id": "n13",
+      "type": "SECTION_SUMMARY",
+      "label": "Section: Trade Analysis",
+      "config": {
+        "section_name": "trade_analysis",
+        "input_name": "enriched_prop_executions",
+        "field_bindings": [
+          {
+            "field": "exec_quantity",
+            "agg": "sum"
+          },
+          {
+            "field": "signed_notional",
+            "agg": "sum"
+          },
+          {
+            "field": "venue",
+            "agg": "nunique"
+          }
+        ],
+        "llm_prompt_template": "Analyze the trade data for {trader_id} in {currency_pair}. Focus on aggregate executions, signed notional, and venue breakdown. Disposition: {disposition}. Stats: {stats}"
+      }
+    },
+    {
+      "id": "n14",
+      "type": "SECTION_SUMMARY",
+      "label": "Section: Comms Analysis",
+      "config": {
+        "section_name": "comms_analysis",
+        "input_name": "comms_keyword_signals",
+        "field_bindings": [
+          {
+            "field": "_signal_flag",
+            "agg": "count"
+          }
+        ],
+        "llm_prompt_template": "Review communications for {trader_id} in {currency_pair}. Highlight keyword hits and potential coordination. Disposition: {disposition}. Keyword hits: {stats._signal_flag_count}."
+      }
+    },
+    {
+      "id": "n15",
+      "type": "SECTION_SUMMARY",
+      "label": "Section: Market Analysis",
+      "config": {
+        "section_name": "market_analysis",
+        "input_name": "market_data",
+        "field_bindings": [
+          {
+            "field": "mid",
+            "agg": "mean"
+          },
+          {
+            "field": "spread_pips",
+            "agg": "mean"
+          }
+        ],
+        "llm_prompt_template": "Summarize market data for {currency_pair} on {alert_date}. Analyze price movement magnitude before/after execution. Disposition: {disposition}. Stats: {stats}"
+      }
+    },
+    {
+      "id": "n16",
+      "type": "CONSOLIDATED_SUMMARY",
+      "label": "Consolidated Executive Summary",
+      "config": {}
+    },
+    {
+      "id": "n17",
+      "type": "REPORT_OUTPUT",
+      "label": "Generate Excel Report",
+      "config": {
+        "output_path": "output/fx_fro_report_{context.alert_id}.xlsx",
+        "tabs": [
+          {
+            "name": "Client Orders",
+            "dataset": "client_orders",
+            "include_highlights": false
+          },
+          {
+            "name": "Prop Executions",
+            "dataset": "fro_signals",
+            "include_highlights": true
+          },
+          {
+            "name": "Timing Signals",
+            "dataset": "timing_correlation_signals",
+            "include_highlights": false
+          },
+          {
+            "name": "Comms",
+            "dataset": "comms_keyword_signals",
+            "include_highlights": true
+          },
+          {
+            "name": "Market Data",
+            "dataset": "market_data",
+            "include_highlights": false
+          }
+        ]
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "n01",
+      "to": "n02"
+    },
+    {
+      "from": "n01",
+      "to": "n03"
+    },
+    {
+      "from": "n01",
+      "to": "n05"
+    },
+    {
+      "from": "n01",
+      "to": "n06"
+    },
+    {
+      "from": "n03",
+      "to": "n04"
+    },
+    {
+      "from": "n04",
+      "to": "n07"
+    },
+    {
+      "from": "n04",
+      "to": "n08"
+    },
+    {
+      "from": "n04",
+      "to": "n10"
+    },
+    {
+      "from": "n04",
+      "to": "n13"
+    },
+    {
+      "from": "n05",
+      "to": "n09"
+    },
+    {
+      "from": "n06",
+      "to": "n15"
+    },
+    {
+      "from": "n07",
+      "to": "n12"
+    },
+    {
+      "from": "n07",
+      "to": "n10"
+    },
+    {
+      "from": "n09",
+      "to": "n11"
+    },
+    {
+      "from": "n09",
+      "to": "n14"
+    },
+    {
+      "from": "n10",
+      "to": "n17"
+    },
+    {
+      "from": "n11",
+      "to": "n17"
+    },
+    {
+      "from": "n12",
+      "to": "n16"
+    },
+    {
+      "from": "n12",
+      "to": "n17"
+    },
+    {
+      "from": "n13",
+      "to": "n16"
+    },
+    {
+      "from": "n14",
+      "to": "n16"
+    },
+    {
+      "from": "n15",
+      "to": "n16"
+    },
+    {
+      "from": "n16",
+      "to": "n17"
+    },
+    {
+      "from": "n02",
+      "to": "n17"
+    },
+    {
+      "from": "n08",
+      "to": "n17"
+    },
+    {
+      "from": "n06",
+      "to": "n17"
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 """Pydantic request/response models for the HTTP API."""
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel
 
@@ -29,10 +29,10 @@ class CopilotGenerateRequest(BaseModel):
     # failures so the planner can produce a targeted edit rather than
     # a greenfield draft. Both fields default to None so the legacy
     # "describe a scenario → generate from scratch" path is unchanged.
-    current_workflow: dict[str, Any] | None = None
-    recent_errors: list[dict[str, Any]] | None = None
+    current_workflow: Optional[Dict[str, Any]] = None
+    recent_errors: Optional[List[Dict[str, Any]]] = None
     # When the user has a node selected on the canvas and writes
     # something deictic ("remove this", "change this threshold") we
     # ship the selected node id so the LLM can resolve the referent
     # instead of guessing.
-    selected_node_id: str | None = None
+    selected_node_id: Optional[str] = None

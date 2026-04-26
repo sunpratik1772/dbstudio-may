@@ -17,9 +17,14 @@ export default function NodePanel() {
       style={{ width: paletteWidth, background: 'var(--bg-1)', borderRight: '1px solid var(--border)' }}
     >
       <div className="px-3 py-3" style={{ borderBottom: '1px solid var(--border)' }}>
-        <h3 className="eyebrow" style={{ color: 'var(--text-1)' }}>Node Palette</h3>
+        <h3 className="eyebrow" style={{ color: 'var(--text-1)', letterSpacing: '0.12em' }}>
+          NODES{' '}
+          <span className="num" style={{ fontSize: 11, color: 'var(--text-2)' }}>
+            {NODE_TYPES.length}
+          </span>
+        </h3>
         <p style={{ fontSize: 10.5, color: 'var(--text-3)', marginTop: 4 }}>
-          Drag a node onto the canvas. The ×N badge shows how many of that type are already in the current workflow.
+          Drag a node onto the canvas. The ×N badge counts how many of that type are in the workflow.
         </p>
       </div>
 

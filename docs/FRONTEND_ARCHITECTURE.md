@@ -184,6 +184,14 @@ Components import from `src/nodes/`:
 **This is why `scripts/gen_artifacts.py` must run after every
 backend `NODE_SPEC` change.**
 
+`ConfigInspector` builds form fields from **`NODE_TYPED[node].params`**
+(structured `ParamSpec` from YAML) — not from heuristics on node type
+names. Unknown node types fall back to legacy string `configSchema` only
+if needed. Node cards on the canvas use **`ui.config_tags`** from the
+same generation path for quick chips; styling is by tag **order** and
+name pattern (e.g. `output` in the key), not hardcoded
+`SIGNAL_CALCULATOR` / `signal_type` checks.
+
 ---
 
 ## 6 — Copilot integration

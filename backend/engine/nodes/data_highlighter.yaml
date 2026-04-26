@@ -14,9 +14,13 @@ input_ports:
 output_ports:
   - name: highlighted
     type: dataframe
+    store_at: "ctx.datasets[{output_name}]"
     description: >-
       Input DataFrame + _highlight_colour (hex) + _highlight_label (str).
       Stored under ctx.datasets[output_name].
+    required_columns:
+      - _highlight_colour
+      - _highlight_label
 
 params:
   - name: input_name

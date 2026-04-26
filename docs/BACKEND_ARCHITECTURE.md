@@ -68,6 +68,7 @@ backend/
 │   ├── context.py                 # RunContext dataclass
 │   ├── ports.py                   # PortSpec, ParamSpec, enums
 │   ├── node_spec.py               # NodeSpec + _spec() factory
+│   ├── node_type_ids.py           # GENERATED — TYPE_ID constants from NODE_SPECS
 │   ├── registry.py                # auto-discovery of NODE_SPEC
 │   ├── dag_runner.py              # topological exec + port type checks
 │   ├── jobs.py                    # JobRunner seam (tests inject fakes)
@@ -78,10 +79,10 @@ backend/
 │   ├── typed_config.py            # ParamSpec → coercion helpers
 │   └── nodes/                     # ★ one file per node type ★
 │       ├── alert_trigger.py
-│       ├── trade_data_collector.py
+│       ├── execution_data_collector.py
 │       ├── comms_collector.py
 │       ├── market_data_collector.py
-│       ├── normalise_enrich.py
+│       ├── feature_engine.py
 │       ├── signal_calculator.py
 │       ├── data_highlighter.py
 │       ├── decision_rule.py
@@ -311,13 +312,12 @@ node_id, field)`. `code` is a `ValidationErrorCode` — see
 enum is `str`-based so JSON serialises cleanly and equality `issue.code
 == "UNKNOWN_TYPE"` works for old call sites.
 
-**Field-binding column validation** — `_validate_field_bindings()` maps
-collector node types to their `DataSource` ID via the `_COLLECTOR_SOURCE`
-table in `validator.py` (`TRADE_DATA_COLLECTOR → "trades"`, etc.), then
-checks each `field_bindings[].field` against `DataSource.column_names()`.
-Issues are warnings, not errors, because `NORMALISE_ENRICH` and
-`SIGNAL_CALCULATOR` may append columns that aren't in the base registry.
-If the dataset's lineage can't be resolved to a collector, the check is
+**Field-binding column validation** — `_validate_field_bindings()` traces
+`SECTION_SUMMARY.input_name` back to the producing collector and selected
+source, e.g. `trades:hs_execution` or `oracle:oracle_orders`, then checks
+each `field_bindings[].field` against that exact source schema plus known
+transformer outputs from `FEATURE_ENGINE` and `SIGNAL_CALCULATOR`. Unknown
+columns are validation errors. If lineage cannot be traced, the check is
 skipped to avoid false positives.
 
 ### 3.5 Hard rules — the Open/Closed extension point
@@ -329,7 +329,7 @@ live in `engine/hard_rules.py`:
 @register_hard_rule(
     name="trade_version_pin",
     code=ValidationErrorCode.MISSING_TRADE_VERSION,
-    node_type="TRADE_DATA_COLLECTOR",
+    node_type="EXECUTION_DATA_COLLECTOR",
     description="hs_execution queries must pin trade_version:1.",
 )
 def _rule_trade_version_pin(node: dict, dag: dict, result: _ResultSink) -> None:
@@ -458,15 +458,15 @@ Lookup via `from data_sources.registry import get_registry`.
 
 **Semantic resolver (live).** `ColumnSpec.semantic` drives two runtime behaviours:
 
-1. **LLM system prompt injection.** `DataSourceRegistry.schema_hints_for_prompt()` serialises every source into a compact block that `PromptBuilder.system_prompt()` injects under `## Data Source Column Schemas`. The LLM sees exact column names and their semantic tags, so it writes `field: "qty"` rather than the alias `"size"`.
+1. **LLM system prompt injection.** `DataSourceRegistry.schema_hints_for_prompt()` serialises every source into a compact block that `PromptBuilder.system_prompt()` injects under `## Data Source Column Schemas`. The LLM sees exact column names and their semantic tags, so it writes `field: "quantity"` rather than the alias `"size"`.
 
    ```python
-   ds.semantic_map()          # {"size": ["qty"], "price": ["price"], ...}
+   ds.semantic_map("hs_client_order")  # {"size": ["quantity"], "price": ["limit_price"], ...}
    ds.schema_hint()           # per-source markdown block for the prompt
    registry.schema_hints_for_prompt()   # all sources in one block
    ```
 
-2. **Field-binding validator.** `_validate_field_bindings()` in `validator.py` checks every `SECTION_SUMMARY.field_bindings[].field` against the columns of the resolved `DataSource`. Mismatches emit `UNKNOWN_COLUMN` **warnings** (not errors) because `NORMALISE_ENRICH` and `SIGNAL_CALCULATOR` may append columns not in the base registry. The `_COLLECTOR_SOURCE` map in `validator.py` (`TRADE_DATA_COLLECTOR → "trades"`, `MARKET_DATA_COLLECTOR → "market"`, etc.) resolves the lineage. If lineage can't be traced, the check is silently skipped to avoid false positives.
+2. **Field-binding validator.** `_validate_field_bindings()` in `validator.py` checks every `SECTION_SUMMARY.field_bindings[].field` against the traced source schema and known transformer extras. For example, `SIGNAL_CALCULATOR` validates as upstream columns plus `_signal_*` columns, so pass-through fields like `exec_id` remain valid.
 
 ### 3.10 HTTP layer
 
@@ -555,14 +555,12 @@ without changing the route handlers.
 ### 5.2 Add a dataset
 
 1. Create `data_sources/metadata/<id>.yaml` with `id`, `description`,
-   `sources`, and `columns`. Add `semantic` tags (`trader`, `size`,
+   `sources`, and either `columns` or per-dropdown `source_schemas`. Add `semantic` tags (`trader`, `size`,
    `price`, `time`, `notional`) to every column where applicable — these
    tags are injected into the LLM system prompt and checked by the
    field-binding validator at validation time.
-2. Add/extend a collector node that emits that dataset. If the new
-   collector should participate in `_validate_field_bindings()`, add an
-   entry to `_COLLECTOR_SOURCE` in `engine/validator.py`
-   (`"MY_COLLECTOR": "my_source_id"`).
+2. Add/extend a collector node that emits that dataset and records provenance
+   through `collector_source_ref(...)`, e.g. `trades:hs_execution`.
 3. Done. `get_registry()` picks it up on next import.
 
 ### 5.3 Add a validation rule

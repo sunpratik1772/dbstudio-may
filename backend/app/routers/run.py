@@ -6,9 +6,12 @@ payload instead of blowing up half-way through execution.
 """
 from __future__ import annotations
 
+import copy
 import json
 import logging
+import os
 from pathlib import Path
+from typing import Dict, Optional
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
@@ -23,6 +26,36 @@ from ..schemas import RunWorkflowRequest
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["run"])
+
+# backend/ — used to resolve `demo_data/...` mock_csv_path regardless of process cwd
+_BACKEND_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _resolve_workflow_mock_csv_paths(dag: dict) -> dict:
+    """
+    When the UI posts the same JSON as `backend/workflows/*.json`, relative
+    `mock_csv_path` values must find CSVs under `backend/` even if uvicorn
+    was started from the repo root. Deep-copy the DAG and rewrite paths that
+    exist as `backend/<path>` to absolute paths; leave unknown paths unchanged.
+    """
+    out = copy.deepcopy(dag)
+    for node in out.get("nodes", []):
+        cfg = node.get("config")
+        if not isinstance(cfg, dict):
+            continue
+        p = cfg.get("mock_csv_path")
+        if not p or not isinstance(p, str):
+            continue
+        if os.path.isabs(p) and os.path.isfile(p):
+            continue
+        candidate = (_BACKEND_ROOT / p).resolve()
+        try:
+            candidate.relative_to(_BACKEND_ROOT)
+        except ValueError:
+            continue
+        if candidate.is_file():
+            cfg["mock_csv_path"] = str(candidate)
+    return out
 
 
 # Sensible defaults for the demo endpoint so a reviewer can curl the
@@ -48,11 +81,11 @@ class RunDemoRequest(BaseModel):
         default=_DEMO_WORKFLOW_FILENAME,
         description=(
             "Name of a JSON file under `backend/workflows/` to execute. "
-            "Defaults to the bundled demo workflow that's pre-wired to "
-            "the CSV fixtures."
+            "Defaults to the bundled demo workflow. `fxfronew_workflow.json` is "
+            "the same DAG with report `output/fxfronew_report.xlsx`."
         ),
     )
-    alert_payload: dict[str, str] | None = Field(
+    alert_payload: Optional[Dict[str, str]] = Field(
         default=None,
         description="Optional override of the canned alert payload.",
     )
@@ -72,12 +105,13 @@ def run(req: RunWorkflowRequest) -> dict:
     # Deterministic pre-flight. Errors short-circuit with HTTP 422 and
     # the same payload shape the /validate endpoint returns, so the
     # frontend handles both uniformly.
-    validation = validate_dag(req.dag)
+    dag = _resolve_workflow_mock_csv_paths(req.dag)
+    validation = validate_dag(dag)
     if not validation.valid:
         raise HTTPException(status_code=422, detail=validation.to_json())
 
     try:
-        ctx: RunContext = get_default_runner().run(req.dag, req.alert_payload).context
+        ctx: RunContext = get_default_runner().run(dag, req.alert_payload).context
         result: dict = {
             "run_id": ctx.run_id,
             "disposition": ctx.disposition,
@@ -112,7 +146,8 @@ def run_stream(req: RunWorkflowRequest) -> StreamingResponse:
     rather than raising HTTP 422. That way the frontend — which is
     already parsing SSE — gets a uniform error surface.
     """
-    validation = validate_dag(req.dag)
+    dag = _resolve_workflow_mock_csv_paths(req.dag)
+    validation = validate_dag(dag)
 
     def event_source():
         if not validation.valid:
@@ -124,7 +159,7 @@ def run_stream(req: RunWorkflowRequest) -> StreamingResponse:
                 }
             ) + "\n\n"
             return
-        for ev in get_default_runner().stream(req.dag, req.alert_payload):
+        for ev in get_default_runner().stream(dag, req.alert_payload):
             if ev.get("type") == "workflow_complete":
                 res = ev.get("result") or {}
                 if res.get("report_path"):
@@ -163,7 +198,7 @@ def _load_bundled_workflow(filename: str) -> dict:
 
 
 @router.post("/run/demo")
-def run_demo(req: RunDemoRequest | None = None):
+def run_demo(req: Optional[RunDemoRequest] = None):
     """
     One-click demo: run a bundled workflow end-to-end against the CSV
     fixtures in `backend/demo_data/` and return the generated xlsx as
@@ -176,7 +211,7 @@ def run_demo(req: RunDemoRequest | None = None):
     normal JSON run summary instead (with a `download_url` field).
     """
     req = req or RunDemoRequest()
-    dag = _load_bundled_workflow(req.workflow_filename)
+    dag = _resolve_workflow_mock_csv_paths(_load_bundled_workflow(req.workflow_filename))
     alert = req.alert_payload or dict(_DEMO_ALERT_PAYLOAD)
 
     validation = validate_dag(dag)

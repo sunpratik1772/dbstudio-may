@@ -4,6 +4,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from ..collector_source import collector_source_ref
 from ..context import RunContext
 from ..node_spec import NodeSpec, _spec_from_yaml
 
@@ -40,7 +41,7 @@ def handle_comms_collector(node: dict, ctx: RunContext) -> None:
     output_name: str = cfg.get("output_name", "comms_data")
 
     # Demo mode: prefer the configured CSV when present; otherwise
-    # generate synthetic rows. See trade_data_collector for the same
+    # generate synthetic rows. See execution_data_collector for the same
     # pattern and rationale.
     mock_csv_path = cfg.get("mock_csv_path")
     if mock_csv_path:
@@ -70,6 +71,7 @@ def handle_comms_collector(node: dict, ctx: RunContext) -> None:
     df["_keyword_hit"] = df["_matched_keywords"].apply(bool)
 
     ctx.datasets[output_name] = df
+    ctx.dataset_provenance[output_name] = collector_source_ref("COMMS_COLLECTOR", cfg)
     ctx.set(f"{output_name}_keyword_hits", int(df["_keyword_hit"].sum()))
 
 

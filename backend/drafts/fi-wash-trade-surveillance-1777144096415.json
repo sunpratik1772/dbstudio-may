@@ -1,0 +1,377 @@
+{
+  "workflow_id": "fi_wash_trade_workflow",
+  "name": "FI Wash Trade Surveillance",
+  "schema_version": "1.0",
+  "description": "Detects Fixed Income wash trading using built-in and custom signals for counterparty circularity and price neutrality.",
+  "nodes": [
+    {
+      "id": "n01",
+      "type": "ALERT_TRIGGER",
+      "label": "Alert Trigger",
+      "config": {
+        "alert_fields": {
+          "trader_id": "string",
+          "book": "string",
+          "alert_date": "date",
+          "currency_pair": "string",
+          "entity": "string",
+          "alert_id": "string"
+        }
+      }
+    },
+    {
+      "id": "n02",
+      "type": "EXECUTION_DATA_COLLECTOR",
+      "label": "Collect Client Orders",
+      "config": {
+        "source": "hs_client_order",
+        "query_template": "trader_id:{context.trader_id} AND book:{context.book} AND order_time:[{context.alert_date}T00:00:00Z TO {context.alert_date}T23:59:59Z] AND currency_pair:\"{context.currency_pair}\"",
+        "output_name": "client_orders"
+      }
+    },
+    {
+      "id": "n03",
+      "type": "EXECUTION_DATA_COLLECTOR",
+      "label": "Collect Executions",
+      "config": {
+        "source": "hs_execution",
+        "query_template": "trader_id:{context.trader_id} AND book:{context.book} AND exec_time:[{context.alert_date}T00:00:00Z TO {context.alert_date}T23:59:59Z] AND currency_pair:\"{context.currency_pair}\" AND trade_version:1",
+        "output_name": "executions"
+      }
+    },
+    {
+      "id": "n04",
+      "type": "FEATURE_ENGINE",
+      "label": "Normalise & Enrich Executions",
+      "config": {
+        "input_name": "executions",
+        "output_name": "enriched_executions",
+        "operations": [
+          {
+            "op": "lifecycle_event"
+          },
+          {
+            "op": "derive_signed_notional"
+          }
+        ]
+      }
+    },
+    {
+      "id": "n05",
+      "type": "SIGNAL_CALCULATOR",
+      "label": "Wash Trade Signal",
+      "config": {
+        "mode": "configure",
+        "signal_type": "WASH_TRADE",
+        "input_name": "enriched_executions",
+        "output_name": "wash_signals",
+        "params": {
+          "window_minutes": 10,
+          "ratio_threshold": 0.8
+        }
+      }
+    },
+    {
+      "id": "n06",
+      "type": "SIGNAL_CALCULATOR",
+      "label": "Counterparty Circularity Signal",
+      "config": {
+        "mode": "upload_script",
+        "input_name": "enriched_executions",
+        "output_name": "circularity_signals",
+        "script_content": "import pandas as pd\nif 'counterparty' in df.columns and 'trader_id' in df.columns:\n    related = df['counterparty'].isin(['INTERNAL', 'RELATED', df['trader_id'].iloc[0]])\n    df['_signal_flag'] = related\n    df['_signal_score'] = related.astype(float) * 10\n    df['_signal_reason'] = df.apply(\n        lambda r: f\"Trade with related/internal counterparty: {r['counterparty']}\" if r['_signal_flag'] else \"\", axis=1\n    )\nelse:\n    df['_signal_flag'] = False\n    df['_signal_score'] = 0.0\n    df['_signal_reason'] = ''\ndf['_signal_type'] = 'COUNTERPARTY_CIRCULARITY'\ndf['_signal_window'] = '1d'"
+      }
+    },
+    {
+      "id": "n07",
+      "type": "SIGNAL_CALCULATOR",
+      "label": "Price Neutrality Signal",
+      "config": {
+        "mode": "upload_script",
+        "input_name": "enriched_executions",
+        "output_name": "neutrality_signals",
+        "script_content": "import pandas as pd\nif 'signed_notional' in df.columns:\n    net_notional = df['signed_notional'].sum()\n    total_notional = df['signed_notional'].abs().sum()\n    neutrality = 1 - (abs(net_notional) / total_notional) if total_notional > 0 else 0\n    df['_signal_flag'] = neutrality > 0.9\n    df['_signal_score'] = round(neutrality * 10, 2)\n    df['_signal_reason'] = f\"Net notional neutrality: {neutrality:.2%}\" if df['_signal_flag'].any() else ''\nelse:\n    df['_signal_flag'] = False\n    df['_signal_score'] = 0.0\n    df['_signal_reason'] = ''\ndf['_signal_type'] = 'PRICE_NEUTRALITY'\ndf['_signal_window'] = '1d'"
+      }
+    },
+    {
+      "id": "n08",
+      "type": "COMMS_COLLECTOR",
+      "label": "Collect Communications",
+      "config": {
+        "query_template": "user:{context.trader_id} AND timestamp:[{context.alert_date}T00:00:00Z TO {context.alert_date}T23:59:59Z]",
+        "keywords": [
+          "wash",
+          "offset",
+          "back-to-back",
+          "round-trip",
+          "artificial volume",
+          "related account",
+          "step-out",
+          "rotate",
+          "coordinated"
+        ],
+        "output_name": "comms_data"
+      }
+    },
+    {
+      "id": "n09",
+      "type": "DATA_HIGHLIGHTER",
+      "label": "Highlight Wash Signals",
+      "config": {
+        "input_name": "wash_signals",
+        "output_name": "wash_signals_highlighted",
+        "rules": [
+          {
+            "condition": "_signal_flag == True",
+            "colour": "#FF4444",
+            "label": "WASH SIGNAL"
+          },
+          {
+            "condition": "side == 'BUY'",
+            "colour": "#90EE90",
+            "label": "BUY"
+          },
+          {
+            "condition": "side == 'SELL'",
+            "colour": "#87CEEB",
+            "label": "SELL"
+          },
+          {
+            "condition": "status == 'CANCELLED'",
+            "colour": "#FFD700",
+            "label": "CANCELLED"
+          }
+        ]
+      }
+    },
+    {
+      "id": "n10",
+      "type": "DATA_HIGHLIGHTER",
+      "label": "Highlight Comms Data",
+      "config": {
+        "input_name": "comms_data",
+        "output_name": "comms_data_highlighted",
+        "rules": [
+          {
+            "condition": "_keyword_hit == True",
+            "colour": "#FF8C00",
+            "label": "COMM ALERT"
+          }
+        ]
+      }
+    },
+    {
+      "id": "n11",
+      "type": "DECISION_RULE",
+      "label": "Determine Disposition",
+      "config": {
+        "input_name": "wash_signals",
+        "escalate_threshold": 3,
+        "review_threshold": 1
+      }
+    },
+    {
+      "id": "n12",
+      "type": "SECTION_SUMMARY",
+      "label": "Execution Analysis Summary",
+      "config": {
+        "section_name": "execution_analysis",
+        "input_name": "enriched_executions",
+        "field_bindings": [
+          {
+            "field": "side",
+            "agg": "count"
+          },
+          {
+            "field": "signed_notional",
+            "agg": "sum"
+          },
+          {
+            "field": "counterparty",
+            "agg": "nunique"
+          }
+        ],
+        "llm_prompt_template": "Summarize the execution data for {trader_id} in {currency_pair}. Focus on buy/sell ratio, net notional, and counterparty diversity. Disposition: {disposition}."
+      }
+    },
+    {
+      "id": "n13",
+      "type": "SECTION_SUMMARY",
+      "label": "Comms Analysis Summary",
+      "config": {
+        "section_name": "comms_analysis",
+        "input_name": "comms_data",
+        "field_bindings": [
+          {
+            "field": "_keyword_hit",
+            "agg": "sum"
+          },
+          {
+            "field": "user",
+            "agg": "nunique"
+          }
+        ],
+        "llm_prompt_template": "Analyze communications for {trader_id} related to wash trading. Report on keyword hits and potential coordination. Disposition: {disposition}."
+      }
+    },
+    {
+      "id": "n14",
+      "type": "SECTION_SUMMARY",
+      "label": "Counterparty Analysis Summary",
+      "config": {
+        "section_name": "counterparty_analysis",
+        "input_name": "enriched_executions",
+        "field_bindings": [
+          {
+            "field": "counterparty",
+            "agg": "nunique"
+          },
+          {
+            "field": "trader_id",
+            "agg": "nunique"
+          }
+        ],
+        "llm_prompt_template": "Provide a summary of counterparty relationships for {trader_id}'s trades. Identify any internal or related entities. Disposition: {disposition}."
+      }
+    },
+    {
+      "id": "n15",
+      "type": "CONSOLIDATED_SUMMARY",
+      "label": "Consolidated Executive Summary",
+      "config": {}
+    },
+    {
+      "id": "n16",
+      "type": "REPORT_OUTPUT",
+      "label": "Generate Excel Report",
+      "config": {
+        "output_path": "output/fi_wash_trade_report_{context.alert_id}.xlsx",
+        "tabs": [
+          {
+            "name": "Client Orders",
+            "dataset": "client_orders",
+            "include_highlights": false
+          },
+          {
+            "name": "Wash Signals",
+            "dataset": "wash_signals_highlighted",
+            "include_highlights": true
+          },
+          {
+            "name": "Circularity Signals",
+            "dataset": "circularity_signals",
+            "include_highlights": false
+          },
+          {
+            "name": "Neutrality Signals",
+            "dataset": "neutrality_signals",
+            "include_highlights": false
+          },
+          {
+            "name": "Communications",
+            "dataset": "comms_data_highlighted",
+            "include_highlights": true
+          }
+        ]
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "n01",
+      "to": "n02"
+    },
+    {
+      "from": "n01",
+      "to": "n03"
+    },
+    {
+      "from": "n01",
+      "to": "n08"
+    },
+    {
+      "from": "n03",
+      "to": "n04"
+    },
+    {
+      "from": "n04",
+      "to": "n05"
+    },
+    {
+      "from": "n04",
+      "to": "n06"
+    },
+    {
+      "from": "n04",
+      "to": "n07"
+    },
+    {
+      "from": "n04",
+      "to": "n12"
+    },
+    {
+      "from": "n04",
+      "to": "n14"
+    },
+    {
+      "from": "n05",
+      "to": "n09"
+    },
+    {
+      "from": "n05",
+      "to": "n11"
+    },
+    {
+      "from": "n08",
+      "to": "n10"
+    },
+    {
+      "from": "n08",
+      "to": "n13"
+    },
+    {
+      "from": "n09",
+      "to": "n16"
+    },
+    {
+      "from": "n10",
+      "to": "n16"
+    },
+    {
+      "from": "n11",
+      "to": "n15"
+    },
+    {
+      "from": "n11",
+      "to": "n16"
+    },
+    {
+      "from": "n12",
+      "to": "n15"
+    },
+    {
+      "from": "n13",
+      "to": "n15"
+    },
+    {
+      "from": "n14",
+      "to": "n15"
+    },
+    {
+      "from": "n15",
+      "to": "n16"
+    },
+    {
+      "from": "n02",
+      "to": "n16"
+    },
+    {
+      "from": "n06",
+      "to": "n16"
+    },
+    {
+      "from": "n07",
+      "to": "n16"
+    }
+  ]
+}

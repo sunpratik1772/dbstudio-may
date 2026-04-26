@@ -166,11 +166,14 @@ export const CustomNode = memo(({ id, data }: NodeProps<NodeData>) => {
           in backend/engine/registry.py. */}
       {meta.configTags.some((k) => data.config[k] != null) && (
         <div className="flex flex-wrap gap-1 px-3 pb-2.5 pt-0.5">
-          {meta.configTags.map((k) => {
+          {meta.configTags.map((k, i) => {
             const v = data.config[k]
             if (v == null) return null
-            const tone = k === 'signal_type' ? 'danger' : k === 'output_name' ? 'muted' : 'default'
-            const label = k === 'output_name' ? `→ ${String(v)}` : String(v)
+            // Order + purpose come from backend ``ui.config_tags`` — no per-node type strings here.
+            const tone =
+              i === 0 ? 'danger' : i === 1 ? 'muted' : 'default'
+            const isOutputName = k.toLowerCase().includes('output')
+            const label = isOutputName ? `→ ${String(v)}` : String(v)
             return <Tag key={k} label={label} tone={tone} />
           })}
         </div>

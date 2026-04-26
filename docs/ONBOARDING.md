@@ -134,10 +134,11 @@ for the full loader.
 Tag generously — it directly improves the quality of Copilot-generated
 workflows for your new dataset.
 
-If your collector should participate in the field-binding check, add one
-entry to `_COLLECTOR_SOURCE` in `engine/validator.py`:
+If your collector should participate in the field-binding check, add it to
+`COLLECTOR_TYPE_TO_SOURCE_ID` in `engine/collector_source.py` and record
+runtime provenance with `collector_source_ref(...)`:
 ```python
-"POSITIONS_COLLECTOR": "positions",   # node type → data source id
+"POSITIONS_COLLECTOR": "positions",   # node type -> data source id
 ```
 
 ### 4.2 Create the collector node
@@ -505,15 +506,15 @@ Before opening a PR:
 
 - [ ] New handler is pure — no `import fastapi`, no `requests.*`.
 - [ ] `NODE_SPEC` declared at the bottom of the handler file.
-- [ ] `python backend/scripts/gen_artifacts.py` ran cleanly and the two
-      generated files are committed.
+- [ ] `python backend/scripts/gen_artifacts.py` ran cleanly and generated
+      files (``node_type_ids.py``, ``node_contracts.json``, ``generated.ts``) are committed.
 - [ ] `backend/.venv/bin/pytest tests/ -v` — all green.
 - [ ] `cd frontend && ./node_modules/.bin/tsc --noEmit` — no errors.
 - [ ] `POST /validate` on the new workflow returns `{"valid": true, ...}`.
 - [ ] If you added a scenario, there's a skills markdown file.
 - [ ] If you added a dataset, there's a metadata YAML file with `semantic`
-      tags on columns where applicable, and the collector is listed in
-      `_COLLECTOR_SOURCE` in `engine/validator.py`.
+      tags on columns where applicable, and the collector records provenance
+      through `engine/collector_source.py`.
 - [ ] If you added a signal, there's at least one unit test for the
       signal function itself (decoupled from the node handler).
 

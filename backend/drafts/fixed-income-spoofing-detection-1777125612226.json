@@ -1,0 +1,215 @@
+{
+  "workflow_id": "fi_spoofing_workflow",
+  "name": "Fixed Income Spoofing Detection",
+  "schema_version": "1.0",
+  "description": "Detects Fixed Income spoofing patterns for a given trader and instrument, including order size anomalies and rapid cancellations.",
+  "nodes": [
+    {
+      "id": "n01",
+      "type": "ALERT_TRIGGER",
+      "label": "Alert Trigger",
+      "config": {
+        "alert_fields": {
+          "trader_id": "string",
+          "book": "string",
+          "alert_date": "date",
+          "instrument": "string",
+          "cusip": "string",
+          "alert_id": "string"
+        }
+      }
+    },
+    {
+      "id": "n02",
+      "type": "EXECUTION_DATA_COLLECTOR",
+      "label": "Collect Client Orders",
+      "config": {
+        "source": "hs_client_order",
+        "query_template": "trader_id:{context.trader_id} AND book:{context.book} AND order_time:[{context.alert_date}T00:00:00Z TO {context.alert_date}T23:59:59Z]",
+        "output_name": "client_orders"
+      }
+    },
+    {
+      "id": "n03",
+      "type": "FEATURE_ENGINE",
+      "label": "Enrich Client Orders",
+      "config": {
+        "input_name": "client_orders",
+        "output_name": "enriched_orders",
+        "operations": [
+          {
+            "op": "lifecycle_event"
+          },
+          {
+            "op": "derive_signed_notional"
+          }
+        ]
+      }
+    },
+    {
+      "id": "n04",
+      "type": "SIGNAL_CALCULATOR",
+      "label": "SPOOFING Signal",
+      "config": {
+        "mode": "configure",
+        "signal_type": "SPOOFING",
+        "input_name": "enriched_orders",
+        "output_name": "spoofing_signals",
+        "params": {
+          "cancel_ratio_threshold": 0.7,
+          "window": "1d"
+        }
+      }
+    },
+    {
+      "id": "n05",
+      "type": "SIGNAL_CALCULATOR",
+      "label": "Order Size Anomaly Signal",
+      "config": {
+        "mode": "upload_script",
+        "input_name": "enriched_orders",
+        "output_name": "order_size_anomaly_signals",
+        "script_content": "import pandas as pd\nif 'quantity' in df.columns and 'status' in df.columns:\n    avg_exec = df[df['status'] == 'FILLED']['quantity'].mean() if (df['status'] == 'FILLED').any() else 1\n    df['_size_ratio'] = df['quantity'] / avg_exec if avg_exec > 0 else 0\n    df['_signal_flag'] = (df['_size_ratio'] > 5) & (df['status'] == 'CANCELLED')\n    df['_signal_score'] = df['_size_ratio'].clip(0, 10).round(2)\n    df['_signal_reason'] = df.apply(\n        lambda r: f\"Cancelled order {r['_size_ratio']:.1f}x larger than avg execution\" if r['_signal_flag'] else \"\", axis=1\n    )\nelse:\n    df['_signal_flag'] = False\n    df['_signal_score'] = 0.0\n    df['_signal_reason'] = ''\ndf['_signal_type'] = 'ORDER_SIZE_ANOMALY'\ndf['_signal_window'] = '1d'"
+      }
+    },
+    {
+      "id": "n06",
+      "type": "SIGNAL_CALCULATOR",
+      "label": "Rapid Cancel Pattern Signal",
+      "config": {
+        "mode": "upload_script",
+        "input_name": "enriched_orders",
+        "output_name": "rapid_cancel_signals",
+        "script_content": "import pandas as pd\nif 'order_time' in df.columns and 'status' in df.columns:\n    df['order_time'] = pd.to_datetime(df['order_time'])\n    df_sorted = df.sort_values('order_time')\n    df_sorted['_next_time'] = df_sorted['order_time'].shift(-1)\n    df_sorted['_life_secs'] = (df_sorted['_next_time'] - df_sorted['order_time']).dt.total_seconds().fillna(999)\n    df = df_sorted\n    df['_signal_flag'] = (df['_life_secs'] < 30) & (df['status'] == 'CANCELLED')\n    df['_signal_score'] = (30 - df['_life_secs'].clip(0, 30)).clip(0, 10).round(2)\n    df['_signal_reason'] = df.apply(\n        lambda r: f\"Order cancelled after {r['_life_secs']:.0f}s\" if r['_signal_flag'] else \"\", axis=1\n    )\nelse:\n    df['_signal_flag'] = False\n    df['_signal_score'] = 0.0\n    df['_signal_reason'] = ''\ndf['_signal_type'] = 'RAPID_CANCEL'\ndf['_signal_window'] = '30s'"
+      }
+    },
+    {
+      "id": "n07",
+      "type": "DECISION_RULE",
+      "label": "Spoofing Decision Rule",
+      "config": {
+        "input_name": "spoofing_signals",
+        "escalate_threshold": 5,
+        "review_threshold": 2
+      }
+    },
+    {
+      "id": "n08",
+      "type": "DATA_HIGHLIGHTER",
+      "label": "Highlight Spoofing Signals",
+      "config": {
+        "input_name": "spoofing_signals",
+        "output_name": "spoofing_signals_highlighted",
+        "rules": [
+          {
+            "condition": "_signal_flag == True",
+            "colour": "#FF4444",
+            "label": "SPOOF SIGNAL"
+          },
+          {
+            "condition": "status == 'CANCELLED'",
+            "colour": "#FFD700",
+            "label": "CANCELLED"
+          },
+          {
+            "condition": "order_type == 'LIMIT'",
+            "colour": "#DDA0DD",
+            "label": "LIMIT ORDER"
+          }
+        ]
+      }
+    },
+    {
+      "id": "n09",
+      "type": "SECTION_SUMMARY",
+      "label": "Order Analysis Summary",
+      "config": {
+        "section_name": "order_analysis",
+        "input_name": "spoofing_signals",
+        "field_bindings": [
+          {
+            "field": "order_id",
+            "agg": "count"
+          },
+          {
+            "field": "_signal_flag",
+            "agg": "sum"
+          }
+        ],
+        "llm_prompt_template": "Summarize the order flow for {trader_id} related to spoofing. Focus on the number of orders, cancellations, and any detected spoofing signals. Context: {section_text}"
+      }
+    },
+    {
+      "id": "n10",
+      "type": "REPORT_OUTPUT",
+      "label": "Generate Spoofing Report",
+      "config": {
+        "output_path": "output/spoofing_report_{context.alert_id}.xlsx",
+        "tabs": [
+          {
+            "name": "Client Orders",
+            "dataset": "client_orders",
+            "include_highlights": false
+          },
+          {
+            "name": "Spoofing Signals",
+            "dataset": "spoofing_signals_highlighted",
+            "include_highlights": true
+          },
+          {
+            "name": "Order Size Anomaly",
+            "dataset": "order_size_anomaly_signals",
+            "include_highlights": false
+          },
+          {
+            "name": "Rapid Cancel Signals",
+            "dataset": "rapid_cancel_signals",
+            "include_highlights": false
+          }
+        ]
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "n01",
+      "to": "n02"
+    },
+    {
+      "from": "n02",
+      "to": "n03"
+    },
+    {
+      "from": "n03",
+      "to": "n04"
+    },
+    {
+      "from": "n03",
+      "to": "n05"
+    },
+    {
+      "from": "n03",
+      "to": "n06"
+    },
+    {
+      "from": "n04",
+      "to": "n07"
+    },
+    {
+      "from": "n04",
+      "to": "n08"
+    },
+    {
+      "from": "n08",
+      "to": "n09"
+    },
+    {
+      "from": "n09",
+      "to": "n10"
+    },
+    {
+      "from": "n07",
+      "to": "n10"
+    }
+  ]
+}

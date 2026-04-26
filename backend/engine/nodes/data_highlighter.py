@@ -4,21 +4,26 @@ import pandas as pd
 
 from ..context import RunContext
 from ..node_spec import NodeSpec, _spec_from_yaml
+from ..signal_contract import signal_flag_column_name
 
-DEFAULT_RULES = [
-    {"condition": "_signal_flag == True", "colour": "#FF4444", "label": "SIGNAL HIT"},
-    {"condition": "_keyword_hit == True", "colour": "#FF8C00", "label": "COMM ALERT"},
-    {"condition": "status == 'CANCELLED'", "colour": "#FFD700", "label": "CANCELLED"},
-    {"condition": "side == 'SELL'", "colour": "#87CEEB", "label": "SELL"},
-    {"condition": "side == 'BUY'", "colour": "#90EE90", "label": "BUY"},
-]
+
+def _default_highlight_rules() -> list[dict]:
+    """Defaults use the same flag column name as SIGNAL_CALCULATOR YAML."""
+    f = signal_flag_column_name()
+    return [
+        {"condition": f"{f} == True", "colour": "#FF4444", "label": "SIGNAL HIT"},
+        {"condition": "_keyword_hit == True", "colour": "#FF8C00", "label": "COMM ALERT"},
+        {"condition": "status == 'CANCELLED'", "colour": "#FFD700", "label": "CANCELLED"},
+        {"condition": "side == 'SELL'", "colour": "#87CEEB", "label": "SELL"},
+        {"condition": "side == 'BUY'", "colour": "#90EE90", "label": "BUY"},
+    ]
 
 
 def handle_data_highlighter(node: dict, ctx: RunContext) -> None:
     cfg = node.get("config", {})
     input_name: str = cfg.get("input_name", "signal_data")
     output_name: str = cfg.get("output_name", f"{input_name}_highlighted")
-    rules: list[dict] = cfg.get("rules", DEFAULT_RULES)
+    rules: list[dict] = cfg.get("rules", _default_highlight_rules())
 
     df = ctx.datasets.get(input_name)
     if df is None:

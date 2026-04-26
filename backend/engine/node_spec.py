@@ -133,7 +133,6 @@ def _spec(
         "outputs": [p.to_json() for p in typed_outputs],
     }
     contract["params"] = [p.to_json() for p in typed_params]
-
     return NodeSpec(
         type_id=type_id,
         description=description,
@@ -179,11 +178,19 @@ def _spec_from_yaml(yaml_path: Path | str, handler: Handler) -> NodeSpec:
         data = _yaml.safe_load(f)
 
     def _load_port(p: dict) -> PortSpec:
+        rc = p.get("required_columns") or []
+        rk = p.get("required_keys") or []
+        sk = p.get("source_config_key")
+        store_at = p.get("store_at")
         return PortSpec(
             name=p["name"],
             type=PortType(p["type"].lower()),
             description=p.get("description", ""),
             optional=bool(p.get("optional", False)),
+            required_columns=tuple(str(c) for c in rc),
+            required_keys=tuple(str(k) for k in rk),
+            source_config_key=str(sk) if sk else None,
+            store_at=str(store_at) if store_at else None,
         )
 
     def _load_param(p: dict) -> ParamSpec:
@@ -206,8 +213,14 @@ def _spec_from_yaml(yaml_path: Path | str, handler: Handler) -> NodeSpec:
     ui = data.get("ui") or {}
     sem = data.get("semantics") or {}
 
+    type_id = data.get("type_id") or data.get("id")
+    if not type_id:
+        raise ValueError(
+            f"Node YAML {yaml_path!s} must set 'type_id' (or alias 'id')"
+        )
+
     return _spec(
-        data["type_id"],
+        type_id,
         handler,
         data["description"],
         color=ui.get("color", "#6B7280"),

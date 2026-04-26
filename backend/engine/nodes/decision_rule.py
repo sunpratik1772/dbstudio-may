@@ -2,6 +2,7 @@ from pathlib import Path
 
 from ..context import RunContext
 from ..node_spec import NodeSpec, _spec_from_yaml
+from ..signal_contract import signal_flag_column_name
 
 
 def handle_decision_rule(node: dict, ctx: RunContext) -> None:
@@ -14,8 +15,9 @@ def handle_decision_rule(node: dict, ctx: RunContext) -> None:
 
     # Resolve flag_count from dataset or previously stored context value
     df = ctx.datasets.get(input_name)
-    if df is not None and "_signal_flag" in df.columns:
-        flag_count = int(df["_signal_flag"].sum())
+    _flag = signal_flag_column_name()
+    if df is not None and _flag in df.columns:
+        flag_count = int(df[_flag].sum())
     else:
         flag_count = int(ctx.get(f"{input_name}_flag_count", 0))
 

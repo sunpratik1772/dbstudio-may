@@ -14,6 +14,7 @@ import {
   Check,
   X as XIcon,
   ArrowUp,
+  Loader2,
 } from 'lucide-react'
 import { useWorkflowStore } from '../../store/workflowStore'
 import { api } from '../../services/api'
@@ -82,32 +83,34 @@ function CopilotAvatar({ size = 24 }: { size?: number }) {
 function PhaseTimeline({ phases }: { phases: PhaseState[] }) {
   if (phases.length === 0) return null
   return (
-    <div className="mb-3 ml-8 space-y-1.5">
+    <div className="mb-2 space-y-2">
       {phases.map((p) => {
         const isRunning = p.status === 'running'
         const isError = p.status === 'error'
         const color = isError ? 'var(--danger)' : p.status === 'done' ? 'var(--success)' : 'var(--accent)'
         const IconComp = PHASE_ICON[p.phase] ?? Sparkles
         return (
-          <div
-            key={p.id}
-            className="flex items-start gap-2 rounded-lg px-2.5 py-1.5"
-            style={{
-              background: 'var(--bg-2)',
-              border: `1px solid color-mix(in srgb, ${color} 30%, var(--border))`,
-              fontSize: 11.5,
-            }}
-          >
+            <div
+              key={p.id}
+              className="flex min-w-0 items-start gap-2 rounded-lg px-2.5 py-2"
+              style={{
+                background: 'color-mix(in srgb, var(--text-0) 4.5%, var(--bg-2))',
+                border: `1.5px solid color-mix(in srgb, ${color} 50%, var(--border))`,
+                fontSize: 11.5,
+                boxShadow: '0 1px 0 color-mix(in srgb, var(--text-0) 5%, transparent)',
+              }}
+            >
             <div
               className="shrink-0 mt-0.5 w-4 h-4 rounded-full flex items-center justify-center"
               style={{
-                background: `color-mix(in srgb, ${color} 15%, transparent)`,
-                border: `1px solid ${color}`,
+                background: `color-mix(in srgb, ${color} 22%, var(--bg-1))`,
+                border: `1.5px solid color-mix(in srgb, ${color} 70%, var(--bg-0))`,
                 color,
+                boxShadow: 'inset 0 1px 0 color-mix(in srgb, #fff 12%, transparent)',
               }}
             >
               {isRunning ? (
-                <span className="w-1.5 h-1.5 rounded-full live-blink" style={{ background: color }} />
+                <Loader2 size={10} strokeWidth={2.5} className="animate-spin" style={{ color }} />
               ) : isError ? (
                 <XIcon size={9} strokeWidth={3} />
               ) : (
@@ -115,9 +118,9 @@ function PhaseTimeline({ phases }: { phases: PhaseState[] }) {
               )}
             </div>
             <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-1.5">
-                <IconComp size={11} strokeWidth={2} style={{ color: 'var(--text-2)' }} />
-                <span style={{ color: 'var(--text-0)', fontWeight: 500 }}>{p.label}</span>
+              <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5 min-w-0">
+                <IconComp size={11} strokeWidth={2} className="shrink-0" style={{ color: 'var(--text-2)' }} />
+                <span style={{ color: 'var(--text-0)', fontWeight: 600 }}>{p.label}</span>
                 {p.approved === true && (
                   <span
                     className="num"
@@ -134,12 +137,21 @@ function PhaseTimeline({ phases }: { phases: PhaseState[] }) {
                     VALID
                   </span>
                 )}
+                {p.detail && (
+                  <>
+                    <span className="shrink-0" style={{ color: 'var(--text-3)', fontSize: 11, fontWeight: 400 }} aria-hidden>
+                      —
+                    </span>
+                    <span
+                      className="truncate min-w-0"
+                      style={{ color: 'var(--text-2)', fontSize: 10.5, fontWeight: 400, flex: '1 1 120px' }}
+                      title={p.detail}
+                    >
+                      {p.detail}
+                    </span>
+                  </>
+                )}
               </div>
-              {p.detail && (
-                <div className="truncate mt-0.5" style={{ color: 'var(--text-2)', fontSize: 10.5 }} title={p.detail}>
-                  {p.detail}
-                </div>
-              )}
               {p.errorCodes && p.errorCodes.length > 0 && (
                 <div className="flex flex-wrap gap-1 mt-1">
                   {p.errorCodes.slice(0, 6).map((code, i) => (
@@ -190,7 +202,7 @@ function PhaseTimeline({ phases }: { phases: PhaseState[] }) {
                 </div>
               )}
             </div>
-          </div>
+            </div>
         )
       })}
     </div>
@@ -275,9 +287,11 @@ function MessageBubble({ msg }: { msg: CopilotMessage }) {
         className={`rounded-xl px-3 py-2 leading-relaxed ${isUser ? 'rounded-br-sm' : 'rounded-bl-sm'}`}
         style={{
           fontSize: 12,
-          background: isUser ? 'color-mix(in srgb, var(--info) 18%, var(--bg-2))' : 'var(--bg-2)',
+          background: isUser
+            ? 'color-mix(in srgb, var(--info) 22%, var(--bg-2))'
+            : 'color-mix(in srgb, var(--text-0) 3%, var(--bg-2))',
           color: 'var(--text-0)',
-          border: `1px solid ${isUser ? 'color-mix(in srgb, var(--info) 30%, transparent)' : 'var(--border)'}`,
+          border: `1px solid ${isUser ? 'color-mix(in srgb, var(--info) 42%, var(--border))' : 'var(--border)'}`,
           maxWidth: '85%',
         }}
       >
@@ -299,16 +313,13 @@ function MessageBubble({ msg }: { msg: CopilotMessage }) {
   )
 }
 
-function TypingDots() {
+function TypingIndicator() {
   return (
-    <div className="flex gap-1 px-3 py-2 rounded-xl rounded-bl-sm" style={{ background: 'var(--bg-2)', border: '1px solid var(--border)' }}>
-      {[0, 1, 2].map((i) => (
-        <div
-          key={i}
-          className="w-1.5 h-1.5 rounded-full animate-bounce"
-          style={{ background: 'var(--accent)', animationDelay: `${i * 150}ms` }}
-        />
-      ))}
+    <div
+      className="flex items-center gap-2 px-3 py-2 rounded-xl rounded-bl-sm"
+      style={{ background: 'var(--bg-2)', border: '1px solid var(--border)' }}
+    >
+      <Loader2 size={14} strokeWidth={2.2} className="animate-spin shrink-0" style={{ color: 'var(--accent)' }} />
     </div>
   )
 }
@@ -332,12 +343,14 @@ export default function Copilot() {
   const [useGenerate, setUseGenerate] = useState(true)
   const [criticIter, setCriticIter] = useState(3)
   const [phases, setPhases] = useState<PhaseState[]>([])
-  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const messagesScrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const rootRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    const el = messagesScrollRef.current
+    if (!el) return
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
   }, [copilotMessages, isLoading, phases])
 
   // "Fix with Copilot" CTAs elsewhere in the app set copilotDraft; we
@@ -476,7 +489,7 @@ export default function Copilot() {
   return (
     <div
       ref={rootRef}
-      className="flex flex-col relative shrink-0"
+      className="flex flex-col relative shrink-0 min-h-0"
       style={{
         width: copilotWidth,
         background: 'var(--bg-1)',
@@ -496,19 +509,25 @@ export default function Copilot() {
       {/* Header */}
       <div className="px-3 py-2.5 border-b shrink-0" style={{ borderColor: 'var(--border)' }}>
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 min-w-0">
             <CopilotAvatar size={24} />
-            <span className="display" style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-0)' }}>Copilot</span>
-            <span
-              className="chip"
-              style={{
-                background: 'color-mix(in srgb, var(--accent) 15%, transparent)',
-                color: 'var(--accent)',
-                border: '1px solid color-mix(in srgb, var(--accent) 40%, transparent)',
-              }}
-            >
-              AI
-            </span>
+            <div className="flex flex-col min-w-0">
+              <span className="display" style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-0)', lineHeight: 1.2 }}>
+                Copilot
+              </span>
+              <span
+                className="font-mono"
+                style={{
+                  fontSize: 9.5,
+                  color: 'var(--text-3)',
+                  letterSpacing: '0.14em',
+                  textTransform: 'uppercase',
+                  marginTop: 1,
+                }}
+              >
+                gemini — plan + chat
+              </span>
+            </div>
           </div>
           <button
             onClick={() => { clearCopilotMessages(); api.copilotChat('', true).catch(() => {}) }}
@@ -558,9 +577,9 @@ export default function Copilot() {
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-3">
+      <div ref={messagesScrollRef} className="flex-1 min-h-0 overflow-y-auto px-3 pt-2 pb-3">
         {copilotMessages.length === 0 && (
-          <div className="space-y-2 mt-2">
+          <div className="space-y-2">
             <p className="eyebrow text-center mb-4" style={{ color: 'var(--text-2)' }}>Try an example prompt</p>
             {EXAMPLE_PROMPTS.map((p, i) => (
               <button
@@ -592,7 +611,7 @@ export default function Copilot() {
             {isLoading && phases.length === 0 && (
               <div className="flex items-center gap-2 mb-3">
                 <CopilotAvatar size={24} />
-                <TypingDots />
+                <TypingIndicator />
               </div>
             )}
             <PhaseTimeline phases={phases} />
@@ -601,10 +620,9 @@ export default function Copilot() {
         {isLoading && !useGenerate && (
           <div className="flex items-center gap-2 mb-3">
             <CopilotAvatar size={24} />
-            <TypingDots />
+            <TypingIndicator />
           </div>
         )}
-        <div ref={messagesEndRef} />
       </div>
 
       {/* Input */}
@@ -634,7 +652,7 @@ export default function Copilot() {
           if (selected) {
             parts.push(`"this" = ${selected.id} (${selected.type})`)
           }
-          const label = parts.join(' · ')
+          const label = parts.join(' — ')
           const title = hints.length
             ? hints.map((h) => `${(h.kind || 'error').toUpperCase()}${h.node_id ? ' @' + h.node_id : ''}: ${h.message}`).join('\n')
             : selected
@@ -702,7 +720,7 @@ export default function Copilot() {
           </button>
         </div>
         <p className="num mt-2" style={{ fontSize: 10, color: 'var(--text-3)', letterSpacing: '0.02em' }}>
-          ⏎ send · ⇧⏎ newline
+          ⏎ send — ⇧⏎ newline
         </p>
       </div>
     </div>

@@ -11,7 +11,9 @@ Produces two files that MUST be kept in sync with `engine.registry`:
       NODE_CONFIG_TAGS, and exhaustive NODE_TYPES list. Imported by the
       rest of the frontend. Checked in.
 
-Run after editing `engine/registry.py`:
+Also writes **engine/node_type_ids.py** (auto-generated DRY constants from NODE_SPECS keys).
+
+Run after adding or renaming a node under engine/nodes/:
 
     python backend/scripts/gen_artifacts.py
 """
@@ -30,8 +32,43 @@ from engine.registry import NODE_SPECS, contracts_document, ui_manifest  # noqa:
 
 
 ROOT = _BACKEND.parent
+NODE_TYPE_IDS_PATH = _BACKEND / "engine" / "node_type_ids.py"
 CONTRACTS_PATH = _BACKEND / "contracts" / "node_contracts.json"
 FRONTEND_GEN_PATH = ROOT / "frontend" / "src" / "nodes" / "generated.ts"
+
+
+def write_node_type_ids() -> None:
+    """
+    Generate module-level constants from :data:`engine.registry.NODE_SPECS`
+    so ``hard_rules``, tests, and other code never duplicate type_id strings.
+    """
+    lines: list[str] = [
+        '"""',
+        "Canonical :func:`NodeSpec.type_id` strings for engine topology and hard-rules.",
+        "",
+        "**AUTO-GENERATED** — run ``python backend/scripts/gen_artifacts.py``.",
+        "The canonical set is :data:`engine.registry.NODE_SPECS` keys; import from here",
+        "instead of string literals. Do not edit by hand.",
+        '"""',
+        "from __future__ import annotations",
+        "",
+    ]
+    for tid in sorted(NODE_SPECS.keys()):
+        if not tid.isidentifier():
+            raise ValueError(
+                f"type_id {tid!r} must be a valid Python identifier for node_type_ids"
+            )
+        lines.append(f'{tid} = "{tid}"')
+    names = sorted(NODE_SPECS.keys())
+    lines.append("")
+    lines.append("__all__ = [")
+    for n in names:
+        lines.append(f'    "{n}",')
+    lines.append("]")
+    lines.append("")
+
+    NODE_TYPE_IDS_PATH.write_text("\n".join(lines), encoding="utf-8")
+    print(f"  wrote {NODE_TYPE_IDS_PATH.relative_to(ROOT)}")
 
 
 def write_contracts() -> None:
@@ -130,6 +167,10 @@ def write_frontend_module() -> None:
     lines.append("  type: 'dataframe' | 'scalar' | 'object' | 'text'")
     lines.append("  description: string")
     lines.append("  optional: boolean")
+    lines.append("  required_columns?: readonly string[]")
+    lines.append("  required_keys?: readonly string[]")
+    lines.append("  source_config_key?: string")
+    lines.append("  store_at?: string")
     lines.append("}")
     lines.append("")
     lines.append("/** Typed config param with UI hint. */")
@@ -192,9 +233,10 @@ def write_frontend_module() -> None:
 
 def main() -> None:
     print("Regenerating node artifacts…")
+    write_node_type_ids()
     write_contracts()
     write_frontend_module()
-    print("Done. Remember to `git add` both outputs.")
+    print("Done. Remember to `git add` outputs (incl. `engine/node_type_ids.py`).")
 
 
 if __name__ == "__main__":

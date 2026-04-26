@@ -1,0 +1,65 @@
+id: oracle
+description: Oracle surveillance warehouse extracts.
+sources:
+  - oracle_orders
+  - oracle_executions
+
+source_schemas:
+  oracle_orders:
+    description: Placeholder order rows from Oracle.
+    base_query: "SELECT * FROM surveillance_orders WHERE trader_id = :trader_id"
+    columns:
+      - name: oracle_order_id
+        type: string
+        description: Oracle order primary key.
+      - name: trader_id
+        type: string
+        semantic: trader
+      - name: book
+        type: string
+      - name: instrument
+        type: string
+      - name: order_time
+        type: datetime
+        semantic: time
+      - name: side
+        type: string
+      - name: quantity
+        type: number
+        semantic: size
+      - name: limit_price
+        type: number
+        semantic: price
+      - name: order_status
+        type: string
+
+  oracle_executions:
+    description: Placeholder execution rows from Oracle.
+    base_query: "SELECT * FROM surveillance_executions WHERE trader_id = :trader_id"
+    columns:
+      - name: oracle_exec_id
+        type: string
+        description: Oracle execution primary key.
+      - name: oracle_order_id
+        type: string
+        description: Parent Oracle order key.
+      - name: trader_id
+        type: string
+        semantic: trader
+      - name: book
+        type: string
+      - name: instrument
+        type: string
+      - name: exec_time
+        type: datetime
+        semantic: time
+      - name: side
+        type: string
+      - name: exec_quantity
+        type: number
+        semantic: size
+      - name: exec_price
+        type: number
+        semantic: price
+      - name: counterparty
+        type: string

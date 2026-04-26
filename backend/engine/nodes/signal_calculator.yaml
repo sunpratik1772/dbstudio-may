@@ -9,17 +9,48 @@ ui:
 input_ports:
   - name: dataset
     type: dataframe
-    description: "Trade/execution DataFrame (typically after NORMALISE_ENRICH)."
+    description: "Trade/execution DataFrame, often after FEATURE_ENGINE."
+
+extras:
+  # Anchor before output_ports (YAML alias). Same list for handler + port + signal_contract.
+  signal_output_columns: &SIGNAL_OUTPUT_COLUMNS
+    - _signal_flag
+    - _signal_score
+    - _signal_reason
+    - _signal_type
+    - _signal_window
+  # Input columns each built-in requires before compute (WASH also needs exec_qty or quantity).
+  built_in_required_columns:
+    FRONT_RUNNING: [exec_time, exec_price]
+    WASH_TRADE: [side]
+    SPOOFING: [status]
+    LAYERING: [order_type, side]
+  built_in_signal_params:
+    FRONT_RUNNING:
+      window_minutes: 5
+      price_move_threshold: 0.0003
+    WASH_TRADE:
+      window_minutes: 10
+      ratio_threshold: 0.8
+    SPOOFING:
+      cancel_ratio_threshold: 0.7
+      window: "1d"
+    LAYERING:
+      min_layers: 5
+      window: "30m"
 
 output_ports:
   - name: signals
     type: dataframe
+    store_at: "ctx.datasets[{output_name}]"
     description: >-
       Input DataFrame + exactly 5 signal columns: _signal_flag (bool),
-      _signal_score (float 0-10), _signal_reason (str),
+      _signal_score (float 0-1), _signal_reason (str),
       _signal_type (str), _signal_window (str).
+    required_columns: *SIGNAL_OUTPUT_COLUMNS
   - name: flag_count
     type: scalar
+    store_at: "ctx.values[{output_name}_flag_count]"
     description: "Number of rows where _signal_flag == True. Stored as {output_name}_flag_count."
     optional: true
 
@@ -64,18 +95,3 @@ constraints:
   - "ALWAYS outputs exactly these 5 columns: _signal_flag, _signal_score, _signal_reason, _signal_type, _signal_window."
   - "Missing signal columns are auto-filled with defaults (False, 0.0, '', '', '')."
   - "Custom scripts must operate on local variable 'df' and leave result in 'df'."
-
-extras:
-  built_in_signal_params:
-    FRONT_RUNNING:
-      window_minutes: 5
-      price_move_threshold: 0.0003
-    WASH_TRADE:
-      window_minutes: 10
-      ratio_threshold: 0.8
-    SPOOFING:
-      cancel_ratio_threshold: 0.7
-      window: "1d"
-    LAYERING:
-      min_layers: 5
-      window: "30m"

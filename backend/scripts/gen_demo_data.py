@@ -19,7 +19,7 @@ import pandas as pd
 
 from engine.context import RunContext
 from engine.nodes.comms_collector import _MOCK_MESSAGES
-from engine.nodes.trade_data_collector import _mock_hs_client_order, _mock_hs_execution
+from engine.nodes.execution_data_collector import _mock_hs_client_order, _mock_hs_execution
 
 
 OUT = Path(__file__).resolve().parents[1] / "demo_data"

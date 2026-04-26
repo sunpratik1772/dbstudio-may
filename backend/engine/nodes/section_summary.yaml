@@ -17,7 +17,9 @@ input_ports:
 output_ports:
   - name: section
     type: object
+    store_at: "ctx.sections[{section_name}]"
     description: "{name, stats, narrative, dataset}. Stored under context.sections[section_name]."
+    required_keys: [name, stats, narrative, dataset]
 
 params:
   - name: section_name

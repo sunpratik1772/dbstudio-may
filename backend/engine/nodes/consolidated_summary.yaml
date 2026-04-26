@@ -15,6 +15,7 @@ input_ports:
 output_ports:
   - name: executive_summary
     type: text
+    store_at: "ctx.executive_summary"
     description: "Multi-paragraph executive summary. Stored as context.executive_summary."
 
 params:

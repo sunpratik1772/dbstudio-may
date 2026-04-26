@@ -24,7 +24,15 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from .collector_source import COLLECTOR_TYPE_TO_SOURCE_ID, collector_source_ref
 from .dag_runner import _edge_endpoints, topological_sort
+from .node_type_ids import (
+    ALERT_TRIGGER,
+    FEATURE_ENGINE,
+    REPORT_OUTPUT,
+    SECTION_SUMMARY,
+    SIGNAL_CALCULATOR,
+)
 from .hard_rules import run_hard_rules
 from .ports import ParamType
 from .registry import NODE_SPECS, NodeSpec
@@ -255,7 +263,7 @@ def _validate_topology(
             incoming[dst] += 1
 
     # Exactly one ALERT_TRIGGER, first in the graph, id 'n01'.
-    alert_triggers = [nid for nid, n in nodes_by_id.items() if n.get("type") == "ALERT_TRIGGER"]
+    alert_triggers = [nid for nid, n in nodes_by_id.items() if n.get("type") == ALERT_TRIGGER]
     if not alert_triggers:
         result.add(_VC.NO_ENTRY, "Workflow must contain an ALERT_TRIGGER node.")
     elif len(alert_triggers) > 1:
@@ -280,7 +288,7 @@ def _validate_topology(
             )
 
     # At least one REPORT_OUTPUT at the exit.
-    report_nodes = [nid for nid, n in nodes_by_id.items() if n.get("type") == "REPORT_OUTPUT"]
+    report_nodes = [nid for nid, n in nodes_by_id.items() if n.get("type") == REPORT_OUTPUT]
     if not report_nodes:
         result.add(
             _VC.NO_EXIT,
@@ -483,7 +491,7 @@ def _validate_wiring(
                 produced.append((pid, pcfg["output_name"]))
 
         produced_names = {name for _, name in produced}
-        # Some upstream nodes (like NORMALISE_ENRICH) pass through a
+        # Some upstream nodes (like FEATURE_ENGINE) pass through a
         # dataset under the same name — so also accept cases where the
         # named dataset matches *any* ancestor's output.
         if input_name not in produced_names:
@@ -504,69 +512,117 @@ def _validate_wiring(
 # ---------------------------------------------------------------------------
 # Field-binding column validation
 # ---------------------------------------------------------------------------
-# Maps the node type that *produces* a dataset to its DataSource ID in the
-# registry.  Only collector nodes are listed because transformers (NORMALISE_
-# ENRICH, SIGNAL_CALCULATOR) pass the dataset through under the same name —
-# the base schema is still the collector's schema plus appended columns.
-_COLLECTOR_SOURCE: dict[str, str] = {
-    "TRADE_DATA_COLLECTOR": "trades",
-    "MARKET_DATA_COLLECTOR": "market",
-    "COMMS_COLLECTOR": "comms",
-    "SIGNAL_CALCULATOR": "signals",
-}
+# Collector → data source id: single map in `collector_source` (runtime + validator).
+# Transformers (FEATURE_ENGINE, SIGNAL_CALCULATOR) are followed backward from
+# `SECTION_SUMMARY.input_name` to recover the same base, plus well-known extras.
+_SIGNAL_EXTRAS: frozenset[str] = frozenset(
+    {
+        "_signal_flag",
+        "_signal_score",
+        "_signal_reason",
+        "_signal_type",
+        "_signal_window",
+    }
+)
+_NORMALISE_EXTRAS: frozenset[str] = frozenset(
+    {
+        "signed_notional",
+        "_prev_status",
+        "_status_changed",
+        "_lifecycle_event",
+    }
+)
+
+
+def _producing_node_for_output(
+    output_name: str, nodes_by_id: dict[str, dict]
+) -> dict[str, Any] | None:
+    for n in nodes_by_id.values():
+        if (n.get("config") or {}).get("output_name") == output_name:
+            return n
+    return None
+
+
+def _trace_dataset_to_registry(
+    dataset_name: str,
+    nodes_by_id: dict[str, dict],
+    reg: Any,
+) -> tuple[Any, str | None, set[str]]:
+    """Walk from a table name to the base :class:`DataSource` and extras."""
+    n = _producing_node_for_output(dataset_name, nodes_by_id)
+    if n is None:
+        return (None, None, set())
+    t = n.get("type", "")
+    cfg = n.get("config") or {}
+    if t in COLLECTOR_TYPE_TO_SOURCE_ID:
+        source_ref = collector_source_ref(t, cfg)
+        return (reg.get(source_ref), source_ref, set())
+    if t == SIGNAL_CALCULATOR:
+        prev = cfg.get("input_name")
+        if not prev or not isinstance(prev, str):
+            return (None, None, set())
+        ds, source_ref, ex = _trace_dataset_to_registry(prev, nodes_by_id, reg)
+        return (ds, source_ref, ex | set(_SIGNAL_EXTRAS))
+    if t == FEATURE_ENGINE:
+        prev = cfg.get("input_name")
+        if not prev or not isinstance(prev, str):
+            return (None, None, set())
+        ds, source_ref, ex = _trace_dataset_to_registry(prev, nodes_by_id, reg)
+        return (ds, source_ref, ex | set(_NORMALISE_EXTRAS))
+    return (None, None, set())
+
+
+def _field_resolves(
+    field: str,
+    ds: Any,
+    source_ref: str | None,
+    extra_cols: set[str],
+) -> bool:
+    if field in extra_cols:
+        return True
+    source_name = None
+    if source_ref and ":" in source_ref:
+        _, source_name = source_ref.split(":", 1)
+    if ds is not None and ds.resolve_field(field, source_name) is not None:
+        return True
+    return False
 
 
 def _validate_field_bindings(
     nodes_by_id: dict[str, dict],
     result: ValidationResult,
 ) -> None:
-    """Warn when a SECTION_SUMMARY field_bindings entry names a column that
-    doesn't exist in the resolved DataSource.
-
-    The check is intentionally a *warning* (not an error) because:
-      * NORMALISE_ENRICH can add columns (e.g. signed_notional) that aren't
-        in the base registry entry.
-      * SIGNAL_CALCULATOR appends 5 _signal_* columns to any input dataset.
-      * We only resolve datasets that trace directly to a collector node —
-        if the lineage is ambiguous we skip silently to avoid false positives.
+    """Error when a SECTION_SUMMARY field name is not a registry column/semantic
+    (for the traced base data source) nor a well-known extra from upstream
+    transformers. Datasets that do not trace to a collector are skipped.
     """
     from data_sources import get_registry
     reg = get_registry()
 
-    # Build output_name → DataSource from collector nodes only.
-    output_to_source: dict[str, Any] = {}
-    for node in nodes_by_id.values():
-        source_id = _COLLECTOR_SOURCE.get(node.get("type", ""))
-        if not source_id:
-            continue
-        ds = reg.get(source_id)
-        if ds is None:
-            continue
-        output_name = (node.get("config") or {}).get("output_name")
-        if output_name:
-            output_to_source[output_name] = ds
-
-    # Check field_bindings on every SECTION_SUMMARY node.
     for nid, node in nodes_by_id.items():
-        if node.get("type") != "SECTION_SUMMARY":
+        if node.get("type") != SECTION_SUMMARY:
             continue
         cfg = node.get("config") or {}
         input_name = cfg.get("input_name")
-        ds = output_to_source.get(input_name) if input_name else None
+        if not input_name or not isinstance(input_name, str):
+            continue
+        ds, source_ref, extras = _trace_dataset_to_registry(input_name, nodes_by_id, reg)
         if ds is None:
-            continue  # can't resolve source — skip rather than false-positive
-
-        known = set(ds.column_names())
+            continue
         for i, binding in enumerate(cfg.get("field_bindings") or []):
             if not isinstance(binding, dict):
                 continue
             field = binding.get("field")
-            if field and field not in known:
+            if not field:
+                continue
+            if not _field_resolves(field, ds, source_ref, extras):
                 result.add(
                     _VC.UNKNOWN_COLUMN,
-                    f"Node '{nid}' field_bindings[{i}].field='{field}' is not a known "
-                    f"column of '{ds.id}'. Known: {sorted(known)}.",
-                    severity="warning",
+                    f"Node '{nid}' field_bindings[{i}].field='{field}' is not a column, "
+                    f"registered semantic, or known transformer field for the traced source "
+                    f"(`{source_ref or ds.id}`). Allowed names include registry columns, semantic tags, and "
+                    f"extras: {sorted(extras)}.",
+                    severity="error",
                     node_id=nid,
                     field=f"config.field_bindings[{i}].field",
                 )

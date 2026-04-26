@@ -1,11 +1,31 @@
+from __future__ import annotations
+
 from pathlib import Path
 
 import pandas as pd
+from data_sources import get_registry, split_source_ref
 
 from llm import get_default_adapter
 
 from ..context import RunContext
 from ..node_spec import NodeSpec, _spec_from_yaml
+from ..signal_contract import signal_flag_column_name
+
+
+def _column_for_field(field: str, df: pd.DataFrame, source_id: str | None) -> str | None:
+    """Resolve field_bindings field to a column present on df (direct name or semantic)."""
+    if not field or df is None:
+        return None
+    if field in df.columns:
+        return field
+    if source_id:
+        ds_id, source_name = split_source_ref(source_id)
+        ds = get_registry().get(ds_id)
+        if ds is not None:
+            phys = ds.resolve_field(field, source_name)
+            if phys and phys in df.columns:
+                return phys
+    return None
 
 
 def _llm_narrative(prompt: str) -> str:
@@ -26,7 +46,7 @@ def _llm_narrative(prompt: str) -> str:
 def handle_section_summary(node: dict, ctx: RunContext) -> None:
     cfg = node.get("config", {})
     section_name: str = cfg.get("section_name", "section")
-    input_name: str = cfg.get("input_name", "trade_data")
+    input_name: str = cfg.get("input_name", "execution_data")
     field_bindings: list[dict] = cfg.get("field_bindings", [])
     prompt_template: str = cfg.get(
         "llm_prompt_template",
@@ -38,20 +58,28 @@ def handle_section_summary(node: dict, ctx: RunContext) -> None:
 
     if df is not None:
         stats["row_count"] = len(df)
+        prov = ctx.dataset_provenance.get(input_name)
         for binding in field_bindings:
             field: str = binding.get("field", "")
             agg: str = binding.get("agg", "count")
-            if field not in df.columns:
+            col = _column_for_field(field, df, prov)
+            if col is None:
                 continue
-            match agg:
-                case "count":   stats[field] = int(df[field].count())
-                case "sum":     stats[field] = float(df[field].sum())
-                case "mean":    stats[field] = round(float(df[field].mean()), 4)
-                case "nunique": stats[field] = int(df[field].nunique())
-                case "max":     stats[field] = str(df[field].max())
-                case "min":     stats[field] = str(df[field].min())
-        if "_signal_flag" in df.columns:
-            stats["signal_hits"] = int(df["_signal_flag"].sum())
+            if agg == "count":
+                stats[field] = int(df[col].count())
+            elif agg == "sum":
+                stats[field] = float(df[col].sum())
+            elif agg == "mean":
+                stats[field] = round(float(df[col].mean()), 4)
+            elif agg == "nunique":
+                stats[field] = int(df[col].nunique())
+            elif agg == "max":
+                stats[field] = str(df[col].max())
+            elif agg == "min":
+                stats[field] = str(df[col].min())
+        _sf = signal_flag_column_name()
+        if _sf in df.columns:
+            stats["signal_hits"] = int(df[_sf].sum())
         if "_keyword_hit" in df.columns:
             stats["comm_keyword_hits"] = int(df["_keyword_hit"].sum())
 

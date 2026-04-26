@@ -1,0 +1,44 @@
+type_id: FEATURE_ENGINE
+description: "Apply ordered feature operations to a dataset"
+
+ui:
+  color: "#6366F1"
+  icon: SlidersHorizontal
+  config_tags: [output_name]
+
+input_ports:
+  - name: dataset
+    type: dataframe
+    description: "Any DataFrame referenced by input_name."
+
+output_ports:
+  - name: features
+    type: dataframe
+    store_at: "ctx.datasets[{output_name}]"
+    description: "Input DataFrame plus columns added or renamed by configured operations."
+
+params:
+  - name: input_name
+    type: input_ref
+    description: "Source dataset name (an upstream output_name)."
+    required: true
+  - name: output_name
+    type: string
+    description: "Feature dataset name."
+    required: true
+  - name: operations
+    type: array
+    description: >-
+      Ordered operations. Supported op values: rename, lifecycle_event,
+      derive_signed_notional.
+    default: []
+    required: false
+    widget: json
+
+semantics:
+  requires: []
+
+constraints:
+  - "rename uses {op:'rename', columns:{old_col:new_col}}."
+  - "lifecycle_event adds _prev_status, _status_changed, _lifecycle_event when id/status columns exist."
+  - "derive_signed_notional adds signed_notional using quantity/price/side columns."

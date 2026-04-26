@@ -52,7 +52,7 @@ class TestTradeVersionFix:
             "nodes": [
                 {
                     "id": "n01",
-                    "type": "TRADE_DATA_COLLECTOR",
+                    "type": "EXECUTION_DATA_COLLECTOR",
                     "label": "executions",
                     "config": {
                         "source": "hs_execution",

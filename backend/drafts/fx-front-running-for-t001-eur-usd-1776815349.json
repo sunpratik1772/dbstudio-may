@@ -19,7 +19,7 @@
     },
     {
       "id": "n02",
-      "type": "TRADE_DATA_COLLECTOR",
+      "type": "EXECUTION_DATA_COLLECTOR",
       "label": "Collect Client Orders",
       "config": {
         "source": "hs_client_order",
@@ -29,7 +29,7 @@
     },
     {
       "id": "n03",
-      "type": "TRADE_DATA_COLLECTOR",
+      "type": "EXECUTION_DATA_COLLECTOR",
       "label": "Collect Prop Executions",
       "config": {
         "source": "hs_execution",
@@ -39,13 +39,19 @@
     },
     {
       "id": "n04",
-      "type": "NORMALISE_ENRICH",
+      "type": "FEATURE_ENGINE",
       "label": "Enrich Prop Executions",
       "config": {
         "input_name": "prop_executions",
         "output_name": "enriched_prop_executions",
-        "track_lifecycle": true,
-        "compute_signed_notional": true
+        "operations": [
+          {
+            "op": "lifecycle_event"
+          },
+          {
+            "op": "derive_signed_notional"
+          }
+        ]
       }
     },
     {

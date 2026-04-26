@@ -83,14 +83,33 @@ class PortSpec:
     type: PortType
     description: str = ""
     optional: bool = False
+    # For DATAFRAME — enforced on the resolved DataFrame (input or output).
+    required_columns: tuple[str, ...] = field(default_factory=tuple)
+    # For OBJECT — enforced when a dict is resolved for this port.
+    required_keys: tuple[str, ...] = field(default_factory=tuple)
+    # For input DATAFRAME — which config key holds the ctx.datasets name
+    # (default in the runner: "input_name" when required_columns is set).
+    source_config_key: str | None = None
+    # For output ports — explicit storage path used by dag_runner contract
+    # checks, e.g. "ctx.datasets[{output_name}]" or "ctx.values[flag_count]".
+    store_at: str | None = None
 
     def to_json(self) -> dict:
-        return {
+        out: dict[str, Any] = {
             "name": self.name,
             "type": self.type.value,
             "description": self.description,
             "optional": self.optional,
         }
+        if self.required_columns:
+            out["required_columns"] = list(self.required_columns)
+        if self.required_keys:
+            out["required_keys"] = list(self.required_keys)
+        if self.source_config_key:
+            out["source_config_key"] = self.source_config_key
+        if self.store_at:
+            out["store_at"] = self.store_at
+        return out
 
 
 @dataclass(frozen=True)

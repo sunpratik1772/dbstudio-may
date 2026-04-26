@@ -56,15 +56,22 @@ export default function Topbar() {
         >
           <ShieldCheck size={15} strokeWidth={2.3} />
         </div>
-        <div className="flex items-baseline gap-2">
+        <div className="flex flex-col justify-center leading-tight gap-0.5">
           <span
             className="display"
-            style={{ fontWeight: 600, fontSize: 17, color: 'var(--text-0)' }}
+            style={{ fontWeight: 600, fontSize: 16, color: 'var(--text-0)' }}
           >
-            dbSherpa
+            dbSherpa Studio
           </span>
-          <span className="eyebrow hidden sm:inline" style={{ color: 'var(--text-2)' }}>
-            Surveillance · v1.0
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 500,
+              letterSpacing: '0.02em',
+              color: 'var(--text-2)',
+            }}
+          >
+            AI workflow builder
           </span>
         </div>
       </div>

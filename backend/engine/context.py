@@ -12,6 +12,8 @@ class RunContext:
     alert_payload: dict = field(default_factory=dict)
     values: dict[str, Any] = field(default_factory=dict)
     datasets: dict[str, pd.DataFrame] = field(default_factory=dict)
+    # output_name of each dataset -> DataSource registry id (trades, market, comms, …)
+    dataset_provenance: dict[str, str] = field(default_factory=dict)
     sections: dict[str, dict] = field(default_factory=dict)
     executive_summary: str = ""
     disposition: str = ""

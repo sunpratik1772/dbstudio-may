@@ -1,0 +1,138 @@
+type_id: EXECUTION_DATA_COLLECTOR
+description: "Query Solr for client orders, executions, trades, and quotes"
+
+ui:
+  color: "#2563EB"
+  icon: ArrowLeftRight
+  config_tags: [source, output_name]
+
+input_ports:
+  - name: context
+    type: object
+    description: "Context keys referenced in query_template as {context.xxx}"
+    optional: true
+
+output_ports:
+  - name: executions
+    type: dataframe
+    store_at: "ctx.datasets[{output_name}]"
+    description: "Order/execution rows. Stored in ctx.datasets under the configured output_name."
+  - name: row_count
+    type: scalar
+    store_at: "ctx.values[{output_name}_count]"
+    description: "Integer row count. Stored in ctx.values as {output_name}_count."
+    optional: true
+
+params:
+  - name: source
+    type: enum
+    description: "Which Solr collection to query."
+    enum: [hs_client_order, hs_execution, hs_trades, hs_orders_and_executions, hs_quotes]
+    default: hs_client_order
+    required: true
+  - name: query_template
+    type: string
+    description: "Solr query; use {context.xxx} placeholders for alert fields."
+    required: true
+    widget: textarea
+  - name: output_name
+    type: string
+    description: "Dataset name in ctx.datasets."
+    default: execution_data
+    required: true
+  - name: loop_over_books
+    type: boolean
+    description: "Repeat the query for each book in the books list."
+    default: false
+    required: false
+  - name: books
+    type: string_list
+    description: "Book names when loop_over_books=true."
+    default: []
+    required: false
+  - name: mock_csv_path
+    type: string
+    description: >-
+      Demo-mode override: path to a CSV used verbatim instead of the synthetic
+      generator. Ignored if the file is missing. CSV columns are not
+      re-checked against the lists below; synthetic rows are.
+    default: ""
+    required: false
+
+# Per `params.source` — enforced on synthetic generator output; mirrors
+# data_sources/metadata/trades.yaml and handler mocks.
+extras:
+  # dag_runner: bind output_columns_by_source to the dataframe port below
+  source_keyed_schema_port: executions
+  source_param_for_schema: source
+  source_schema_default: hs_client_order
+  output_columns_by_source:
+    hs_client_order:
+      - order_id
+      - trader_id
+      - book
+      - currency_pair
+      - order_time
+      - order_type
+      - side
+      - quantity
+      - limit_price
+      - status
+      - venue
+    hs_execution:
+      - exec_id
+      - order_id
+      - trader_id
+      - book
+      - currency_pair
+      - exec_time
+      - side
+      - exec_quantity
+      - exec_price
+      - venue
+      - counterparty
+      - notional_usd
+      - trade_version
+    hs_trades:
+      - trade_id
+      - trader_id
+      - book
+      - currency_pair
+      - trade_time
+      - side
+      - trade_quantity
+      - trade_price
+      - counterparty
+      - trade_version
+    hs_orders_and_executions:
+      - order_id
+      - exec_id
+      - trader_id
+      - book
+      - currency_pair
+      - order_time
+      - exec_time
+      - side
+      - quantity
+      - exec_quantity
+      - limit_price
+      - exec_price
+      - status
+      - trade_version
+    hs_quotes:
+      - quote_id
+      - trader_id
+      - currency_pair
+      - quote_time
+      - bid
+      - ask
+      - bid_size
+      - ask_size
+      - venue
+
+semantics:
+  requires: [trader, time]
+
+constraints:
+  - "When source reads versioned trades/fills, trade_version:1 MUST be hard-coded in query_template — never from context."
+  - "Output DataFrame will always include trade_version=1 for hs_execution, hs_trades, and hs_orders_and_executions synthetic reads."

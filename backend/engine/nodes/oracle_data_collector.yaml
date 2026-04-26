@@ -1,0 +1,78 @@
+type_id: ORACLE_DATA_COLLECTOR
+description: "Query Oracle surveillance warehouse order/execution extracts"
+
+ui:
+  color: "#7C3AED"
+  icon: Database
+  config_tags: [source, output_name]
+
+input_ports:
+  - name: context
+    type: object
+    description: "Context keys referenced in query_template as {context.xxx}"
+    optional: true
+
+output_ports:
+  - name: rows
+    type: dataframe
+    store_at: "ctx.datasets[{output_name}]"
+    description: "Oracle extract rows. Stored in ctx.datasets under the configured output_name."
+  - name: row_count
+    type: scalar
+    store_at: "ctx.values[{output_name}_count]"
+    description: "Integer row count. Stored in ctx.values as {output_name}_count."
+    optional: true
+
+params:
+  - name: source
+    type: enum
+    description: "Which Oracle extract to query."
+    enum: [oracle_orders, oracle_executions]
+    default: oracle_orders
+    required: true
+  - name: query_template
+    type: string
+    description: "Oracle SQL template; use {context.xxx} placeholders for alert fields."
+    required: false
+    widget: textarea
+    default: ""
+  - name: output_name
+    type: string
+    description: "Dataset name in ctx.datasets."
+    default: oracle_data
+    required: true
+  - name: mock_csv_path
+    type: string
+    description: "Demo-mode override: path to a CSV used verbatim instead of the synthetic generator."
+    default: ""
+    required: false
+
+extras:
+  source_keyed_schema_port: rows
+  source_param_for_schema: source
+  source_schema_default: oracle_orders
+  output_columns_by_source:
+    oracle_orders:
+      - oracle_order_id
+      - trader_id
+      - book
+      - instrument
+      - order_time
+      - side
+      - quantity
+      - limit_price
+      - order_status
+    oracle_executions:
+      - oracle_exec_id
+      - oracle_order_id
+      - trader_id
+      - book
+      - instrument
+      - exec_time
+      - side
+      - exec_quantity
+      - exec_price
+      - counterparty
+
+semantics:
+  requires: [trader, time]

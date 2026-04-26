@@ -22,9 +22,11 @@ tiny rules) and the validator will pick it up on next import.
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Callable, Iterable, Protocol
 
+from .node_type_ids import EXECUTION_DATA_COLLECTOR, SIGNAL_CALCULATOR
 from .validation_codes import ValidationErrorCode
 
 
@@ -97,7 +99,7 @@ def register_hard_rule(
         @register_hard_rule(
             name="trade_version_pin",
             code=ValidationErrorCode.MISSING_TRADE_VERSION,
-            node_type="TRADE_DATA_COLLECTOR",
+            node_type="EXECUTION_DATA_COLLECTOR",
         )
         def _rule(node, dag, result): ...
 
@@ -166,7 +168,7 @@ def run_hard_rules(
 @register_hard_rule(
     name="trade_version_pin",
     code=ValidationErrorCode.MISSING_TRADE_VERSION,
-    node_type="TRADE_DATA_COLLECTOR",
+    node_type=EXECUTION_DATA_COLLECTOR,
     description=(
         "Surveillance integrity: hs_execution queries MUST pin "
         "trade_version:1 to avoid joining superseded amendments."
@@ -174,7 +176,7 @@ def run_hard_rules(
 )
 def _rule_trade_version_pin(node: dict, dag: dict, result: _ResultSink) -> None:
     config = node.get("config") or {}
-    if config.get("source") != "hs_execution":
+    if config.get("source") not in {"hs_execution", "hs_trades", "hs_orders_and_executions"}:
         return
     qt = config.get("query_template") or ""
     if "trade_version:1" not in qt:
@@ -190,7 +192,7 @@ def _rule_trade_version_pin(node: dict, dag: dict, result: _ResultSink) -> None:
 @register_hard_rule(
     name="signal_calculator_script_presence",
     code=ValidationErrorCode.MISSING_SCRIPT,
-    node_type="SIGNAL_CALCULATOR",
+    node_type=SIGNAL_CALCULATOR,
     description=(
         "In `upload_script` mode the calculator needs either inline "
         "content (runs anywhere) or a path (best-effort; warns)."
@@ -200,6 +202,14 @@ def _rule_signal_calc_script(node: dict, dag: dict, result: _ResultSink) -> None
     config = node.get("config") or {}
     if config.get("mode") != "upload_script":
         return
+    if os.environ.get("DBSHERPA_ALLOW_UPLOAD_SCRIPT", "").lower() not in {"1", "true", "yes"}:
+        result.add(
+            ValidationErrorCode.UPLOAD_SCRIPT_DISABLED,
+            f"Node '{node.get('id')}' uses mode='upload_script', but "
+            "DBSHERPA_ALLOW_UPLOAD_SCRIPT is not enabled.",
+            node_id=node.get("id"),
+            field="config.mode",
+        )
     script_content = config.get("script_content")
     script_path = config.get("script_path")
     if not script_content and not script_path:

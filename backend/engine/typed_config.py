@@ -4,7 +4,7 @@ Typed config helper for node handlers.
 Today every handler reads its `node["config"]` as a free-form dict:
 
     cfg = node.get("config", {})
-    name = cfg.get("output_name", "trades")
+    name = cfg.get("output_name", "execution_data")
 
 That works but has three problems:
 

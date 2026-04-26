@@ -22,7 +22,7 @@
     },
     {
       "id": "n02",
-      "type": "TRADE_DATA_COLLECTOR",
+      "type": "EXECUTION_DATA_COLLECTOR",
       "label": "Collect Order Book",
       "config": {
         "source": "hs_client_order",
@@ -33,7 +33,7 @@
     },
     {
       "id": "n03",
-      "type": "TRADE_DATA_COLLECTOR",
+      "type": "EXECUTION_DATA_COLLECTOR",
       "label": "Collect All Executions",
       "config": {
         "source": "hs_execution",
@@ -69,14 +69,15 @@
     },
     {
       "id": "n05",
-      "type": "NORMALISE_ENRICH",
+      "type": "FEATURE_ENGINE",
       "label": "Normalise Executions",
       "config": {
         "input_name": "executions",
         "output_name": "executions_enriched",
-        "field_renames": {},
-        "track_lifecycle": true,
-        "compute_signed_notional": true
+        "operations": [
+          {"op": "lifecycle_event"},
+          {"op": "derive_signed_notional"}
+        ]
       }
     },
     {

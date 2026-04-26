@@ -9,13 +9,9 @@
  *                   produces each one) and outputs this node emits (with
  *                   the downstream nodes that consume each one).
  *                   Input of one === output of the next.
- *   3. Config     — editable form fields driven by the contract's
- *                   config_schema. `input_name` fields render as a dropdown
- *                   of upstream output_names so wiring stays consistent.
+ *   3. Config     — fields from **generated** `NODE_TYPED.params` (ParamSpec);
+ *                   `input_ref` / enums / widgets match the backend YAML.
  *   4. Last run   — runtime output for this node from the most recent run.
- *
- * Everything is driven by the central registry (`@nodes`) and the workflow
- * store — no hardcoded per-type knowledge lives here.
  */
 import { useMemo, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
@@ -29,9 +25,10 @@ import {
 } from 'lucide-react'
 import {
   NODE_UI,
-  getNodeContract,
+  getNodeConstraints,
+  getNodeTypedSpec,
   type NodeType,
-  type NodeContract,
+  type NodeParamSpec,
 } from '../../nodes'
 import { useWorkflowStore } from '../../store/workflowStore'
 import type { WorkflowNode, RunLogEntry } from '../../types'
@@ -51,44 +48,43 @@ interface FieldDescriptor {
   hint: string
   kind: FieldKind
   enumValues?: readonly string[]
+  /** From ParamSpec.widget — long text / code editors. */
+  multiline?: boolean
 }
 
 /* -------------------------------------------------------------------------- */
-/* Schema → field descriptor inference                                        */
-/*                                                                            */
-/* The contract's config_schema is just a string hint today, so we parse it   */
-/* with a few heuristics. Centralised here so every node type benefits as     */
-/* soon as we refine the rules (e.g. when we switch to real JSON-schema).     */
+/* ParamSpec (generated NODE_TYPED) → field descriptors — preferred path.    */
 /* -------------------------------------------------------------------------- */
-function classifyField(key: string, hint: string): FieldDescriptor {
-  const h = hint.toLowerCase()
-
-  if (key === 'input_name' || key.endsWith('_input_name') || key === 'input') {
-    return { key, hint, kind: 'input-ref' }
+function paramSpecToFieldDescriptor(p: NodeParamSpec): FieldDescriptor {
+  const hint = p.description
+  if (p.type === 'input_ref' || p.widget === 'input_ref') {
+    return { key: p.name, hint, kind: 'input-ref' }
   }
-  if (key === 'output_name' || key.endsWith('_output_name')) {
-    return { key, hint, kind: 'output-name' }
+  if (p.name === 'output_name' || p.name.endsWith('_output_name') || p.name === 'output_path') {
+    return { key: p.name, hint, kind: 'output-name' }
   }
-  if (h.startsWith('boolean')) {
-    return { key, hint, kind: 'boolean' }
+  if (p.type === 'boolean') {
+    return { key: p.name, hint, kind: 'boolean' }
   }
-  if (h.startsWith('number') || h.startsWith('integer') || h.startsWith('int')) {
-    return { key, hint, kind: 'number' }
+  if (p.type === 'integer' || p.type === 'number') {
+    return { key: p.name, hint, kind: 'number' }
   }
-  if (h.startsWith('array of strings') || h.startsWith('list of strings') || h.startsWith('list[str]')) {
-    return { key, hint, kind: 'stringArray' }
+  if (p.type === 'enum' && p.enum && p.enum.length > 0) {
+    return { key: p.name, hint, kind: 'stringEnum', enumValues: p.enum }
   }
-  if (h.startsWith('object') || h.startsWith('array') || h.startsWith('list')) {
-    return { key, hint, kind: 'json' }
+  if (p.type === 'string_list') {
+    return { key: p.name, hint, kind: 'stringArray' }
   }
-
-  // Parse enum hints like: string — 'hs_client_order' | 'hs_execution'
-  const enumMatches = Array.from(hint.matchAll(/'([^']+)'/g)).map((m) => m[1])
-  if (h.startsWith('string') && enumMatches.length >= 2) {
-    return { key, hint, kind: 'stringEnum', enumValues: enumMatches }
+  if (p.type === 'object' || p.type === 'array' || p.widget === 'json') {
+    return { key: p.name, hint, kind: 'json' }
   }
-
-  return { key, hint, kind: 'string' }
+  if (p.type === 'code' || p.widget === 'code') {
+    return { key: p.name, hint, kind: 'string', multiline: true }
+  }
+  if (p.widget === 'textarea') {
+    return { key: p.name, hint, kind: 'string', multiline: true }
+  }
+  return { key: p.name, hint, kind: 'string' }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -336,6 +332,17 @@ function FieldInput({ field, value, upstreamOutputs, onChange }: FieldRowProps) 
 
   if (field.kind === 'output-name' || field.kind === 'string') {
     const current = typeof value === 'string' ? value : ''
+    if (field.multiline) {
+      return (
+        <textarea
+          value={current}
+          onChange={(e) => onChange(e.target.value)}
+          rows={5}
+          spellCheck={field.key.includes('script') || field.key.includes('template') ? false : undefined}
+          style={{ ...inputStyle, resize: 'vertical', minHeight: 80, lineHeight: 1.45 }}
+        />
+      )
+    }
     return (
       <input
         type="text"
@@ -389,26 +396,21 @@ function JsonField({ value, onChange, style }: { value: unknown; onChange: (v: u
 }
 
 /* -------------------------------------------------------------------------- */
-/* Wiring card — inputs (with producer) and outputs (with consumers)          */
+/* Wiring card — inputs / outputs from NODE_TYPED (PortSpec), not string maps. */
 /* -------------------------------------------------------------------------- */
-function WiringCard({ node, contract, wiring }: { node: WorkflowNode; contract: NodeContract; wiring: WiringInfo }) {
-  const inputs = Object.entries(contract.inputs)
-  const outputs = Object.entries(contract.outputs)
+function WiringCard({ node, wiring }: { node: WorkflowNode; wiring: WiringInfo }) {
+  const typed = getNodeTypedSpec(node.type)
+  if (!typed) return null
+  const inputs = typed.inputPorts
+  const outputs = typed.outputPorts
   if (inputs.length === 0 && outputs.length === 0) return null
 
   const nodeCfg = (node.config ?? {}) as Record<string, unknown>
   const inputName = typeof nodeCfg.input_name === 'string' ? nodeCfg.input_name : undefined
   const outputName = typeof nodeCfg.output_name === 'string' ? nodeCfg.output_name : undefined
 
-  // Find the producer that matches our currently-selected input_name (if any).
-  const producer = inputName
-    ? wiring.upstreamOutputs.find((u) => u.name === inputName)
-    : undefined
-  const consumers = outputName ? wiring.consumersByOutput[outputName] ?? [] : []
-
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-      {/* Inputs column */}
       <div
         className="rounded-lg p-3"
         style={{ background: 'var(--bg-2)', border: '1px solid var(--border)' }}
@@ -418,20 +420,22 @@ function WiringCard({ node, contract, wiring }: { node: WorkflowNode; contract: 
           <p style={{ fontSize: 11, color: 'var(--text-3)' }}>No inputs.</p>
         ) : (
           <div className="space-y-1.5">
-            {inputs.map(([k, v]) => {
-              // A contract key like "datasets[input_name]" resolves to the
-              // current config's input_name (what the wire actually carries).
-              const isDatasetInput = k.startsWith('datasets[')
-              const wireName = isDatasetInput ? inputName : null
+            {inputs.map((port) => {
+              const isDataframe = port.type === 'dataframe'
+              const wireName = isDataframe ? inputName : undefined
+              const producer = wireName
+                ? wiring.upstreamOutputs.find((u) => u.name === wireName)
+                : undefined
               return (
                 <div
-                  key={k}
+                  key={port.name}
                   className="rounded p-2"
                   style={{ background: 'var(--bg-0)', border: '1px solid var(--border-soft)' }}
                 >
                   <div className="flex items-center gap-2" style={{ fontSize: 11 }}>
-                    <span className="num" style={{ color: 'var(--info)' }}>{k}</span>
-                    {wireName && (
+                    <span className="num" style={{ color: 'var(--info)' }}>{port.name}</span>
+                    <span className="eyebrow" style={{ color: 'var(--text-3)', fontSize: 9 }}>{port.type}</span>
+                    {isDataframe && wireName && (
                       <>
                         <ArrowRight size={11} strokeWidth={2} style={{ color: 'var(--text-3)' }} />
                         <span
@@ -448,9 +452,9 @@ function WiringCard({ node, contract, wiring }: { node: WorkflowNode; contract: 
                     )}
                   </div>
                   <p className="mt-1" style={{ fontSize: 10.5, color: 'var(--text-2)', lineHeight: 1.5 }}>
-                    {v}
+                    {port.description}
                   </p>
-                  {isDatasetInput && (
+                  {isDataframe && (
                     <div className="mt-1.5 flex items-center gap-1.5" style={{ fontSize: 10.5 }}>
                       <Link2 size={10} strokeWidth={2} style={{ color: 'var(--text-3)' }} />
                       {producer ? (
@@ -470,7 +474,7 @@ function WiringCard({ node, contract, wiring }: { node: WorkflowNode; contract: 
                         </span>
                       ) : (
                         <span style={{ color: 'var(--text-3)' }}>
-                          Set <span className="num">input_name</span> below to wire this
+                          Set <span className="num">input_name</span> in config to wire a dataset
                         </span>
                       )}
                     </div>
@@ -482,7 +486,6 @@ function WiringCard({ node, contract, wiring }: { node: WorkflowNode; contract: 
         )}
       </div>
 
-      {/* Outputs column */}
       <div
         className="rounded-lg p-3"
         style={{ background: 'var(--bg-2)', border: '1px solid var(--border)' }}
@@ -492,18 +495,20 @@ function WiringCard({ node, contract, wiring }: { node: WorkflowNode; contract: 
           <p style={{ fontSize: 11, color: 'var(--text-3)' }}>No outputs.</p>
         ) : (
           <div className="space-y-1.5">
-            {outputs.map(([k, v]) => {
-              const isDatasetOutput = k.startsWith('datasets[')
-              const wireName = isDatasetOutput ? outputName : null
+            {outputs.map((port) => {
+              const isDataframe = port.type === 'dataframe'
+              const wireName = isDataframe ? outputName : undefined
+              const consumers = wireName ? (wiring.consumersByOutput[wireName] ?? []) : []
               return (
                 <div
-                  key={k}
+                  key={port.name}
                   className="rounded p-2"
                   style={{ background: 'var(--bg-0)', border: '1px solid var(--border-soft)' }}
                 >
                   <div className="flex items-center gap-2" style={{ fontSize: 11 }}>
-                    <span className="num" style={{ color: 'var(--success)' }}>{k}</span>
-                    {wireName && (
+                    <span className="num" style={{ color: 'var(--success)' }}>{port.name}</span>
+                    <span className="eyebrow" style={{ color: 'var(--text-3)', fontSize: 9 }}>{port.type}</span>
+                    {isDataframe && wireName && (
                       <>
                         <ArrowRight size={11} strokeWidth={2} style={{ color: 'var(--text-3)' }} />
                         <span
@@ -520,9 +525,9 @@ function WiringCard({ node, contract, wiring }: { node: WorkflowNode; contract: 
                     )}
                   </div>
                   <p className="mt-1" style={{ fontSize: 10.5, color: 'var(--text-2)', lineHeight: 1.5 }}>
-                    {v}
+                    {port.description}
                   </p>
-                  {isDatasetOutput && wireName && (
+                  {isDataframe && wireName && (
                     <div className="mt-1.5" style={{ fontSize: 10.5 }}>
                       {consumers.length > 0 ? (
                         <span style={{ color: 'var(--text-2)' }}>
@@ -574,6 +579,26 @@ export default function ConfigInspector({ runEntry, renderRunOutput }: ConfigIns
     [workflow, selectedId],
   )
 
+  // Hooks must run unconditionally — never place hooks after `if (!node) return`.
+  const fields = useMemo<FieldDescriptor[]>(() => {
+    if (!node) return []
+    const typed = getNodeTypedSpec(node.type)
+    if (typed && typed.params.length > 0) {
+      return typed.params.map(paramSpecToFieldDescriptor)
+    }
+    return []
+  }, [node])
+  const constraints = useMemo(
+    () => (node ? getNodeConstraints(node.type) : []),
+    [node],
+  )
+  const wiring = useMemo((): WiringInfo => {
+    if (!node || !workflow) {
+      return { upstreamOutputs: [], parents: [], children: [], consumersByOutput: {} }
+    }
+    return computeWiring(node, workflow.nodes, workflow.edges)
+  }, [node, workflow])
+
   if (!node) {
     return (
       <p className="text-center mt-8" style={{ fontSize: 11.5, color: 'var(--text-2)' }}>
@@ -583,15 +608,6 @@ export default function ConfigInspector({ runEntry, renderRunOutput }: ConfigIns
   }
 
   const meta = NODE_UI[node.type as NodeType]
-  const contract = getNodeContract(node.type)
-  const wiring = workflow
-    ? computeWiring(node, workflow.nodes, workflow.edges)
-    : { upstreamOutputs: [], parents: [], children: [], consumersByOutput: {} }
-
-  const fields = useMemo<FieldDescriptor[]>(() => {
-    return Object.entries(contract.configSchema).map(([k, v]) => classifyField(k, v))
-  }, [contract])
-
   const cfg = (node.config ?? {}) as Record<string, unknown>
 
   return (
@@ -653,12 +669,12 @@ export default function ConfigInspector({ runEntry, renderRunOutput }: ConfigIns
           </span>
         </div>
         <p style={{ fontSize: 11.5, color: 'var(--text-2)', lineHeight: 1.55 }}>
-          {contract.description || meta?.description || ''}
+          {meta?.description ?? ''}
         </p>
       </div>
 
       {/* ----------------- WIRING ----------------- */}
-      <WiringCard node={node} contract={contract} wiring={wiring} />
+      <WiringCard node={node} wiring={wiring} />
 
       {/* ----------------- CONFIG ----------------- */}
       <div>
@@ -684,7 +700,7 @@ export default function ConfigInspector({ runEntry, renderRunOutput }: ConfigIns
           </div>
         )}
 
-        {contract.constraints.length > 0 && (
+        {constraints.length > 0 && (
           <div
             className="mt-2 rounded p-2"
             style={{
@@ -699,7 +715,7 @@ export default function ConfigInspector({ runEntry, renderRunOutput }: ConfigIns
               </span>
             </div>
             <ul className="space-y-0.5" style={{ fontSize: 10.5, color: 'var(--text-1)', lineHeight: 1.5 }}>
-              {contract.constraints.map((c, i) => (
+              {constraints.map((c, i) => (
                 <li key={i}>· {c}</li>
               ))}
             </ul>

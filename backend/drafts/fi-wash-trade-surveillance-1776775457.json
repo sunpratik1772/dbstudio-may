@@ -23,7 +23,7 @@
     },
     {
       "id": "n02",
-      "type": "TRADE_DATA_COLLECTOR",
+      "type": "EXECUTION_DATA_COLLECTOR",
       "label": "Collect Executions",
       "config": {
         "source": "hs_execution",
@@ -33,14 +33,16 @@
     },
     {
       "id": "n03",
-      "type": "NORMALISE_ENRICH",
+      "type": "FEATURE_ENGINE",
       "label": "Enrich Executions",
       "config": {
         "input_name": "raw_executions",
         "output_name": "enriched_executions",
-        "track_lifecycle": false,
-        "compute_signed_notional": true,
-        "field_renames": {}
+        "operations": [
+          {
+            "op": "derive_signed_notional"
+          }
+        ]
       }
     },
     {

@@ -9,6 +9,8 @@ input_ports:
   - name: dataset
     type: dataframe
     description: "Signal DataFrame with _signal_flag column."
+    required_columns:
+      - _signal_flag
   - name: flag_count
     type: scalar
     description: >-
@@ -19,12 +21,15 @@ input_ports:
 output_ports:
   - name: disposition
     type: text
+    store_at: "ctx.disposition"
     description: "'ESCALATE' | 'REVIEW' | 'DISMISS'. Stored as context.disposition."
   - name: flag_count
     type: scalar
+    store_at: "ctx.values[flag_count]"
     description: "Total signal hits (int). Stored as context.flag_count."
   - name: output_branch
     type: text
+    store_at: "ctx.output_branch"
     description: "Branch name to route to. Stored as context.output_branch."
 
 params:

@@ -128,6 +128,9 @@ class ValidationErrorCode(str, Enum):
     SCRIPT_PATH_ONLY = "SCRIPT_PATH_ONLY"
     """Custom signal references a `script_path` that doesn't exist on disk."""
 
+    UPLOAD_SCRIPT_DISABLED = "UPLOAD_SCRIPT_DISABLED"
+    """SIGNAL_CALCULATOR upload_script mode is disabled by environment policy."""
+
 
 # Backwards-compat alias: some older imports reached for `ErrorCode`.
 # Keep it resolving to `str` so type hints stay boolean-compatible.

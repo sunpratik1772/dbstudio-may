@@ -4,6 +4,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from ..collector_source import collector_source_ref
 from ..context import RunContext
 from ..node_spec import NodeSpec, _spec_from_yaml
 
@@ -36,6 +37,7 @@ def handle_market_data_collector(node: dict, ctx: RunContext) -> None:
         if os.path.isfile(mock_csv_path):
             clean = pd.read_csv(mock_csv_path)
             ctx.datasets[output_name] = clean
+            ctx.dataset_provenance[output_name] = collector_source_ref("MARKET_DATA_COLLECTOR", cfg)
             ctx.set(f"{output_name}_tick_count", len(clean))
             return
 
@@ -67,6 +69,7 @@ def handle_market_data_collector(node: dict, ctx: RunContext) -> None:
     clean = raw_df.drop(columns=["raw_timestamp", "raw_symbol", "venue"])
 
     ctx.datasets[output_name] = clean
+    ctx.dataset_provenance[output_name] = collector_source_ref("MARKET_DATA_COLLECTOR", cfg)
     ctx.set(f"{output_name}_tick_count", len(clean))
 
 

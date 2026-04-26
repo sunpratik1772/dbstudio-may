@@ -13,6 +13,7 @@ input_ports:
 output_ports:
   - name: context_keys
     type: object
+    store_at: "ctx.values[context_keys]"
     description: >-
       One context key per declared alert_field, e.g. trader_id, book,
       alert_date, currency_pair, alert_id.
@@ -21,11 +22,22 @@ params:
   - name: alert_fields
     type: object
     description: >-
-      Map of field_name → type (string|date|number). Binds standard fields
-      trader_id, book, alert_date, currency_pair, alert_id, entity, desk.
+      Map of field_name → type (string|date|number). Non-listed payload keys
+      in extras.standard_alert_fields are still bound when present in the alert.
     default: {}
     required: false
     widget: json
+
+# Authoritative list — handler reads only this (no Python duplicate tuple).
+extras:
+  standard_alert_fields:
+    - trader_id
+    - book
+    - alert_date
+    - currency_pair
+    - alert_id
+    - entity
+    - desk
 
 semantics:
   requires: []

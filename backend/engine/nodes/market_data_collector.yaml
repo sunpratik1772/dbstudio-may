@@ -15,12 +15,25 @@ input_ports:
 output_ports:
   - name: ticks
     type: dataframe
+    store_at: "ctx.datasets[{output_name}]"
     description: >-
       DataFrame with columns: timestamp (ISO str), symbol (str), bid, ask,
       mid, spread_pips, bid_size, ask_size, venue_name, seq_no.
       Stored under ctx.datasets[output_name].
+    required_columns:
+      - timestamp
+      - symbol
+      - bid
+      - ask
+      - mid
+      - spread_pips
+      - bid_size
+      - ask_size
+      - venue_name
+      - seq_no
   - name: tick_count
     type: scalar
+    store_at: "ctx.values[{output_name}_tick_count]"
     description: "Tick count (int). Stored as {output_name}_tick_count."
     optional: true
 

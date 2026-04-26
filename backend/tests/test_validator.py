@@ -100,10 +100,10 @@ class TestParams:
                     {"id": "n01", "type": "ALERT_TRIGGER", "label": "Alert", "config": {}},
                     {
                         "id": "n02",
-                        "type": "TRADE_DATA_COLLECTOR",
-                        "label": "Trades",
+                        "type": "EXECUTION_DATA_COLLECTOR",
+                        "label": "Executions",
                         # 'query_template' and 'output_name' are required; omit query_template.
-                        "config": {"source": "hs_client_order", "output_name": "trades"},
+                        "config": {"source": "hs_client_order", "output_name": "execution_data"},
                     },
                 ],
                 "edges": [{"from": "n01", "to": "n02"}],
@@ -122,12 +122,12 @@ class TestParams:
                     {"id": "n01", "type": "ALERT_TRIGGER", "label": "Alert", "config": {}},
                     {
                         "id": "n02",
-                        "type": "TRADE_DATA_COLLECTOR",
-                        "label": "Trades",
+                        "type": "EXECUTION_DATA_COLLECTOR",
+                        "label": "Executions",
                         "config": {
                             "source": "not_a_real_source",
                             "query_template": "*:*",
-                            "output_name": "trades",
+                            "output_name": "execution_data",
                         },
                     },
                 ],
@@ -151,12 +151,12 @@ class TestAcyclicity:
                     {"id": "n01", "type": "ALERT_TRIGGER", "label": "A", "config": {}},
                     {
                         "id": "n02",
-                        "type": "TRADE_DATA_COLLECTOR",
+                        "type": "EXECUTION_DATA_COLLECTOR",
                         "label": "B",
                         "config": {
                             "source": "hs_client_order",
                             "query_template": "*:*",
-                            "output_name": "trades",
+                            "output_name": "execution_data",
                         },
                     },
                 ],
@@ -173,16 +173,16 @@ class TestAcyclicity:
 # ---------------------------------------------------------------------------
 # field_bindings column validation
 # ---------------------------------------------------------------------------
-def _dag_with_section_summary(field: str, collector_output: str = "trades") -> dict:
-    """Minimal valid DAG: trigger → trade collector → section summary."""
+def _dag_with_section_summary(field: str, collector_output: str = "execution_data") -> dict:
+    """Minimal valid DAG: trigger → execution collector → section summary."""
     return {
         "schema_version": "1.0",
         "nodes": [
             {"id": "n01", "type": "ALERT_TRIGGER", "label": "Alert", "config": {}},
             {
                 "id": "n02",
-                "type": "TRADE_DATA_COLLECTOR",
-                "label": "Trades",
+                "type": "EXECUTION_DATA_COLLECTOR",
+                "label": "Executions",
                 "config": {
                     "source": "hs_client_order",
                     "query_template": "*:*",
@@ -194,7 +194,7 @@ def _dag_with_section_summary(field: str, collector_output: str = "trades") -> d
                 "type": "SECTION_SUMMARY",
                 "label": "Summary",
                 "config": {
-                    "section_name": "trades",
+                    "section_name": "exec_section",
                     "input_name": collector_output,
                     "field_bindings": [{"field": field, "agg": "nunique"}],
                 },
@@ -208,32 +208,56 @@ class TestFieldBindings:
     def test_valid_column_passes(self):
         result = validate_dag(_dag_with_section_summary("trader_id"))
         assert not any(i.code == "UNKNOWN_COLUMN" for i in result.issues)
+        assert result.valid
 
-    def test_semantic_alias_emits_warning(self):
-        """Using 'size' instead of 'qty' must warn — silent stats is a real bug."""
+    def test_semantic_alias_passes(self):
+        """Semantic tag 'size' resolves to selected source size column — no false UNKNOWN."""
         result = validate_dag(_dag_with_section_summary("size"))
-        warnings = [i for i in result.warnings if i.code == "UNKNOWN_COLUMN"]
-        assert warnings, "expected UNKNOWN_COLUMN warning for semantic alias 'size'"
-        assert warnings[0].node_id == "n03"
+        assert not any(i.code == "UNKNOWN_COLUMN" for i in result.issues)
+        assert result.valid
+        assert not any(i.code == "UNKNOWN_COLUMN" for i in result.errors)
 
-    def test_invented_column_emits_warning(self):
+    def test_signal_calculator_passes_through_upstream_columns(self):
+        dag = _dag_with_section_summary("exec_id", "signals")
+        dag["nodes"][1]["config"] = {
+            "source": "hs_execution",
+            "query_template": "*:* AND trade_version:1",
+            "output_name": "execution_data",
+        }
+        dag["nodes"].insert(
+            2,
+            {
+                "id": "n02b",
+                "type": "SIGNAL_CALCULATOR",
+                "label": "Signals",
+                "config": {
+                    "mode": "configure",
+                    "signal_type": "FRONT_RUNNING",
+                    "input_name": "execution_data",
+                    "output_name": "signals",
+                },
+            },
+        )
+        dag["edges"] = [
+            {"from": "n01", "to": "n02"},
+            {"from": "n02", "to": "n02b"},
+            {"from": "n02b", "to": "n03"},
+        ]
+
+        result = validate_dag(dag)
+        assert result.valid
+        assert not any(i.code == "UNKNOWN_COLUMN" for i in result.issues)
+
+    def test_invented_column_is_error(self):
         result = validate_dag(_dag_with_section_summary("does_not_exist"))
-        assert any(i.code == "UNKNOWN_COLUMN" for i in result.warnings)
-
-    def test_warning_does_not_block_execution(self):
-        """UNKNOWN_COLUMN is a warning, not an error — valid should still be True."""
-        result = validate_dag(_dag_with_section_summary("size"))
-        assert result.valid  # errors list empty
+        assert not result.valid
+        assert any(
+            i.code == "UNKNOWN_COLUMN" and i.severity == "error" for i in result.errors
+        )
 
     def test_unresolvable_input_name_skips_silently(self):
-        """If the dataset name doesn't trace to a collector, don't emit false positives."""
-        result = validate_dag(_dag_with_section_summary("any_field", collector_output="other_dataset"))
-        # collector output_name="other_dataset" — SECTION_SUMMARY input_name="other_dataset"
-        # But "other_dataset" isn't produced by a collector in the same DAG → skip
-        # (the dag above DOES produce "other_dataset" from trade collector, so let's
-        #  test a truly unknown dataset by using a mismatched input_name)
-        dag = _dag_with_section_summary("qty", "trades")
-        # now change section summary input_name to something that doesn't come from a collector
+        """If the dataset name doesn't trace to a collector, skip (no false positives)."""
+        dag = _dag_with_section_summary("qty", "execution_data")
         dag["nodes"][2]["config"]["input_name"] = "enriched_trades"
         result = validate_dag(dag)
         assert not any(i.code == "UNKNOWN_COLUMN" for i in result.issues)
