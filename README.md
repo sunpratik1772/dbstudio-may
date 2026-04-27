@@ -122,7 +122,11 @@ dbsherpa/
 ├── backend/           # FastAPI + pure engine + agent harness
 ├── frontend/          # React + Vite + ReactFlow UI
 ├── docs/              # ★ Engineering docs ★
-│   ├── ONBOARDING.md              # Worked example — ship a new scenario
+│   ├── ONBOARDING.md              # Start here
+│   ├── HOW_TO_DEFINE_A_NODE.md
+│   ├── HOW_TO_ONBOARD_A_DATASOURCE.md
+│   ├── HOW_TO_BUILD_A_WORKFLOW_FROM_BACKEND.md
+│   ├── HOW_TO_BUILD_A_WORKFLOW_FROM_UI.md
 │   ├── BACKEND_ARCHITECTURE.md    # Authoritative backend reference
 │   └── FRONTEND_ARCHITECTURE.md   # High-level frontend overview
 ├── start.sh           # One-shot dev launcher
@@ -135,7 +139,11 @@ dbsherpa/
 
 | I want to…                                 | Go to                                                          |
 |--------------------------------------------|----------------------------------------------------------------|
-| Onboard a new scenario / dataset / signal  | [`docs/ONBOARDING.md`](docs/ONBOARDING.md)                     |
+| Start onboarding                            | [`docs/ONBOARDING.md`](docs/ONBOARDING.md)                     |
+| Define a node                               | [`docs/HOW_TO_DEFINE_A_NODE.md`](docs/HOW_TO_DEFINE_A_NODE.md) |
+| Onboard a data source                       | [`docs/HOW_TO_ONBOARD_A_DATASOURCE.md`](docs/HOW_TO_ONBOARD_A_DATASOURCE.md) |
+| Build workflow JSON from backend            | [`docs/HOW_TO_BUILD_A_WORKFLOW_FROM_BACKEND.md`](docs/HOW_TO_BUILD_A_WORKFLOW_FROM_BACKEND.md) |
+| Build workflow from the UI                  | [`docs/HOW_TO_BUILD_A_WORKFLOW_FROM_UI.md`](docs/HOW_TO_BUILD_A_WORKFLOW_FROM_UI.md) |
 | Understand the backend deeply              | [`docs/BACKEND_ARCHITECTURE.md`](docs/BACKEND_ARCHITECTURE.md) |
 | Understand the frontend                    | [`docs/FRONTEND_ARCHITECTURE.md`](docs/FRONTEND_ARCHITECTURE.md) |
 | Deploy to Cloud Run                        | `backend/deploy/` and `frontend/deploy/`                       |
@@ -146,8 +154,6 @@ dbsherpa/
 ## Running the tests
 
 ```bash
-cd backend
-source .venv/bin/activate
 uv run pytest backend/tests -q      # full backend suite
 ```
 

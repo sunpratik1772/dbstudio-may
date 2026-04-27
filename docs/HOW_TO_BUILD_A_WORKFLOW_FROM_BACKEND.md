@@ -1,0 +1,231 @@
+# How To Build A Workflow From The Backend
+
+> The rule: a backend workflow is plain JSON under `backend/workflows/`.
+> It must validate before it runs. Treat validation errors as contract failures,
+> not warnings to ignore.
+
+## Workflow Shape
+
+Use this top-level shape:
+
+```json
+{
+  "schema_version": "1.0",
+  "workflow_id": "my_workflow_001",
+  "name": "My Workflow",
+  "version": "0.1.0",
+  "description": "What the workflow detects.",
+  "nodes": [],
+  "edges": []
+}
+```
+
+Node shape:
+
+```json
+{
+  "id": "n01",
+  "type": "ALERT_TRIGGER",
+  "label": "Alert",
+  "config": {}
+}
+```
+
+Edge shape:
+
+```json
+{ "from": "n01", "to": "n02" }
+```
+
+Do not use React Flow `source` / `target` in persisted workflow JSON.
+
+## Node Ordering
+
+Conventions:
+
+- `n01` should be `ALERT_TRIGGER`.
+- Final node should usually be `REPORT_OUTPUT`.
+- Use two-digit sequential ids: `n01`, `n02`, `n03`.
+- Keep edges acyclic. In normal workflows, edges point from lower ids to higher ids.
+
+## Start From Existing Workflows
+
+Good references:
+
+- `backend/workflows/fx_fro_v2_workflow.json`
+- `backend/workflows/fisl_workflow.json`
+- `backend/workflows/fi_wash_workflow.json`
+
+Templates used by Copilot live under:
+
+```text
+backend/templates/
+```
+
+Templates wrap a full workflow skeleton with `matches` and `parameters` metadata.
+
+## Common Backend Workflow Pattern
+
+Typical chassis:
+
+```text
+ALERT_TRIGGER
+  -> TIME_WINDOW
+  -> collectors
+  -> transforms / grouping / MAP
+  -> SIGNAL_CALCULATOR
+  -> DATA_HIGHLIGHTER
+  -> DECISION_RULE
+  -> SECTION_SUMMARY / CONSOLIDATED_SUMMARY
+  -> REPORT_OUTPUT
+```
+
+Use `EXECUTION_DATA_COLLECTOR` for Solr:
+
+```json
+{
+  "id": "n03",
+  "type": "EXECUTION_DATA_COLLECTOR",
+  "label": "Collect Orders",
+  "config": {
+    "source": "hs_client_order",
+    "query_template": "trader_id:{context.trader_id}",
+    "output_name": "orders",
+    "window_key": "window"
+  }
+}
+```
+
+For executions:
+
+```json
+{
+  "id": "n04",
+  "type": "EXECUTION_DATA_COLLECTOR",
+  "label": "Collect Executions",
+  "config": {
+    "source": "hs_execution",
+    "query_template": "trader_id:{context.trader_id} AND trade_version:1",
+    "output_name": "executions",
+    "window_key": "window"
+  }
+}
+```
+
+`hs_execution` queries must include `trade_version:1`; this is a hard rule.
+
+## Validation
+
+Validate from Python:
+
+```bash
+uv run python - <<'PY'
+import json
+from engine.validator import validate_dag
+
+with open("backend/workflows/fx_fro_v2_workflow.json") as f:
+    dag = json.load(f)
+
+result = validate_dag(dag)
+print(result.to_json())
+raise SystemExit(0 if result.valid else 1)
+PY
+```
+
+Validate through HTTP:
+
+```bash
+curl -X POST http://localhost:8000/validate \
+  -H 'Content-Type: application/json' \
+  -d '{"dag": '"$(python3 -m json.tool backend/workflows/fx_fro_v2_workflow.json)"'}'
+```
+
+The endpoint always returns HTTP 200 with `{valid, errors, warnings, summary}`. `POST /run` returns HTTP 422 for invalid workflows.
+
+## Run
+
+Run through HTTP:
+
+```bash
+curl -X POST http://localhost:8000/run \
+  -H 'Content-Type: application/json' \
+  -d @<(python3 - <<'PY'
+import json
+with open("backend/workflows/fx_fro_v2_workflow.json") as f:
+    dag = json.load(f)
+print(json.dumps({
+    "dag": dag,
+    "alert_payload": {
+        "trader_id": "T001",
+        "book": "FX-SPOT",
+        "currency_pair": "EUR/USD",
+        "alert_date": "2024-01-15",
+        "alert_id": "DEMO-0001",
+        "event_time": "2024-01-15 09:00"
+    }
+}))
+PY
+)
+```
+
+Run the canned demo:
+
+```bash
+curl -X POST http://localhost:8000/run/demo \
+  -H 'Content-Type: application/json' \
+  -d '{}' \
+  --output demo_report.xlsx
+```
+
+## Save And Draft APIs
+
+Saved workflows:
+
+- `GET /workflows`
+- `GET /workflows/{filename}`
+- `POST /workflows/{filename}`
+- `DELETE /workflows/{filename}`
+
+Draft workflows:
+
+- `GET /drafts`
+- `GET /drafts/{filename}`
+- `POST /drafts/{filename}`
+- `DELETE /drafts/{filename}`
+- `POST /drafts/{filename}/promote`
+
+Generated Copilot workflows auto-save as drafts.
+
+## Regenerate Docs And Fallbacks
+
+If the workflow change follows a node/datasource change, run:
+
+```bash
+uv run python backend/scripts/gen_artifacts.py
+```
+
+If the workflow is just a JSON wiring change, no artifact generation is required.
+
+## Tests
+
+Add a golden test when the workflow is intended to be shipped:
+
+```python
+def test_my_workflow_validates() -> None:
+    with open("backend/workflows/my_workflow.json") as f:
+        dag = json.load(f)
+    result = validate_dag(dag)
+    assert result.valid, [e.message for e in result.errors]
+```
+
+For end-to-end coverage, call `run_workflow(...)` or the FastAPI route with `TestClient`.
+
+## Checklist
+
+- `schema_version` is `1.0`.
+- Node ids are stable and sequential.
+- Edges use `{from, to}` and are acyclic.
+- Every `input_name` matches an upstream `output_name`.
+- Solr execution/trade reads pin `trade_version:1` when required.
+- `validate_dag` is clean.
+- Golden test added for shipped workflows.

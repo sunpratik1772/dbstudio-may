@@ -690,11 +690,9 @@ without changing the route handlers.
 ### 6.3 Running tests
 
 ```bash
-cd backend
-source .venv/bin/activate           # or use .venv/bin/pytest directly
-pytest tests/ -v                    # full suite (69 tests)
-pytest tests/test_validator.py -v   # targeted
-pytest -k "hard_rule" -v            # pattern match
+uv run pytest backend/tests -q                    # full suite
+uv run pytest backend/tests/test_validator.py -q   # targeted
+uv run pytest backend/tests -k "hard_rule" -q      # pattern match
 ```
 
 ### 6.4 Example unit test (handler)

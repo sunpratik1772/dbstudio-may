@@ -136,8 +136,7 @@ There are two main Zustand stores:
 | `runLog`             | Live `RunLogEntry[]` appended by the SSE stream                      |
 | `runResult`          | Final run result (disposition, report URL)                           |
 | `rightPanelMode`     | Active right-side mode: config, copilot, runlog, output, or null      |
-| `copilotDraft`       | Live-streaming Copilot reply before commit                           |
-| `copilotHistory`     | Persisted chat turns (sent to `/copilot/chat`)                       |
+| `copilotDraft`       | One-shot text handoff into the Copilot input                          |
 | Pane sizes           | `paletteWidth`, `copilotWidth`, persisted in localStorage                    |
 
 Two conventions to know:
@@ -187,18 +186,18 @@ Two conventions to know:
 2. **Palette drag** drops a new node by type. The new node's label and
    UI metadata are looked up from the live registry.
 3. **Edit in canvas / right-panel config** mutates `workflow` in the store.
-4. **Validate** (`actions.validate()`) sends `workflow` to `POST
-   /validate`, stores `validationIssues`. Red pills light up on the
-   canvas.
+4. **Validate** (shield icon in `Topbar`) sends `workflow` to `POST
+   /validate`, stores `validationIssues`, and turns green/red for the
+   current workflow revision.
 5. **Run** opens an SSE to `/run/stream`. Each frame is parsed in
    `services/api.ts` and pushed through `workflowStore.applyRunEvent`;
    Canvas, RunLogView, and OutputView all derive from that store state.
-6. **Copilot generate** opens an SSE
-   to `/copilot/generate/stream`. Frames are `understanding`,
-   `planning`, `validation`, `auto_fixing`, `success`, `failed`. The
-   right pane renders the timeline; the final workflow payload is
-   merged into the canvas in "edit mode" if the user is refining an
-   existing workflow.
+6. **Copilot generate** opens an SSE to `/copilot/generate/stream`.
+   Frames are `understanding`, `planning`, `generating`,
+   `auto_fixing`, `critiquing`, `finalizing`, `complete`, or `error`.
+   The right pane renders the timeline. Greenfield prompts replace the
+   canvas only after validation succeeds; explicit edit/fix prompts
+   attach the current canvas for targeted repair.
 
 ---
 
