@@ -5,11 +5,23 @@ ui:
   color: "#2563EB"
   icon: ArrowLeftRight
   config_tags: [source, output_name]
+  palette:
+    section:
+      id: integrations
+      label: Integrations
+      order: 10
+      color: "#00E5FF"
+    node_order: 11
+  display_name: Solr Data Collector
 
 input_ports:
   - name: context
     type: object
     description: "Context keys referenced in query_template as {context.xxx}"
+    optional: true
+  - name: window
+    type: object
+    description: "Optional TIME_WINDOW output (start_time, end_time) — filters rows to the window when window_key is set."
     optional: true
 
 output_ports:
@@ -26,7 +38,7 @@ output_ports:
 params:
   - name: source
     type: enum
-    description: "Which Solr collection to query."
+    description: "Which Solr collection to query. Values are derived from data_sources/metadata/trades.yaml at runtime."
     enum: [hs_client_order, hs_execution, hs_trades, hs_orders_and_executions, hs_quotes]
     default: hs_client_order
     required: true
@@ -40,6 +52,16 @@ params:
     description: "Dataset name in ctx.datasets."
     default: execution_data
     required: true
+  - name: window_key
+    type: string
+    description: "ctx.values key holding the window dict. Used when a TIME_WINDOW node is wired upstream."
+    default: window
+    required: false
+  - name: trader_filter_key
+    type: string
+    description: "ctx.values key whose value filters trader_id when present. Empty = no trader filter."
+    default: trader_id
+    required: false
   - name: loop_over_books
     type: boolean
     description: "Repeat the query for each book in the books list."
@@ -59,76 +81,15 @@ params:
     default: ""
     required: false
 
-# Per `params.source` — enforced on synthetic generator output; mirrors
-# data_sources/metadata/trades.yaml and handler mocks.
+# Per `params.source` — populated from data_sources/metadata/trades.yaml
+# in execution_data_collector.py so the UI dropdown and runtime contracts
+# track YAML metadata without regenerating frontend code.
 extras:
   # dag_runner: bind output_columns_by_source to the dataframe port below
   source_keyed_schema_port: executions
   source_param_for_schema: source
   source_schema_default: hs_client_order
-  output_columns_by_source:
-    hs_client_order:
-      - order_id
-      - trader_id
-      - book
-      - currency_pair
-      - order_time
-      - order_type
-      - side
-      - quantity
-      - limit_price
-      - status
-      - venue
-    hs_execution:
-      - exec_id
-      - order_id
-      - trader_id
-      - book
-      - currency_pair
-      - exec_time
-      - side
-      - exec_quantity
-      - exec_price
-      - venue
-      - counterparty
-      - notional_usd
-      - trade_version
-    hs_trades:
-      - trade_id
-      - trader_id
-      - book
-      - currency_pair
-      - trade_time
-      - side
-      - trade_quantity
-      - trade_price
-      - counterparty
-      - trade_version
-    hs_orders_and_executions:
-      - order_id
-      - exec_id
-      - trader_id
-      - book
-      - currency_pair
-      - order_time
-      - exec_time
-      - side
-      - quantity
-      - exec_quantity
-      - limit_price
-      - exec_price
-      - status
-      - trade_version
-    hs_quotes:
-      - quote_id
-      - trader_id
-      - currency_pair
-      - quote_time
-      - bid
-      - ask
-      - bid_size
-      - ask_size
-      - venue
+  output_columns_by_source: {}
 
 semantics:
   requires: [trader, time]

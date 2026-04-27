@@ -11,8 +11,8 @@
  *   • Show validation errors as red badges on the offending node,
  *     pulling from `useWorkflowStore.getState().validationIssues`.
  *
- * Nothing here knows the schema of a specific node type — everything
- * goes through the generated `NODE_UI` registry under src/nodes/.
+ * Nothing here knows the schema of a specific node type — palette
+ * metadata comes from `nodeRegistryStore` (backend node-manifest).
  */
 import { useCallback, useMemo, useRef, useState, type DragEvent } from 'react'
 import ReactFlow, {
@@ -36,7 +36,7 @@ import 'reactflow/dist/style.css'
 // (icons used in empty state are inline below)
 import { CustomNode } from './CustomNode'
 import { useWorkflowStore } from '../../store/workflowStore'
-import { NODE_UI, type NodeType } from '../../nodes'
+import { useNodeRegistryStore, type NodeType } from '../../nodes'
 import type { RunLogEntry } from '../../types'
 import { useCanvasKeyboard } from './useCanvasKeyboard'
 import NodeContextMenu, { type ContextMenuState } from './NodeContextMenu'
@@ -210,7 +210,7 @@ function styleEdgesByRun(edges: Edge[], log: RunLogEntry[]): Edge[] {
 
 function EmptyCanvas({ onDragOver, onDrop }: { onDragOver: (e: DragEvent<HTMLDivElement>) => void; onDrop: (e: DragEvent<HTMLDivElement>) => void }) {
   const setDrawerOpen = useWorkflowStore((s) => s.setWorkflowDrawerOpen)
-  const setCopilotOpen = useWorkflowStore((s) => s.setCopilotOpen)
+  const setRightPanelMode = useWorkflowStore((s) => s.setRightPanelMode)
   return (
     <div
       className="flex-1 relative flex items-center justify-center"
@@ -238,7 +238,7 @@ function EmptyCanvas({ onDragOver, onDrop }: { onDragOver: (e: DragEvent<HTMLDiv
             Load a template
           </button>
           <button
-            onClick={() => setCopilotOpen(true)}
+            onClick={() => setRightPanelMode('copilot')}
             style={{
               height: 40, padding: '0 18px', borderRadius: 8,
               background: 'transparent', color: 'var(--text-0)',
@@ -284,7 +284,11 @@ function WorkflowCanvasInner() {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges)
 
-  // Re-sync when workflow structure changes
+  // Re-sync React Flow's internal state when the workflow object changes
+  // outside canvas gestures (template load, import, copilot edit, clear).
+  // This useMemo intentionally performs state writes; a useEffect would be
+  // more idiomatic, but introduces an extra frame where the canvas can show
+  // stale nodes. Touch carefully if you refactor the flow/store boundary.
   useMemo(() => {
     const { nodes: n, edges: e } = workflowToFlow(workflow)
     setNodes(n)
@@ -314,7 +318,7 @@ function WorkflowCanvasInner() {
         e.dataTransfer.getData(PALETTE_DND_MIME) ||
         e.dataTransfer.getData('text/plain')
       if (!raw) return
-      if (!(raw in NODE_UI)) return
+      if (!useNodeRegistryStore.getState().nodeUI[raw]) return
       const type = raw as NodeType
       const position = screenToFlowPosition({ x: e.clientX, y: e.clientY })
       addNode(type, position)
@@ -432,7 +436,7 @@ function WorkflowCanvasInner() {
           }}
           nodeColor={(n) => {
             const nodeType = (n.data as { nodeType: string })?.nodeType
-            return NODE_UI[nodeType as keyof typeof NODE_UI]?.color ?? 'var(--text-3)'
+            return useNodeRegistryStore.getState().nodeUI[nodeType]?.color ?? 'var(--text-3)'
           }}
           maskColor="rgba(5, 5, 5, 0.75)"
           pannable

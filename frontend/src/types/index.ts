@@ -1,7 +1,6 @@
-// NodeType + UI metadata are owned by the generated registry under
-// `src/nodes/`. This file re-exports the *types* so legacy imports keep
-// working, but never the runtime values — that avoids pulling in lucide
-// from every consumer that only wants `Workflow` or `RunResult`.
+// NodeType is any backend type_id; UI metadata is hydrated from
+// `GET /node-manifest` (see `nodeRegistryStore`). This file re-exports
+// the *types* only so consumers avoid pulling in lucide or the store.
 export type { NodeType, NodeUIMeta, NodeMeta } from '../nodes'
 import type { NodeType } from '../nodes'
 

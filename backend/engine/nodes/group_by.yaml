@@ -1,0 +1,72 @@
+type_id: GROUP_BY
+description: "Split a dataset by column value into one DataFrame per group"
+
+ui:
+  color: "#7C3AED"
+  icon: Split
+  config_tags: [input_name, group_by_column]
+  palette:
+    section:
+      id: transform
+      label: Transform
+      order: 20
+      color: "#A78BFA"
+    node_order: 22
+
+input_ports:
+  - name: dataset
+    type: dataframe
+    description: "Upstream dataset to partition."
+
+output_ports:
+  - name: keys
+    type: object
+    description: >-
+      {values: [...]} list of distinct group keys. Stored in ctx.values
+      under keys_output_name (default '{input_name}_keys').
+  - name: groups
+    type: object
+    description: >-
+      Each group slice is published as ctx.datasets[f"{output_prefix}_{key}"].
+      Conceptual bucket — runtime stores one dataset per key.
+
+params:
+  - name: input_name
+    type: string
+    description: "Name of the dataset to partition."
+    required: true
+  - name: group_by_column
+    type: string
+    description: "Column whose distinct values define group boundaries."
+    required: true
+  - name: output_prefix
+    type: string
+    description: >-
+      Prefix for per-group dataset names. For key='BOOK_A' and prefix
+      'orders_by_book', the slice is published as
+      ctx.datasets['orders_by_book_BOOK_A'].
+    required: true
+  - name: keys_output_name
+    type: string
+    description: >-
+      ctx.values key for the {values: [...]} list. Defaults to
+      '{input_name}_keys' when blank.
+    default: ""
+    required: false
+  - name: dropna
+    type: boolean
+    description: "Drop rows where the group_by_column is null before partitioning."
+    default: true
+    required: false
+  - name: order
+    type: enum
+    description: "Key order: first_seen, sort (ascending), desc."
+    enum: [first_seen, sort, desc]
+    default: first_seen
+    required: false
+
+semantics:
+  requires: []
+
+constraints:
+  - "Output dataset names contain the raw key value — keep keys filesystem-safe."

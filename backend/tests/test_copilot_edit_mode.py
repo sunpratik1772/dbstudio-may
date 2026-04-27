@@ -22,6 +22,7 @@ from agent.prompt_builder import (
     _render_errors,
     _render_selection,
 )
+from copilot.workflow_generator import WorkflowCopilot
 
 
 def _small_workflow() -> dict:
@@ -55,6 +56,59 @@ def test_initial_prompt_identity_without_context() -> None:
     assert pb.initial_prompt("Create an FX front-running workflow") == (
         "Create an FX front-running workflow"
     )
+
+
+def test_system_prompt_uses_live_contracts_not_stale_file(tmp_path) -> None:
+    stale = tmp_path / "node_contracts.json"
+    stale.write_text('{"nodes":{"STALE_ONLY":{"description":"old"}}}')
+    pb = PromptBuilder(contracts_path=stale)
+
+    contracts = pb._load_contracts()
+
+    assert "ALERT_TRIGGER" in contracts
+    assert "STALE_ONLY" not in contracts
+
+
+def test_system_prompt_exposes_upload_script_guardrail(monkeypatch) -> None:
+    monkeypatch.delenv("DBSHERPA_ALLOW_UPLOAD_SCRIPT", raising=False)
+    prompt = PromptBuilder().system_prompt()
+
+    assert "Active Guardrails" in prompt
+    assert "upload_script is DISABLED" in prompt
+    assert "NEVER set SIGNAL_CALCULATOR.mode='upload_script'" in prompt
+
+
+class _FakeChatLLM:
+    def __init__(self) -> None:
+        self.history_lengths: list[int] = []
+
+    def chat_turn(self, *, system_prompt, history, user_turn, temperature, json_mode):
+        self.history_lengths.append(len(history))
+        return f"history={len(history)} user={user_turn}"
+
+
+def test_copilot_chat_is_stateless_without_session_id() -> None:
+    fake = _FakeChatLLM()
+    cp = WorkflowCopilot(llm=fake)
+
+    assert "history=0" in cp.chat("first")
+    assert "history=0" in cp.chat("second")
+    assert fake.history_lengths == [0, 0]
+
+
+def test_copilot_chat_history_is_scoped_by_session_id() -> None:
+    fake = _FakeChatLLM()
+    cp = WorkflowCopilot(llm=fake)
+
+    cp.chat("a1", session_id="A")
+    cp.chat("b1", session_id="B")
+    reply = cp.chat("a2", session_id="A")
+    cp.reset(session_id="A")
+    reset_reply = cp.chat("a3", session_id="A")
+
+    assert "history=2" in reply
+    assert "history=0" in reset_reply
+    assert fake.history_lengths == [0, 0, 2, 0]
 
 
 def test_initial_prompt_edit_mode_with_workflow() -> None:

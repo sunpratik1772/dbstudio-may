@@ -20,6 +20,7 @@
  *   • useDraftAutosave    — debounced autosave to /drafts when the
  *                           current workflow changes.
  */
+import { useEffect } from 'react'
 import WorkflowCanvas from './components/WorkflowCanvas'
 import NodePanel from './components/NodePanel'
 import RightPanel from './components/RightPanel'
@@ -28,10 +29,14 @@ import WorkflowDrawer from './components/WorkflowDrawer'
 import ActivityRail from './components/ActivityRail'
 import { useApplyTheme } from './store/themeStore'
 import { useDraftAutosave } from './store/useDraftAutosave'
+import { useNodeRegistryStore } from './store/nodeRegistryStore'
 
 export default function App() {
   useApplyTheme()
   useDraftAutosave()
+  useEffect(() => {
+    void useNodeRegistryStore.getState().refreshFromBackend()
+  }, [])
 
   return (
     <div

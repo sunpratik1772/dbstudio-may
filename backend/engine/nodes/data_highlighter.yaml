@@ -5,6 +5,13 @@ ui:
   color: "#9333EA"
   icon: Highlighter
   config_tags: [output_name]
+  palette:
+    section:
+      id: transform
+      label: Transform
+      order: 20
+      color: "#A78BFA"
+    node_order: 21
 
 input_ports:
   - name: dataset

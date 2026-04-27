@@ -1,0 +1,136 @@
+{
+  "schema_version": "1.0",
+  "workflow_id": "fisl_chassis_ref_001",
+  "name": "FISL Chassis (nested MAP \u2014 instance \u2192 book)",
+  "description": "Orders-only nested MAP proof: GROUP_BY instance_id \u2192 MAP \u2192 GROUP_BY book \u2192 MAP \u2192 EXTRACT_SCALAR. No executions. FIXTURES/ resolved in tests.",
+  "nodes": [
+    {
+      "id": "n01",
+      "type": "ALERT_TRIGGER",
+      "label": "Alert",
+      "config": {
+        "alert_fields": {
+          "trader_id": "string",
+          "currency_pair": "string"
+        }
+      }
+    },
+    {
+      "id": "n02",
+      "type": "EXECUTION_DATA_COLLECTOR",
+      "label": "Orders",
+      "config": {
+        "output_name": "orders",
+        "query_template": "trader_id:{context.trader_id}",
+        "trader_filter_key": "trader_id",
+        "mock_csv_path": "FIXTURES/fisl/orders_fisl.csv",
+        "source": "hs_client_order"
+      }
+    },
+    {
+      "id": "n03",
+      "type": "GROUP_BY",
+      "label": "By instance",
+      "config": {
+        "input_name": "orders",
+        "group_by_column": "instance_id",
+        "output_prefix": "inst",
+        "keys_output_name": "inst_keys"
+      }
+    },
+    {
+      "id": "n04",
+      "type": "MAP",
+      "label": "Per instance",
+      "config": {
+        "keys_key": "inst_keys",
+        "iteration_ctx_key": "instance_id",
+        "dataset_prefix": "inst",
+        "iteration_dataset_alias": "in_slice",
+        "output_name": "outer_m",
+        "collect_values": [
+          "inner_res"
+        ],
+        "sub_workflow": {
+          "nodes": [
+            {
+              "id": "gb2",
+              "type": "GROUP_BY",
+              "label": "By book",
+              "config": {
+                "input_name": "in_slice",
+                "group_by_column": "book",
+                "output_prefix": "ib",
+                "keys_output_name": "bk"
+              }
+            },
+            {
+              "id": "m2",
+              "type": "MAP",
+              "label": "Per book",
+              "config": {
+                "keys_key": "bk",
+                "iteration_ctx_key": "book",
+                "dataset_prefix": "ib",
+                "iteration_dataset_alias": "bs",
+                "output_name": "inner_res",
+                "collect_values": [
+                  "row_c"
+                ],
+                "sub_workflow": {
+                  "nodes": [
+                    {
+                      "id": "ex",
+                      "type": "EXTRACT_SCALAR",
+                      "label": "count",
+                      "config": {
+                        "input_name": "bs",
+                        "column": "order_id",
+                        "reducer": "count",
+                        "output_name": "row_c"
+                      }
+                    }
+                  ],
+                  "edges": []
+                }
+              }
+            }
+          ],
+          "edges": [
+            {
+              "from": "gb2",
+              "to": "m2"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "n05",
+      "type": "REPORT_OUTPUT",
+      "label": "Out",
+      "config": {
+        "output_path": "output/fisl_chassis_reference.xlsx",
+        "tabs": []
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "n01",
+      "to": "n02"
+    },
+    {
+      "from": "n02",
+      "to": "n03"
+    },
+    {
+      "from": "n03",
+      "to": "n04"
+    },
+    {
+      "from": "n04",
+      "to": "n05"
+    }
+  ]
+}

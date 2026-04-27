@@ -32,17 +32,18 @@
     },
     {
       "id": "n03",
-      "type": "ORDER_COLLECTOR",
+      "type": "EXECUTION_DATA_COLLECTOR",
       "label": "Collect Orders",
       "config": {
         "query_template": "trader_id:{context.trader_id}",
         "output_name": "orders",
-        "window_key": "window"
+        "window_key": "window",
+        "source": "hs_client_order"
       }
     },
     {
       "id": "n04",
-      "type": "TRADE_DATA_COLLECTOR",
+      "type": "EXECUTION_DATA_COLLECTOR",
       "label": "Collect Executions",
       "config": {
         "source": "hs_execution",
@@ -60,9 +61,23 @@
         "output_name": "comms",
         "window_key": "window",
         "keyword_categories": {
-          "INTENT": ["layering", "spoofing", "front-run", "push through"],
-          "TIMING": ["fix", "WM fix", "benchmark", "before the move"],
-          "COVERUP": ["cover", "rotate", "step-out"]
+          "INTENT": [
+            "layering",
+            "spoofing",
+            "front-run",
+            "push through"
+          ],
+          "TIMING": [
+            "fix",
+            "WM fix",
+            "benchmark",
+            "before the move"
+          ],
+          "COVERUP": [
+            "cover",
+            "rotate",
+            "step-out"
+          ]
         },
         "emit_hits_only": true
       }
@@ -100,8 +115,13 @@
         "dataset_prefix": "orders_by_book",
         "iteration_dataset_alias": "orders",
         "output_name": "per_book",
-        "collect_values": ["book_qty_total", "book_order_count"],
-        "collect_datasets": ["orders"],
+        "collect_values": [
+          "book_qty_total",
+          "book_order_count"
+        ],
+        "collect_datasets": [
+          "orders"
+        ],
         "sub_workflow": {
           "nodes": [
             {
@@ -127,33 +147,50 @@
               }
             }
           ],
-          "edges": [{"from": "s1", "to": "s2"}]
+          "edges": [
+            {
+              "from": "s1",
+              "to": "s2"
+            }
+          ]
         }
       }
     },
     {
       "id": "n09",
       "type": "FEATURE_ENGINE",
-      "label": "Feature Engine — bucket + signed qty",
+      "label": "Feature Engine \u2014 bucket + signed qty",
       "config": {
         "input_name": "executions",
         "output_name": "executions_features",
         "ops": [
-          {"op": "window_bucket", "time_col": "exec_time", "interval_ms": 60000, "out_col": "minute_bucket"},
-          {"op": "derive", "out_col": "notional_per_unit", "expr": "notional_usd / exec_quantity"}
+          {
+            "op": "window_bucket",
+            "time_col": "exec_time",
+            "interval_ms": 60000,
+            "out_col": "minute_bucket"
+          },
+          {
+            "op": "derive",
+            "out_col": "notional_per_unit",
+            "expr": "notional_usd / exec_quantity"
+          }
         ]
       }
     },
     {
       "id": "n10",
       "type": "SIGNAL_CALCULATOR",
-      "label": "Signal — Front Running",
+      "label": "Signal \u2014 Front Running",
       "config": {
         "mode": "configure",
         "signal_type": "FRONT_RUNNING",
         "input_name": "executions_features",
         "output_name": "executions_signals",
-        "params": {"window_minutes": 5, "price_move_threshold": 0.0003}
+        "params": {
+          "window_minutes": 5,
+          "price_move_threshold": 0.0003
+        }
       }
     },
     {
@@ -164,8 +201,16 @@
         "input_name": "executions_signals",
         "output_name": "executions_signals_highlighted",
         "rules": [
-          {"condition": "_signal_flag == True", "colour": "#FCA5A5", "label": "Front-run signal"},
-          {"condition": "_signal_score > 0.5", "colour": "#DC2626", "label": "Severe price move"}
+          {
+            "condition": "_signal_flag == True",
+            "colour": "#FCA5A5",
+            "label": "Front-run signal"
+          },
+          {
+            "condition": "_signal_score > 0.5",
+            "colour": "#DC2626",
+            "label": "Severe price move"
+          }
         ]
       }
     },
@@ -178,10 +223,22 @@
         "escalate_threshold": 5,
         "review_threshold": 1,
         "rules": [
-          {"name": "comms_intent_with_signal", "when": "{executions_signals._signal_flag.sum} >= 1", "disposition": "ESCALATE", "severity": "CRITICAL"},
-          {"name": "any_signal", "when": "{context.flag_count} >= 1", "disposition": "REVIEW", "severity": "MEDIUM"}
+          {
+            "name": "comms_intent_with_signal",
+            "when": "{executions_signals._signal_flag.sum} >= 1",
+            "disposition": "ESCALATE",
+            "severity": "CRITICAL"
+          },
+          {
+            "name": "any_signal",
+            "when": "{context.flag_count} >= 1",
+            "disposition": "REVIEW",
+            "severity": "MEDIUM"
+          }
         ],
-        "severity_map": {"DISMISS": "LOW"}
+        "severity_map": {
+          "DISMISS": "LOW"
+        }
       }
     },
     {
@@ -193,9 +250,18 @@
         "input_name": "executions_signals",
         "mode": "templated",
         "field_bindings": [
-          {"field": "_signal_flag", "agg": "sum"},
-          {"field": "_signal_score", "agg": "max"},
-          {"field": "_signal_type", "agg": "nunique"}
+          {
+            "field": "_signal_flag",
+            "agg": "sum"
+          },
+          {
+            "field": "_signal_score",
+            "agg": "max"
+          },
+          {
+            "field": "_signal_type",
+            "agg": "nunique"
+          }
         ],
         "llm_prompt_template": "You are a trade surveillance analyst.\nTrader: {trader_id}  Disposition: {disposition}\nSignal stats:\n{stats}\n\nWrite a one-paragraph summary of the front-running signals."
       }
@@ -209,13 +275,36 @@
         "input_name": "executions",
         "mode": "fact_pack_llm",
         "facts": [
-          {"name": "exec_count", "column": "exec_id", "agg": "count"},
-          {"name": "buy_count", "column": "side", "agg": "count_where_buy"},
-          {"name": "sell_count", "column": "side", "agg": "count_where_sell"},
-          {"name": "total_qty", "column": "exec_quantity", "agg": "sum"},
-          {"name": "venues_touched", "column": "venue", "agg": "unique_values"}
+          {
+            "name": "exec_count",
+            "column": "exec_id",
+            "agg": "count"
+          },
+          {
+            "name": "buy_count",
+            "column": "side",
+            "agg": "count_where_buy"
+          },
+          {
+            "name": "sell_count",
+            "column": "side",
+            "agg": "count_where_sell"
+          },
+          {
+            "name": "total_qty",
+            "column": "exec_quantity",
+            "agg": "sum"
+          },
+          {
+            "name": "venues_touched",
+            "column": "venue",
+            "agg": "unique_values"
+          }
         ],
-        "required_facts": ["exec_count", "total_qty"],
+        "required_facts": [
+          "exec_count",
+          "total_qty"
+        ],
         "llm_prompt_template": "You are a trade surveillance analyst.\nTrader: {trader_id}  Disposition: {disposition}\nFacts (JSON):\n{facts}\n\nWrite a tight 2-paragraph narrative referencing every fact verbatim."
       }
     },
@@ -246,11 +335,31 @@
       "config": {
         "output_path": "output/fx_fro_v2_report.xlsx",
         "tabs": [
-          {"name": "All Orders", "dataset": "orders", "include_highlights": false},
-          {"name": "Executions", "dataset": "executions", "include_highlights": false},
-          {"name": "Signal Detections", "dataset": "executions_signals", "include_highlights": true},
-          {"name": "Comms Hits", "dataset": "comms_hits", "include_highlights": false},
-          {"name": "Market", "dataset": "market", "include_highlights": false},
+          {
+            "name": "All Orders",
+            "dataset": "orders",
+            "include_highlights": false
+          },
+          {
+            "name": "Executions",
+            "dataset": "executions",
+            "include_highlights": false
+          },
+          {
+            "name": "Signal Detections",
+            "dataset": "executions_signals",
+            "include_highlights": true
+          },
+          {
+            "name": "Comms Hits",
+            "dataset": "comms_hits",
+            "include_highlights": false
+          },
+          {
+            "name": "Market",
+            "dataset": "market",
+            "include_highlights": false
+          },
           {
             "expand_from": "{context.per_book}",
             "as": "key",
@@ -263,26 +372,89 @@
     }
   ],
   "edges": [
-    {"from": "n01", "to": "n02"},
-    {"from": "n02", "to": "n03"},
-    {"from": "n02", "to": "n04"},
-    {"from": "n02", "to": "n05"},
-    {"from": "n02", "to": "n06"},
-    {"from": "n03", "to": "n07"},
-    {"from": "n07", "to": "n08"},
-    {"from": "n04", "to": "n09"},
-    {"from": "n09", "to": "n10"},
-    {"from": "n10", "to": "n11"},
-    {"from": "n10", "to": "n12"},
-    {"from": "n10", "to": "n13"},
-    {"from": "n04", "to": "n14"},
-    {"from": "n05", "to": "n15"},
-    {"from": "n12", "to": "n16"},
-    {"from": "n13", "to": "n16"},
-    {"from": "n14", "to": "n16"},
-    {"from": "n15", "to": "n16"},
-    {"from": "n08", "to": "n17"},
-    {"from": "n11", "to": "n17"},
-    {"from": "n16", "to": "n17"}
+    {
+      "from": "n01",
+      "to": "n02"
+    },
+    {
+      "from": "n02",
+      "to": "n03"
+    },
+    {
+      "from": "n02",
+      "to": "n04"
+    },
+    {
+      "from": "n02",
+      "to": "n05"
+    },
+    {
+      "from": "n02",
+      "to": "n06"
+    },
+    {
+      "from": "n03",
+      "to": "n07"
+    },
+    {
+      "from": "n07",
+      "to": "n08"
+    },
+    {
+      "from": "n04",
+      "to": "n09"
+    },
+    {
+      "from": "n09",
+      "to": "n10"
+    },
+    {
+      "from": "n10",
+      "to": "n11"
+    },
+    {
+      "from": "n10",
+      "to": "n12"
+    },
+    {
+      "from": "n10",
+      "to": "n13"
+    },
+    {
+      "from": "n04",
+      "to": "n14"
+    },
+    {
+      "from": "n05",
+      "to": "n15"
+    },
+    {
+      "from": "n12",
+      "to": "n16"
+    },
+    {
+      "from": "n13",
+      "to": "n16"
+    },
+    {
+      "from": "n14",
+      "to": "n16"
+    },
+    {
+      "from": "n15",
+      "to": "n16"
+    },
+    {
+      "from": "n08",
+      "to": "n17"
+    },
+    {
+      "from": "n11",
+      "to": "n17"
+    },
+    {
+      "from": "n16",
+      "to": "n17"
+    }
   ]
 }

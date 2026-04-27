@@ -1,0 +1,55 @@
+type_id: EXTRACT_SCALAR
+description: "Reduce a column of an upstream DataFrame to a single scalar (first, unique_single, max, min, count, sum, mean)."
+
+ui:
+  color: "#8B5CF6"
+  icon: Crosshair
+  palette:
+    section:
+      id: transform
+      label: Transform
+      order: 20
+      color: "#A78BFA"
+    node_order: 25
+
+input_ports:
+  - name: dataset
+    type: dataframe
+    description: "Source DataFrame (by input_name)."
+
+output_ports:
+  - name: value
+    type: scalar
+    description: "Published under ctx.values[output_name]."
+    optional: true
+
+params:
+  - name: input_name
+    type: input_ref
+    description: "Dataset name in ctx.datasets."
+    required: true
+  - name: column
+    type: string
+    description: "Column to reduce."
+    required: true
+  - name: reducer
+    type: enum
+    description: "How to collapse the column to a single value."
+    enum: [first, unique_single, max, min, count, sum, mean]
+    default: unique_single
+    required: true
+  - name: output_name
+    type: string
+    description: "ctx.values key to publish the scalar under."
+    required: true
+  - name: fail_on_ambiguous
+    type: boolean
+    description: "When reducer=unique_single, raise if the column has more than one distinct value (default false — take the first)."
+    default: false
+    required: false
+
+semantics:
+  requires: []
+
+constraints:
+  - "Typical use: EXTRACT_SCALAR(orders, 'trader_id', unique_single) → feeds a downstream collector's trader_filter_key."

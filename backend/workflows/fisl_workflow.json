@@ -1,9 +1,9 @@
 {
   "schema_version": "1.0",
   "workflow_id": "fisl_v1",
-  "name": "Fixed Income Spoof / Layering (FISL) — nested MAP proof",
+  "name": "Fixed Income Spoof / Layering (FISL) \u2014 nested MAP proof",
   "version": "1.1",
-  "description": "FISL scenario built entirely on Phase 1-5 chassis primitives. Demonstrates nested MAP (outer venue, inner book), FEATURE_ENGINE (window_bucket → groupby_agg → pivot for an order-book ladder), shared SIGNAL_CALCULATOR (signal_type=SPOOFING), DATA_HIGHLIGHTER with cross-dataset refs, DECISION_RULE rules-mode + severity, SECTION_SUMMARY in three modes, and REPORT_OUTPUT with static + dynamic per-venue tabs (expand_from). Same node set, different config from FXFRO — proves cross-scenario portability with zero new node code.",
+  "description": "FISL scenario built entirely on Phase 1-5 chassis primitives. Demonstrates nested MAP (outer venue, inner book), FEATURE_ENGINE (window_bucket \u2192 groupby_agg \u2192 pivot for an order-book ladder), shared SIGNAL_CALCULATOR (signal_type=SPOOFING), DATA_HIGHLIGHTER with cross-dataset refs, DECISION_RULE rules-mode + severity, SECTION_SUMMARY in three modes, and REPORT_OUTPUT with static + dynamic per-venue tabs (expand_from). Same node set, different config from FXFRO \u2014 proves cross-scenario portability with zero new node code.",
   "nodes": [
     {
       "id": "n01",
@@ -31,12 +31,13 @@
     },
     {
       "id": "n03",
-      "type": "ORDER_COLLECTOR",
+      "type": "EXECUTION_DATA_COLLECTOR",
       "label": "Collect Orders",
       "config": {
         "query_template": "trader_id:{context.trader_id}",
         "output_name": "orders",
-        "window_key": "window"
+        "window_key": "window",
+        "source": "hs_client_order"
       }
     },
     {
@@ -61,8 +62,13 @@
         "dataset_prefix": "orders_by_venue",
         "iteration_dataset_alias": "orders",
         "output_name": "per_instrument",
-        "collect_values": ["per_book", "instance_qty_total"],
-        "collect_datasets": ["orders"],
+        "collect_values": [
+          "per_book",
+          "instance_qty_total"
+        ],
+        "collect_datasets": [
+          "orders"
+        ],
         "sub_workflow": {
           "nodes": [
             {
@@ -87,7 +93,10 @@
                 "dataset_prefix": "orders_by_book",
                 "iteration_dataset_alias": "orders",
                 "output_name": "per_book",
-                "collect_values": ["book_qty", "book_order_count"],
+                "collect_values": [
+                  "book_qty",
+                  "book_order_count"
+                ],
                 "collect_datasets": [],
                 "sub_workflow": {
                   "nodes": [
@@ -114,7 +123,12 @@
                       }
                     }
                   ],
-                  "edges": [{"from": "t1", "to": "t2"}]
+                  "edges": [
+                    {
+                      "from": "t1",
+                      "to": "t2"
+                    }
+                  ]
                 }
               }
             },
@@ -131,8 +145,14 @@
             }
           ],
           "edges": [
-            {"from": "s1", "to": "s2"},
-            {"from": "s1", "to": "s3"}
+            {
+              "from": "s1",
+              "to": "s2"
+            },
+            {
+              "from": "s1",
+              "to": "s3"
+            }
           ]
         }
       }
@@ -140,27 +160,53 @@
     {
       "id": "n06",
       "type": "FEATURE_ENGINE",
-      "label": "Feature Engine — order-book ladder",
+      "label": "Feature Engine \u2014 order-book ladder",
       "config": {
         "input_name": "orders",
         "output_name": "orders_features",
         "ops": [
-          {"op": "window_bucket", "time_col": "order_time", "interval_ms": 60000, "out_col": "minute_bucket"},
-          {"op": "groupby_agg", "by": ["minute_bucket", "side"], "aggs": {"quantity": "sum", "order_id": "count"}, "as": "ladder_long"},
-          {"op": "pivot", "index": "minute_bucket", "columns": "side", "values": "quantity", "aggfunc": "sum", "as": "ladder"}
+          {
+            "op": "window_bucket",
+            "time_col": "order_time",
+            "interval_ms": 60000,
+            "out_col": "minute_bucket"
+          },
+          {
+            "op": "groupby_agg",
+            "by": [
+              "minute_bucket",
+              "side"
+            ],
+            "aggs": {
+              "quantity": "sum",
+              "order_id": "count"
+            },
+            "as": "ladder_long"
+          },
+          {
+            "op": "pivot",
+            "index": "minute_bucket",
+            "columns": "side",
+            "values": "quantity",
+            "aggfunc": "sum",
+            "as": "ladder"
+          }
         ]
       }
     },
     {
       "id": "n07",
       "type": "SIGNAL_CALCULATOR",
-      "label": "Signal — Spoofing",
+      "label": "Signal \u2014 Spoofing",
       "config": {
         "mode": "configure",
         "signal_type": "SPOOFING",
         "input_name": "orders_features",
         "output_name": "orders_signals",
-        "params": {"cancel_ratio_threshold": 0.5, "window": "30m"}
+        "params": {
+          "cancel_ratio_threshold": 0.5,
+          "window": "30m"
+        }
       }
     },
     {
@@ -171,8 +217,16 @@
         "input_name": "orders_signals",
         "output_name": "orders_signals_highlighted",
         "rules": [
-          {"condition": "status == 'CANCELLED'", "colour": "#FCA5A5", "label": "Cancelled"},
-          {"condition": "_signal_flag == True", "colour": "#DC2626", "label": "Spoof signal"}
+          {
+            "condition": "status == 'CANCELLED'",
+            "colour": "#FCA5A5",
+            "label": "Cancelled"
+          },
+          {
+            "condition": "_signal_flag == True",
+            "colour": "#DC2626",
+            "label": "Spoof signal"
+          }
         ]
       }
     },
@@ -185,8 +239,18 @@
         "escalate_threshold": 1,
         "review_threshold": 1,
         "rules": [
-          {"name": "spoof_signal_fired", "when": "{orders_signals._signal_flag.any}", "disposition": "ESCALATE", "severity": "CRITICAL"},
-          {"name": "high_cancel_volume", "when": "{orders.@row_count} > 30", "disposition": "REVIEW", "severity": "MEDIUM"}
+          {
+            "name": "spoof_signal_fired",
+            "when": "{orders_signals._signal_flag.any}",
+            "disposition": "ESCALATE",
+            "severity": "CRITICAL"
+          },
+          {
+            "name": "high_cancel_volume",
+            "when": "{orders.@row_count} > 30",
+            "disposition": "REVIEW",
+            "severity": "MEDIUM"
+          }
         ]
       }
     },
@@ -199,9 +263,18 @@
         "input_name": "orders_signals",
         "mode": "templated",
         "field_bindings": [
-          {"field": "_signal_flag", "agg": "sum"},
-          {"field": "_signal_score", "agg": "max"},
-          {"field": "_signal_type", "agg": "nunique"}
+          {
+            "field": "_signal_flag",
+            "agg": "sum"
+          },
+          {
+            "field": "_signal_score",
+            "agg": "max"
+          },
+          {
+            "field": "_signal_type",
+            "agg": "nunique"
+          }
         ],
         "llm_prompt_template": "You are a fixed-income surveillance analyst.\nTrader: {trader_id}  Disposition: {disposition}\nSignal stats:\n{stats}\n\nWrite a one-paragraph summary of the spoofing signals."
       }
@@ -215,13 +288,36 @@
         "input_name": "orders",
         "mode": "fact_pack_llm",
         "facts": [
-          {"name": "order_count", "column": "order_id", "agg": "count"},
-          {"name": "total_qty", "column": "quantity", "agg": "sum"},
-          {"name": "instruments", "column": "instrument", "agg": "unique_values"},
-          {"name": "books", "column": "book", "agg": "unique_values"},
-          {"name": "cancelled_count", "column": "status", "agg": "count_where_cancelled"}
+          {
+            "name": "order_count",
+            "column": "order_id",
+            "agg": "count"
+          },
+          {
+            "name": "total_qty",
+            "column": "quantity",
+            "agg": "sum"
+          },
+          {
+            "name": "instruments",
+            "column": "instrument",
+            "agg": "unique_values"
+          },
+          {
+            "name": "books",
+            "column": "book",
+            "agg": "unique_values"
+          },
+          {
+            "name": "cancelled_count",
+            "column": "status",
+            "agg": "count_where_cancelled"
+          }
         ],
-        "required_facts": ["order_count", "cancelled_count"],
+        "required_facts": [
+          "order_count",
+          "cancelled_count"
+        ],
         "llm_prompt_template": "You are a fixed-income surveillance analyst.\nTrader: {trader_id}\nFacts (JSON):\n{facts}\n\nWrite a tight 2-paragraph layering / spoofing analysis referencing every fact verbatim."
       }
     },
@@ -238,9 +334,21 @@
       "config": {
         "output_path": "output/fisl_report.xlsx",
         "tabs": [
-          {"name": "All Orders", "dataset": "orders", "include_highlights": false},
-          {"name": "Order-Book Ladder", "dataset": "ladder", "include_highlights": false},
-          {"name": "Spoof Signals", "dataset": "orders_signals", "include_highlights": true},
+          {
+            "name": "All Orders",
+            "dataset": "orders",
+            "include_highlights": false
+          },
+          {
+            "name": "Order-Book Ladder",
+            "dataset": "ladder",
+            "include_highlights": false
+          },
+          {
+            "name": "Spoof Signals",
+            "dataset": "orders_signals",
+            "include_highlights": true
+          },
           {
             "expand_from": "{context.per_instrument}",
             "as": "key",
@@ -253,21 +361,69 @@
     }
   ],
   "edges": [
-    {"from": "n01", "to": "n02"},
-    {"from": "n02", "to": "n03"},
-    {"from": "n03", "to": "n04"},
-    {"from": "n04", "to": "n05"},
-    {"from": "n03", "to": "n06"},
-    {"from": "n06", "to": "n07"},
-    {"from": "n07", "to": "n08"},
-    {"from": "n07", "to": "n09"},
-    {"from": "n07", "to": "n10"},
-    {"from": "n03", "to": "n11"},
-    {"from": "n09", "to": "n12"},
-    {"from": "n10", "to": "n12"},
-    {"from": "n11", "to": "n12"},
-    {"from": "n05", "to": "n13"},
-    {"from": "n08", "to": "n13"},
-    {"from": "n12", "to": "n13"}
+    {
+      "from": "n01",
+      "to": "n02"
+    },
+    {
+      "from": "n02",
+      "to": "n03"
+    },
+    {
+      "from": "n03",
+      "to": "n04"
+    },
+    {
+      "from": "n04",
+      "to": "n05"
+    },
+    {
+      "from": "n03",
+      "to": "n06"
+    },
+    {
+      "from": "n06",
+      "to": "n07"
+    },
+    {
+      "from": "n07",
+      "to": "n08"
+    },
+    {
+      "from": "n07",
+      "to": "n09"
+    },
+    {
+      "from": "n07",
+      "to": "n10"
+    },
+    {
+      "from": "n03",
+      "to": "n11"
+    },
+    {
+      "from": "n09",
+      "to": "n12"
+    },
+    {
+      "from": "n10",
+      "to": "n12"
+    },
+    {
+      "from": "n11",
+      "to": "n12"
+    },
+    {
+      "from": "n05",
+      "to": "n13"
+    },
+    {
+      "from": "n08",
+      "to": "n13"
+    },
+    {
+      "from": "n12",
+      "to": "n13"
+    }
   ]
 }

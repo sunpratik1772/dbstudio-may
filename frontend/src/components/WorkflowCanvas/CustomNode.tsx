@@ -1,9 +1,8 @@
 /**
  * Visual representation of a single node on the canvas.
  *
- * Pulls colour/icon/category from the generated NODE_UI registry so
- * adding a new backend node type only means regenerating
- * `src/nodes/generated.ts` — no edits here. React.memo wraps the
+ * Pulls colour/icon from `nodeRegistryStore` (live node-manifest).
+ * React.memo wraps the
  * component because React Flow re-renders on every drag frame; without
  * it a 30-node DAG drops below 60fps.
  *
@@ -13,7 +12,7 @@
  */
 import { memo } from 'react'
 import { Handle, Position, type NodeProps } from 'reactflow'
-import { getNodeMeta, getNodeDisplayName, type NodeType, type NodeUIMeta } from '../../nodes'
+import { getNodeDisplayName, useNodeRegistryStore, UNKNOWN_NODE_UI, type NodeType, type NodeUIMeta } from '../../nodes'
 import { useWorkflowStore } from '../../store/workflowStore'
 import { useNodeRunStatus } from '../../store/useNodeRunStatus'
 
@@ -38,7 +37,7 @@ const STATUS_COLOR: Record<string, string> = {
 }
 
 export const CustomNode = memo(({ id, data }: NodeProps<NodeData>) => {
-  const meta: NodeUIMeta = getNodeMeta(data.nodeType)
+  const meta: NodeUIMeta = useNodeRegistryStore((s) => s.nodeUI[data.nodeType] ?? UNKNOWN_NODE_UI)
   const IconComp = meta.Icon
   const selectedNodeId = useWorkflowStore((s) => s.selectedNodeId)
   const selectNode = useWorkflowStore((s) => s.selectNode)
@@ -182,14 +181,11 @@ export const CustomNode = memo(({ id, data }: NodeProps<NodeData>) => {
           in backend/engine/registry.py. */}
       {meta.configTags.some((k) => data.config[k] != null) && (
         <div className="flex flex-wrap gap-1 px-3 pb-2.5 pt-0.5">
-          {meta.configTags.map((k, i) => {
+          {meta.configTags.map((k) => {
             const v = data.config[k]
             if (v == null) return null
-            // Order + purpose come from backend ``ui.config_tags`` — no per-node type strings here.
-            const tone =
-              i === 0 ? 'danger' : i === 1 ? 'muted' : 'default'
-            const isOutputName = k.toLowerCase().includes('output')
-            const label = isOutputName ? `→ ${String(v)}` : String(v)
+            const tone = k === 'signal_type' ? 'danger' : k === 'output_name' ? 'muted' : 'default'
+            const label = k === 'output_name' ? `→ ${String(v)}` : String(v)
             return <Tag key={k} label={label} tone={tone} />
           })}
         </div>

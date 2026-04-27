@@ -1,10 +1,29 @@
-"""Copilot endpoints — chat, workflow generation, skills + contracts."""
+"""Copilot and NodeSpec-facing endpoints.
+
+Router map for newcomers:
+  * POST /copilot/chat              free-form multi-turn chat
+  * POST /copilot/generate          blocking workflow draft/repair
+  * POST /copilot/generate/stream   SSE workflow draft/repair timeline
+  * GET  /copilot/skills            skill index for the prompt builder
+  * GET  /copilot/skills/{id}       skill body
+
+This module also owns `contracts_router`, mounted at top level from
+`app.main`, for historical API compatibility:
+  * GET /data_sources
+  * GET /contracts
+  * GET /node-manifest
+
+The important architectural point: Studio should learn node behavior from
+the live NodeSpec registry (`/node-manifest`), not from frontend constants.
+"""
 from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import time
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -44,12 +63,17 @@ def _autosave_draft(dag: dict[str, Any]) -> str | None:
 
 @router.post("/chat")
 def copilot_chat(req: CopilotChatRequest) -> dict:
-    """Multi-turn copilot chat."""
+    """Copilot chat.
+
+    Multi-turn history is scoped by `session_id`. Requests without a
+    session_id are deliberately stateless so the process-wide cached
+    WorkflowCopilot cannot leak chat context between users.
+    """
     cp = get_copilot()
     if req.reset_history:
-        cp.reset()
+        cp.reset(session_id=req.session_id)
     try:
-        reply = cp.chat(req.message)
+        reply = cp.chat(req.message, session_id=req.session_id)
         return {"reply": reply}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
@@ -125,6 +149,10 @@ def copilot_generate_stream(req: CopilotGenerateRequest) -> StreamingResponse:
 @router.get("/skills")
 def list_skills() -> dict:
     """Return available skill file names and descriptions."""
+    return {"skills": _skill_rows()}
+
+
+def _skill_rows() -> list[dict]:
     skills: list[dict] = []
     if SKILLS_DIR.exists():
         for f in sorted(SKILLS_DIR.glob("*.md")):
@@ -137,13 +165,60 @@ def list_skills() -> dict:
                     "filename": f.name,
                 }
             )
-    return {"skills": skills}
+    return skills
+
+
+@router.get("/guardrails")
+def get_guardrails() -> dict:
+    """
+    Return the active authoring constraints that Copilot generation must obey.
+
+    This is UI-facing: it lets the Plan panel show the same boundaries the
+    backend prompt/validator uses (live NodeSpecs, data-source YAML, skill files,
+    and host capabilities like whether custom script execution is enabled).
+    """
+    from data_sources import get_registry
+    from engine.registry import studio_manifest
+
+    manifest = studio_manifest()
+    data_sources = get_registry().to_json().get("sources", [])
+    upload_enabled = os.environ.get("DBSHERPA_ALLOW_UPLOAD_SCRIPT", "").lower() in {"1", "true", "yes"}
+    return {
+        "nodes": [
+            {
+                "type_id": n["type_id"],
+                "description": n["description"],
+                "section": n.get("palette_group"),
+            }
+            for n in manifest["nodes"]
+        ],
+        "data_sources": data_sources,
+        "skills": _skill_rows(),
+        "capabilities": {
+            "upload_script_enabled": upload_enabled,
+            "allowed_signal_modes": ["configure"] + (["upload_script"] if upload_enabled else []),
+            "builtin_signal_types": ["FRONT_RUNNING", "WASH_TRADE", "SPOOFING", "LAYERING"],
+        },
+        "rules": [
+            "Only use node types and parameters from live NodeSpec.",
+            "Only use data-source names and columns declared in metadata YAML.",
+            "Use scenario logic from skills; unsupported scenarios should be narrowed to supported sources/nodes.",
+            (
+                "Custom Python signal scripts are allowed."
+                if upload_enabled
+                else "Custom Python signal scripts are disabled; use built-in SIGNAL_CALCULATOR configure mode."
+            ),
+        ],
+    }
 
 
 @router.get("/skills/{skill_id}")
 def get_skill(skill_id: str) -> dict:
     """Return full content of a skill file."""
-    path = SKILLS_DIR / f"{skill_id}.md"
+    safe = f"{skill_id}.md"
+    if safe != f"{Path(safe).name}":
+        raise HTTPException(status_code=400, detail="skill_id must be a bare filename stem")
+    path = SKILLS_DIR / safe
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"Skill '{skill_id}' not found")
     return {"id": skill_id, "content": path.read_text()}
@@ -179,9 +254,9 @@ def get_contracts() -> dict:
     frontend palette + copilot prompt builder on the next
     request — no script to run, no artifact to commit.
 
-    If `CONTRACTS_PATH` still exists we fall back to it on the
-    off-chance someone has checked in an override. In practice
-    the file should be deleted once this endpoint is live.
+    If `CONTRACTS_PATH` still exists, we merge it with the live document.
+    Dynamic registry entries win on duplicate node ids, so a newly edited
+    NodeSpec is what the UI/copilot sees on the next request.
     """
     from engine.registry import contracts_document
 
@@ -196,3 +271,16 @@ def get_contracts() -> dict:
         except Exception:  # pragma: no cover - defensive
             pass
     return doc
+
+
+@contracts_router.get("/node-manifest")
+def get_node_manifest() -> dict:
+    """
+    Live NodeSpec snapshot for the Studio: palette sections, node list with
+    UI metadata, typed ports/params, and contracts. The UI fetches this on
+    load (and on manual refresh) so new backend nodes appear without
+    regenerating frontend artifacts.
+    """
+    from engine.registry import studio_manifest
+
+    return studio_manifest()

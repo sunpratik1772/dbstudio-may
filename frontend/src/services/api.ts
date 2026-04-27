@@ -29,6 +29,44 @@ const BASE = '/api'
  * failed the deterministic validator. Callers can `instanceof` check it
  * to surface structured per-node errors instead of a generic message.
  */
+/** Live NodeSpec bundle for Studio palette + config inspector (`GET /node-manifest`). */
+export interface NodeManifestPayload {
+  version: number
+  palette_sections: Array<{ id: string; label: string; order: number; color: string }>
+  nodes: Array<{
+    type_id: string
+    description: string
+    color: string
+    icon: string
+    config_tags?: string[]
+    palette_group: string
+    palette_order: number
+    display_name?: string
+    input_ports: unknown[]
+    output_ports: unknown[]
+    params: unknown[]
+    contract: {
+      description: string
+      inputs: Record<string, string>
+      outputs: Record<string, string>
+      config_schema: Record<string, string>
+      constraints: string[]
+    }
+  }>
+}
+
+export interface CopilotGuardrailsPayload {
+  nodes: Array<{ type_id: string; description: string; section?: string }>
+  data_sources: Array<{ id: string; description: string; sources: string[] }>
+  skills: Array<{ id: string; name: string; filename: string }>
+  capabilities: {
+    upload_script_enabled: boolean
+    allowed_signal_modes: string[]
+    builtin_signal_types: string[]
+  }
+  rules: string[]
+}
+
 export class ValidationError extends Error {
   readonly validation: ValidationResult
 
@@ -198,5 +236,8 @@ export const api = {
   },
   listSkills: () => request<{ skills: Array<{ id: string; name: string; filename: string }> }>('GET', '/copilot/skills'),
   getSkill: (id: string) => request<{ id: string; content: string }>('GET', `/copilot/skills/${id}`),
+  getCopilotGuardrails: () => request<CopilotGuardrailsPayload>('GET', '/copilot/guardrails'),
   getContracts: () => request<Record<string, unknown>>('GET', '/contracts'),
+  /** Palette + node metadata + contracts from the live backend registry. */
+  getNodeManifest: () => request<NodeManifestPayload>('GET', '/node-manifest'),
 }

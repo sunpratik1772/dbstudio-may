@@ -1,0 +1,68 @@
+type_id: TIME_WINDOW
+description: "Expand an event time into a [start_time, end_time] window for downstream filtering."
+
+ui:
+  color: "#F59E0B"
+  icon: Clock
+  palette:
+    section:
+      id: transform
+      label: Transform
+      order: 20
+      color: "#A78BFA"
+    node_order: 19
+
+input_ports:
+  - name: context
+    type: object
+    description: "Context keys referenced in event_time_key / end_time_key."
+    optional: true
+
+output_ports:
+  - name: window
+    type: object
+    description: "{start_time, end_time, buffer_minutes}. Published under ctx.values[output_name]."
+
+params:
+  - name: event_time_key
+    type: string
+    description: "ctx.values key holding the anchor time (e.g. 'fr_start' from the alert). Required unless start_time_literal is set."
+    default: ""
+    required: false
+  - name: end_time_key
+    type: string
+    description: "ctx.values key holding the end anchor (e.g. 'fr_end'). If empty, end = start."
+    default: ""
+    required: false
+  - name: start_time_literal
+    type: string
+    description: "Literal ISO start time. Used when the window anchor isn't in ctx.values."
+    default: ""
+    required: false
+  - name: end_time_literal
+    type: string
+    description: "Literal ISO end time."
+    default: ""
+    required: false
+  - name: pre_minutes
+    type: integer
+    description: "Subtract this many minutes from the start anchor."
+    default: 0
+    required: false
+  - name: post_minutes
+    type: integer
+    description: "Add this many minutes to the end anchor."
+    default: 0
+    required: false
+  - name: output_name
+    type: string
+    description: "ctx.values key under which to publish the window dict (default 'window')."
+    default: window
+    required: true
+
+semantics:
+  requires: []
+
+constraints:
+  - "Output dict keys: start_time (ISO str), end_time (ISO str), buffer_minutes {pre, post}."
+  - "If the event time cannot be resolved, publishes an empty dict — downstream collectors treat that as no-filter."

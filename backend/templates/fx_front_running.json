@@ -58,7 +58,7 @@
     "workflow_id": "fx_fro_v2",
     "name": "FX Front-Running Detection (chassis v2)",
     "version": "2.0",
-    "description": "FRO workflow rebuilt on the Phase 1-5 chassis: TIME_WINDOW + ORDER_COLLECTOR, per-book GROUP_BY + MAP fan-out, fact_pack_llm and event_narrative section modes, comms keyword categories, and expand_from per-book routing.",
+    "description": "FRO workflow rebuilt on the Phase 1-5 chassis: TIME_WINDOW + Solr Data Collector, per-book GROUP_BY + MAP fan-out, fact_pack_llm and event_narrative section modes, comms keyword categories, and expand_from per-book routing.",
     "nodes": [
       {
         "id": "n01",
@@ -87,17 +87,18 @@
       },
       {
         "id": "n03",
-        "type": "ORDER_COLLECTOR",
+        "type": "EXECUTION_DATA_COLLECTOR",
         "label": "Collect Orders",
         "config": {
           "query_template": "trader_id:{context.trader_id}",
           "output_name": "orders",
-          "window_key": "window"
+          "window_key": "window",
+          "source": "hs_client_order"
         }
       },
       {
         "id": "n04",
-        "type": "TRADE_DATA_COLLECTOR",
+        "type": "EXECUTION_DATA_COLLECTOR",
         "label": "Collect Executions",
         "config": {
           "source": "hs_execution",

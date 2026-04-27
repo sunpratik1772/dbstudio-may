@@ -14,7 +14,8 @@ demo path is reproducible across runs and deployments.
 
 ## How they're used
 
-The `demo_fx_fro_workflow.json` workflow sets
+The `/run/demo` endpoint loads `backend/workflows/fx_fro_v2_workflow.json`
+by default. That workflow sets
 `config.mock_csv_path` on each collector node to point at one of
 these files. At run time the collector handlers detect the config
 and read the CSV verbatim instead of calling their synthetic

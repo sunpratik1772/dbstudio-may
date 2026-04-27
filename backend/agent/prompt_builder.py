@@ -19,6 +19,7 @@ regression-tests straightforward.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -46,8 +47,17 @@ class PromptBuilder:
         return "\n\n".join(chunks) if chunks else "(no skill files found)"
 
     def _load_contracts(self) -> str:
-        if self.contracts_path.exists():
-            return self.contracts_path.read_text()
+        # The LLM must see the same NodeSpec contracts that `/contracts` and
+        # `/node-manifest` expose. Falling back to the checked-in artifact is
+        # only for unusual import/bootstrap failures; it is no longer the
+        # normal source of truth.
+        try:
+            from engine.registry import contracts_document
+
+            return json.dumps(contracts_document(), indent=2)
+        except Exception:
+            if self.contracts_path.exists():
+                return self.contracts_path.read_text()
         return "{}"
 
     def list_skills(self) -> list[str]:
@@ -75,9 +85,22 @@ class PromptBuilder:
         skills = self._load_skills()
         contracts = self._load_contracts()
         schema_hints = get_registry().schema_hints_for_prompt()
+        upload_scripts_enabled = os.environ.get("DBSHERPA_ALLOW_UPLOAD_SCRIPT", "").lower() in {"1", "true", "yes"}
+        upload_rule = (
+            "upload_script is ENABLED on this host; use it only when a skill explicitly needs custom Python."
+            if upload_scripts_enabled
+            else "upload_script is DISABLED on this host. NEVER set SIGNAL_CALCULATOR.mode='upload_script'; use mode='configure' with built-in signal_type values only."
+        )
         return f"""You are dbSherpa Copilot — an AI workflow designer for financial trade surveillance.
 
 You generate complete, valid DAG JSON workflows for the dbSherpa engine.
+
+## Active Guardrails
+- Generate workflows only from the Node I/O Contracts below. Do not invent node types, ports, params, or config keys.
+- Use only data sources and columns listed under Data Source Column Schemas. Do not invent source names or columns.
+- Use Surveillance Skills Library guidance for scenario logic. If a requested scenario is outside the listed skills/source schemas, say so or compose only the supported subset.
+- Keep top-level edges acyclic. In normal linear/fan-out flows, every edge should point from a lower numbered node id to a higher numbered node id.
+- Host capability: {upload_rule}
 
 ## Node I/O Contracts
 {contracts}
@@ -94,7 +117,7 @@ You generate complete, valid DAG JSON workflows for the dbSherpa engine.
    _signal_flag, _signal_score, _signal_reason, _signal_type, _signal_window
 3. Every workflow MUST start with an ALERT_TRIGGER node whose id is EXACTLY "n01" (not "n01_alert_trigger" or similar).
 4. Every workflow MUST end with a REPORT_OUTPUT node.
-5. The DAG must be acyclic.
+5. The DAG must be acyclic. Prefer edges from earlier node ids to later node ids (n03 -> n07), never backward edges (n07 -> n03).
 6. Context placeholders use {{context.field_name}} syntax.
 7. All `output_name` values must be referenced correctly as `input_name` in downstream nodes.
 8. Node IDs MUST be the plain form "n01", "n02", "n03", … (two-digit zero-padded integers). NEVER suffix them with names.
@@ -102,10 +125,9 @@ You generate complete, valid DAG JSON workflows for the dbSherpa engine.
 10. Edges MUST use the exact schema `{{"from": "<id>", "to": "<id>"}}` — do NOT use "source"/"target".
 11. SIGNAL_CALCULATOR: prefer `mode: "configure"` with a built-in `signal_type` from:
     FRONT_RUNNING, WASH_TRADE, SPOOFING, LAYERING.
-    Only use `mode: "upload_script"` for custom signals. When you do, you MUST supply an inline
-    `script_content` string (real executable Python operating on `df`) — do NOT reference a
-    `script_path` file that doesn't exist. Custom `_signal_type` strings (e.g. COUNTERPARTY_CIRCULARITY)
-    are allowed inside the script as long as the 5 signal columns are produced.
+    If upload_script is disabled by the Active Guardrails, NEVER use it. If it is enabled and
+    a custom signal is truly required, supply inline `script_content`; do NOT reference a
+    `script_path` file that may not exist on the host.
 
 ## Output Format
 Always return a complete JSON object. No prose, no markdown fences, only JSON:

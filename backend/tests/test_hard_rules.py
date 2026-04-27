@@ -211,4 +211,5 @@ def test_signal_script_disabled_by_default() -> None:
         },
     }])
     result = validate_dag(dag)
-    assert any(i.code == ValidationErrorCode.UPLOAD_SCRIPT_DISABLED for i in result.errors)
+    disabled = [i for i in result.errors if i.code == ValidationErrorCode.UPLOAD_SCRIPT_DISABLED]
+    assert len(disabled) == 1

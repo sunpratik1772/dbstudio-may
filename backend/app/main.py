@@ -19,6 +19,14 @@ copilot singleton) lives here. Nothing domain-specific.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# Load backend/.env before any code reads os.environ (Gemini, output dir, etc.).
+# Uvicorn does not load dotenv by default; IDE/cursor runs often skip start.sh.
+_backend_dir = Path(__file__).resolve().parent.parent
+load_dotenv(_backend_dir / ".env", override=False)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware

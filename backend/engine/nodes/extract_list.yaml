@@ -1,0 +1,54 @@
+type_id: EXTRACT_LIST
+description: "Emit the unique values of a column as an ordered list — cascade primitive for fan-out keys."
+
+ui:
+  color: "#8B5CF6"
+  icon: ListFilter
+  palette:
+    section:
+      id: transform
+      label: Transform
+      order: 20
+      color: "#A78BFA"
+    node_order: 24
+
+input_ports:
+  - name: dataset
+    type: dataframe
+    description: "Source DataFrame (by input_name)."
+
+output_ports:
+  - name: values
+    type: object
+    description: "{values: [...]} — published under ctx.values[output_name]."
+
+params:
+  - name: input_name
+    type: input_ref
+    description: "Dataset name in ctx.datasets."
+    required: true
+  - name: column
+    type: string
+    description: "Column to enumerate."
+    required: true
+  - name: output_name
+    type: string
+    description: "ctx.values key to publish {values: [...]} under."
+    required: true
+  - name: order
+    type: enum
+    description: "sort: ascending, desc: descending, first_seen: original order."
+    enum: [sort, desc, first_seen]
+    default: first_seen
+    required: false
+  - name: dropna
+    type: boolean
+    description: "Exclude NaN values."
+    default: true
+    required: false
+
+semantics:
+  requires: []
+
+constraints:
+  - "Typical use: EXTRACT_LIST(executions, 'book') → fan-out keys for GROUP_BY_BOOK or MAP."

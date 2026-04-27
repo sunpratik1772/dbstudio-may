@@ -10,7 +10,8 @@ This is the heart of the engine. The contract it implements is small:
      each declared output_port (see `_resolve_output_value`). A
      handler that lies about its outputs fails fast — preferable to a
      mysterious KeyError ten nodes downstream.
-  4. Stream events (node_started / node_finished / error) to anyone
+  4. Stream events (`workflow_start`, `node_start`, `node_complete`,
+     `node_error`, `workflow_complete`, `workflow_error`) to anyone
      subscribing through the SSE generator (`run_workflow_stream`).
      The non-streaming `run_workflow` is just the same loop without
      yielding events.
@@ -31,10 +32,13 @@ in via the registry — no edits needed here.
 """
 import json
 import logging
+import re
 import time
 import traceback
 from collections import defaultdict, deque
 from typing import Iterator
+
+from .node_spec import NodeSpec
 
 import pandas as pd
 
@@ -109,6 +113,90 @@ def _assert_port_type(port: PortSpec, value: object) -> str | None:
     return None
 
 
+def _resolve_object_port_value(
+    port: PortSpec, node: dict, ctx: RunContext
+) -> tuple[object, str] | None:
+    """Locate a stored OBJECT output using `port.store_at` (subset of patterns)."""
+    if port.type is not PortType.OBJECT or not port.store_at:
+        return None
+    cfg = node.get("config") or {}
+    sa = port.store_at
+    m = re.fullmatch(r"ctx\.sections\[\{(\w+)\}\]", sa)
+    if m:
+        key = cfg.get(m.group(1))
+        if key is None:
+            return None
+        return ctx.sections.get(key), f"ctx.sections[{key!r}]"
+    m = re.fullmatch(r"ctx\.values\[(\w+)\]", sa)
+    if m:
+        name = m.group(1)
+        return ctx.values.get(name), f"ctx.values[{name!r}]"
+    return None
+
+
+def _output_dataframe_required_columns(
+    port: PortSpec, spec: NodeSpec, node: dict
+) -> tuple[str, ...]:
+    """
+    Declared columns for a dataframe output port — either static
+    `port.required_columns` or `contract.output_columns_by_source` when
+    the node opts into source-keyed schemas (see EXECUTION_DATA_COLLECTOR).
+    """
+    contract = spec.contract or {}
+    schema_port = contract.get("source_keyed_schema_port")
+    if schema_port and port.name == schema_port:
+        by_source = contract.get("output_columns_by_source") or {}
+        param = contract.get("source_param_for_schema", "source")
+        default = contract.get("source_schema_default")
+        cfg = node.get("config") or {}
+        source = cfg.get(param, default)
+        if source is None:
+            source = ""
+        cols = by_source.get(str(source), ())
+        return tuple(str(c) for c in cols)
+    return port.required_columns
+
+
+def check_input_port_schema(node: dict, ctx: RunContext) -> list[str]:
+    """
+    Before/after wiring checks: for each input DATAFRAME port that declares
+    `required_columns`, ensure the referenced dataset (via
+    `source_config_key` or default ``input_name``) exists in ctx and
+    contains those columns.
+
+    If the dataset is absent, returns no issues — some nodes pull inputs
+    from alternate paths (e.g. scalar fallbacks).
+    """
+    node_type = node.get("type")
+    spec = NODE_SPECS.get(node_type)
+    if spec is None:
+        return []
+    cfg = node.get("config") or {}
+    issues: list[str] = []
+    for port in spec.input_ports:
+        if port.type is not PortType.DATAFRAME or not port.required_columns:
+            continue
+        key_field = port.source_config_key or "input_name"
+        ds_name = cfg.get(key_field)
+        if not ds_name:
+            continue
+        df = ctx.datasets.get(ds_name)
+        if df is None:
+            continue
+        if not isinstance(df, pd.DataFrame):
+            issues.append(
+                f"input port '{port.name}': expected DataFrame at ctx.datasets[{ds_name!r}], "
+                f"got {type(df).__name__}"
+            )
+            continue
+        for col in port.required_columns:
+            if col not in df.columns:
+                issues.append(
+                    f"input port '{port.name}' dataset {ds_name!r}: missing column {col!r}"
+                )
+    return issues
+
+
 def check_output_contract(node: dict, ctx: RunContext) -> list[str]:
     """
     After a handler runs, verify the node produced each declared
@@ -121,12 +209,8 @@ def check_output_contract(node: dict, ctx: RunContext) -> list[str]:
     same slot, or forget to write a value altogether. Without this,
     downstream nodes fail later with cryptic KeyErrors.
 
-    Scope: we enforce only DATAFRAME / SCALAR / TEXT ports today. OBJECT
-    ports in our registry are used as conceptual buckets (e.g. "datasets"
-    = all datasets, "context_keys" = whatever the node bound) rather
-    than a single keyed value, so runtime resolution would be noisy
-    without genuine safety. When a node wants a strict OBJECT check it
-    can set the port's name to the literal ctx.values key it writes.
+    OBJECT ports are skipped unless they declare `required_keys` and a
+    `store_at` path we can resolve (strict sections / values objects).
     """
     node_type = node.get("type")
     spec = NODE_SPECS.get(node_type)
@@ -135,7 +219,28 @@ def check_output_contract(node: dict, ctx: RunContext) -> list[str]:
     issues: list[str] = []
     for port in spec.output_ports:
         if port.type is PortType.OBJECT:
-            continue  # conceptual bucket — see docstring
+            if not port.required_keys:
+                continue
+            resolved = _resolve_object_port_value(port, node, ctx)
+            if resolved is None:
+                if not port.optional:
+                    issues.append(
+                        f"output port '{port.name}' ({port.type.value}) not produced"
+                    )
+                continue
+            value, location = resolved
+            err = _assert_port_type(port, value)
+            if err:
+                issues.append(f"output port '{port.name}' at {location}: {err}")
+                continue
+            if not isinstance(value, dict):
+                continue
+            for rk in port.required_keys:
+                if rk not in value:
+                    issues.append(
+                        f"output port '{port.name}' at {location}: missing key {rk!r}"
+                    )
+            continue
         resolved = _resolve_output_value(port, node, ctx)
         if resolved is None:
             if not port.optional:
@@ -147,6 +252,17 @@ def check_output_contract(node: dict, ctx: RunContext) -> list[str]:
         err = _assert_port_type(port, value)
         if err:
             issues.append(f"output port '{port.name}' at {location}: {err}")
+            continue
+        if (
+            port.type is PortType.DATAFRAME
+            and port.required_columns
+            and isinstance(value, pd.DataFrame)
+        ):
+            for col in port.required_columns:
+                if col not in value.columns:
+                    issues.append(
+                        f"output port '{port.name}' at {location}: missing column {col!r}"
+                    )
     return issues
 
 
@@ -206,6 +322,12 @@ def execute_nodes(nodes: list[dict], edges: list[dict], ctx: RunContext) -> None
             raise ValueError(f"Unknown node type '{node_type}' on node '{node_id}'")
         label = node.get("label", node_type)
         logger.info("  → [%s] %s", node_id, label)
+        input_issues = check_input_port_schema(node, ctx)
+        if input_issues:
+            raise ValueError(
+                f"Node '{node_id}' ({node_type}) violated its input contract: "
+                + "; ".join(input_issues)
+            )
         handler(node, ctx)
         contract_issues = check_output_contract(node, ctx)
         if contract_issues:
@@ -412,6 +534,11 @@ def run_workflow_stream(
 
         node_t0 = time.perf_counter()
         try:
+            input_issues = check_input_port_schema(node, ctx)
+            if input_issues:
+                raise ValueError(
+                    "input contract violated: " + "; ".join(input_issues)
+                )
             handler(node, ctx)
             contract_issues = check_output_contract(node, ctx)
             if contract_issues:

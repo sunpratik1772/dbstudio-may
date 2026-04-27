@@ -1,3 +1,11 @@
+/**
+ * Narrow icon rail that controls the right-side work area.
+ *
+ * Each button toggles `workflowStore.rightPanelMode`; clicking the active
+ * mode collapses the panel back to rail-only. The visible panel body lives
+ * in `RightPanel/index.tsx`, and the shared width is still named
+ * `copilotWidth` for historical reasons even though Config/Run/Output use it.
+ */
 import { Settings2, Bot, Activity, FileOutput } from 'lucide-react'
 import { useWorkflowStore } from '../store/workflowStore'
 

@@ -306,11 +306,14 @@ class AgentRunner:
             ),
         ), state
         yield AgentEvent(
-            AgentPhase.COMPLETE, "Workflow ready" if state.workflow else "Workflow failed",
-            status="done" if state.workflow else "error",
+            AgentPhase.COMPLETE, "Workflow ready" if state.is_valid else "Workflow failed",
+            status="done" if state.is_valid else "error",
             detail=state.workflow.get("name", "") if state.workflow else "",
             data={
-                "workflow": state.workflow,
+                # Guardrail guarantee: never hand the UI a workflow that the
+                # deterministic validator rejected. The failed draft stays in
+                # validation/raw diagnostics, but it must not be loaded or saved.
+                "workflow": state.workflow if state.is_valid else None,
                 "validation": state.validation,
             },
         ), state

@@ -4,6 +4,13 @@ description: "LLM executive summary across all sections"
 ui:
   color: "#B45309"
   icon: FileStack
+  palette:
+    section:
+      id: narrative
+      label: Narrative
+      order: 50
+      color: "#F472B6"
+    node_order: 51
 
 input_ports:
   - name: sections

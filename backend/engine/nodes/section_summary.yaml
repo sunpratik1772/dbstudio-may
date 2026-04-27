@@ -4,6 +4,13 @@ description: "Aggregate stats + LLM narrative section"
 ui:
   color: "#DB2777"
   icon: NotebookText
+  palette:
+    section:
+      id: narrative
+      label: Narrative
+      order: 50
+      color: "#F472B6"
+    node_order: 50
 
 input_ports:
   - name: dataset

@@ -1,17 +1,12 @@
 /**
- * Left-side node palette — the draggable catalogue of node types.
+ * Left-side node palette — draggable catalogue built from backend NodeSpec.
  *
- * Source of truth is the generated NODE_UI registry (auto-built from
- * each backend handler's YAML). Add a new node type on the backend,
- * regenerate, and it appears here grouped by category with the right
- * colour and icon. No edits to this file.
- *
- * Drag-and-drop hands off to WorkflowCanvas via the PALETTE_DND_MIME
- * payload — the canvas creates the node at the drop coordinates.
+ * Section headers, grouping, and node metadata come from the live backend
+ * `/node-manifest` payload, with generated.ts only as the offline fallback.
  */
 import { useMemo, useRef, useState, type DragEvent } from 'react'
-import { Search } from 'lucide-react'
-import { NODE_UI, NODE_TYPES, getNodeDisplayName, type NodeType } from '../../nodes'
+import { Check, RefreshCw, Search } from 'lucide-react'
+import { getNodeDisplayName, UNKNOWN_NODE_UI, useNodeRegistryStore, type NodeType } from '../../nodes'
 import { useWorkflowStore } from '../../store/workflowStore'
 import { PALETTE_DND_MIME } from '../WorkflowCanvas'
 import ResizeHandle from '../ResizeHandle'
@@ -23,30 +18,56 @@ type Category = {
   types: NodeType[]
 }
 
-const CATEGORIES: Category[] = [
-  { key: 'trigger',   label: 'TRIGGER',   color: '#F5A623', types: ['ALERT_TRIGGER'] },
-  { key: 'collector', label: 'INTEGRATIONS', color: '#00E5FF', types: ['COMMS_COLLECTOR', 'TRADE_DATA_COLLECTOR', 'MARKET_DATA_COLLECTOR'] },
-  { key: 'transform', label: 'TRANSFORM', color: '#A78BFA', types: ['NORMALISE_ENRICH', 'DATA_HIGHLIGHTER'] },
-  { key: 'signal',    label: 'SIGNAL',    color: '#F472B6', types: ['SIGNAL_CALCULATOR'] },
-  { key: 'rule',      label: 'RULE',      color: '#FBBF24', types: ['DECISION_RULE'] },
-  { key: 'narrative', label: 'NARRATIVE', color: '#F472B6', types: ['SECTION_SUMMARY', 'CONSOLIDATED_SUMMARY'] },
-  { key: 'output',    label: 'OUTPUT',    color: '#10B981', types: ['REPORT_OUTPUT'] },
-]
-
 export default function NodePanel() {
   const paletteWidth = useWorkflowStore((s) => s.paletteWidth)
   const setPaletteWidth = useWorkflowStore((s) => s.setPaletteWidth)
   const rootRef = useRef<HTMLDivElement>(null)
   const [query, setQuery] = useState('')
+  const nodeTypes = useNodeRegistryStore((s) => s.nodeTypes)
+  const nodeUI = useNodeRegistryStore((s) => s.nodeUI)
+  const paletteSections = useNodeRegistryStore((s) => s.paletteSections)
+  const manifestError = useNodeRegistryStore((s) => s.error)
+  const refreshNodeRegistry = useNodeRegistryStore((s) => s.refreshFromBackend)
+  const registryLoading = useNodeRegistryStore((s) => s.loading)
+  const lastLoadedAt = useNodeRegistryStore((s) => s.lastLoadedAt)
+  const [syncFlash, setSyncFlash] = useState(false)
+
+  async function handleRefreshNodes() {
+    try {
+      await refreshNodeRegistry()
+      setSyncFlash(true)
+      window.setTimeout(() => setSyncFlash(false), 1400)
+    } catch {
+      // The store keeps the previous manifest and exposes `manifestError`.
+    }
+  }
+
+  const categories = useMemo((): Category[] => {
+    return paletteSections.map((sec) => ({
+      key: sec.id,
+      label: sec.label,
+      color: sec.color,
+      types: [...nodeTypes]
+        .filter((t) => nodeUI[t]?.paletteGroup === sec.id)
+        .sort((a, b) => (nodeUI[a]?.paletteOrder ?? 0) - (nodeUI[b]?.paletteOrder ?? 0)),
+    })).filter((c) => c.types.length > 0)
+  }, [nodeTypes, nodeUI, paletteSections])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
-    if (!q) return CATEGORIES
-    return CATEGORIES.map((c) => ({
-      ...c,
-      types: c.types.filter((t) => t.toLowerCase().includes(q) || NODE_UI[t].description.toLowerCase().includes(q)),
-    })).filter((c) => c.types.length > 0)
-  }, [query])
+    if (!q) return categories
+    return categories
+      .map((c) => ({
+        ...c,
+        types: c.types.filter(
+          (t) =>
+            t.toLowerCase().includes(q) ||
+            getNodeDisplayName(t).toLowerCase().includes(q) ||
+            (nodeUI[t]?.description ?? '').toLowerCase().includes(q)
+        ),
+      }))
+      .filter((c) => c.types.length > 0)
+  }, [categories, nodeUI, query])
 
   return (
     <div
@@ -56,14 +77,56 @@ export default function NodePanel() {
     >
       {/* Header */}
       <div className="px-4 pt-4 pb-3 shrink-0">
-        <div className="flex items-baseline gap-2">
-          <span className="font-mono" style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-1)', textTransform: 'uppercase', letterSpacing: '0.18em' }}>
-            NODES
-          </span>
-          <span className="font-mono" style={{ fontSize: 11, color: 'var(--text-3)' }}>
-            {NODE_TYPES.length}
-          </span>
+        <div className="flex items-center gap-2">
+          <div className="flex items-baseline gap-2 min-w-0">
+            <span className="font-mono" style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-1)', textTransform: 'uppercase', letterSpacing: '0.18em' }}>
+              NODES
+            </span>
+            <span className="font-mono" style={{ fontSize: 11, color: 'var(--text-3)' }}>
+              {nodeTypes.length}
+            </span>
+          </div>
+          <div className="flex-1" />
+          <button
+            onClick={() => { void handleRefreshNodes() }}
+            disabled={registryLoading}
+            title={manifestError ? 'Refresh node catalog failed; retry' : lastLoadedAt ? 'Node catalog synced. Refresh from backend.' : 'Refresh node catalog from backend'}
+            aria-label="Refresh node catalog"
+            className="flex items-center justify-center"
+            style={{
+              width: 24,
+              height: 24,
+              borderRadius: 7,
+              background: syncFlash
+                ? 'color-mix(in srgb, var(--success) 14%, transparent)'
+                : 'transparent',
+              color: manifestError
+                ? 'var(--danger)'
+                : syncFlash
+                  ? 'var(--success)'
+                  : 'var(--text-2)',
+              border: `1px solid ${syncFlash
+                ? 'color-mix(in srgb, var(--success) 45%, var(--border))'
+                : manifestError
+                  ? 'color-mix(in srgb, var(--danger) 45%, var(--border))'
+                  : 'var(--border-soft)'}`,
+              cursor: registryLoading ? 'wait' : 'pointer',
+              transition: 'background 180ms, color 180ms, border-color 180ms, transform 180ms',
+              transform: syncFlash ? 'scale(1.04)' : 'scale(1)',
+            }}
+          >
+            {syncFlash ? (
+              <Check size={13} strokeWidth={2.6} />
+            ) : (
+              <RefreshCw size={13} strokeWidth={2.2} className={registryLoading ? 'animate-spin' : undefined} />
+            )}
+          </button>
         </div>
+        {manifestError && (
+          <div className="mt-2" style={{ fontSize: 10.5, color: 'var(--danger)' }}>
+            Live manifest failed; using generated fallback.
+          </div>
+        )}
       </div>
 
       {/* Search */}
@@ -89,7 +152,7 @@ export default function NodePanel() {
         </div>
       </div>
 
-      {/* Categories */}
+      {/* Categories — labels/colors deduped from NodeSpec ui.palette */}
       <div className="flex-1 overflow-y-auto px-3 pb-3">
         {filtered.map((cat) => (
           <div key={cat.key} className="mb-4">
@@ -117,7 +180,7 @@ export default function NodePanel() {
       <div className="px-4 py-3 shrink-0" style={{ borderTop: '1px solid var(--border)' }}>
         <div className="font-mono" style={{ fontSize: 10, color: 'var(--text-3)', lineHeight: 1.5 }}>
           drag or double-click to add ·<br />
-          powered by spec-driven registry
+          palette from backend NodeSpec
         </div>
       </div>
 
@@ -134,10 +197,10 @@ export default function NodePanel() {
 }
 
 function NodeCard({ type, accent }: { type: NodeType; accent: string }) {
-  const meta = NODE_UI[type]
+  const meta = useNodeRegistryStore((s) => s.nodeUI[type] ?? UNKNOWN_NODE_UI)
   const Icon = meta.Icon
   const addNode = useWorkflowStore((s) => s.addNode)
-  const titleCase = getNodeDisplayName(type)
+  const title = getNodeDisplayName(type)
 
   return (
     <div
@@ -169,7 +232,7 @@ function NodeCard({ type, accent }: { type: NodeType; accent: string }) {
       </span>
       <div className="flex-1 min-w-0">
         <div style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--text-0)', lineHeight: 1.25 }}>
-          {titleCase}
+          {title}
         </div>
         <div className="font-mono truncate" style={{ fontSize: 10, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginTop: 2 }}>
           {type}

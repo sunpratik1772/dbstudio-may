@@ -1,12 +1,28 @@
+/**
+ * Right-panel inspector for the selected node (`rightPanelMode === 'config'`).
+ *
+ * It renders wiring, editable config fields, and node documentation from the
+ * live NodeSpec registry. `classifyField` is the legacy fallback for
+ * `contract.configSchema`; typed params from `/node-manifest` should be the
+ * preferred path as the backend specs mature.
+ */
 import { useMemo, useState } from 'react'
 import { Settings2, ChevronDown, ChevronRight, ArrowRight, ArrowLeftRight, Sliders, Eye } from 'lucide-react'
 import { useWorkflowStore } from '../../store/workflowStore'
-import { NODE_UI, getNodeContract, type NodeType } from '../../nodes'
+import { useNodeRegistryStore, UNKNOWN_NODE_UI, type NodeType, type NodeContract } from '../../nodes'
+
+const EMPTY_CONFIG_CONTRACT: NodeContract = {
+  description: '',
+  inputs: {},
+  outputs: {},
+  configSchema: {},
+  constraints: [],
+}
 import type { WorkflowNode, WorkflowEdge } from '../../types'
 import Shell, { Empty, SectionHeader } from './Shell'
 
 /* -------------------------------------------------------------------------- */
-/* Field inference — same heuristics as ConfigInspector, simplified.          */
+/* Field inference — legacy fallback for older string-only contracts.         */
 /* -------------------------------------------------------------------------- */
 type FieldKind = 'input-ref' | 'output-name' | 'boolean' | 'number' | 'string' | 'stringEnum' | 'stringArray' | 'json'
 
@@ -292,6 +308,13 @@ export default function ConfigView() {
     [workflow, selectedId],
   )
 
+  const meta = useNodeRegistryStore((s) =>
+    node ? (s.nodeUI[node.type as NodeType] ?? UNKNOWN_NODE_UI) : UNKNOWN_NODE_UI,
+  )
+  const contract = useNodeRegistryStore((s) =>
+    node ? (s.nodeContracts[node.type as NodeType] ?? EMPTY_CONFIG_CONTRACT) : EMPTY_CONFIG_CONTRACT,
+  )
+
   if (!node) {
     return (
       <Shell icon={Settings2} title="Inspector" eyebrow="CONFIG" accent="var(--text-1)">
@@ -303,9 +326,6 @@ export default function ConfigView() {
       </Shell>
     )
   }
-
-  const meta = NODE_UI[node.type as NodeType]
-  const contract = getNodeContract(node.type)
   const upstream = workflow ? computeUpstream(node, workflow.nodes, workflow.edges) : []
   const fields = Object.entries(contract.configSchema).map(([k, v]) => classifyField(k, v))
   const cfg = (node.config ?? {}) as Record<string, unknown>

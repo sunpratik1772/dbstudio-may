@@ -83,8 +83,12 @@
       "config": {
         "input_name": "executions",
         "output_name": "executions_enriched",
-        "operations": [
-          {"op": "derive_signed_notional"}
+        "ops": [
+          {
+            "op": "apply_expr",
+            "out_col": "signed_notional",
+            "expr": "notional_usd * (-1 if side == 'SELL' else 1)"
+          }
         ]
       }
     },

@@ -139,8 +139,8 @@ def _base_dag_with_map(sub_workflow: dict) -> dict:
         "workflow_id": "w",
         "nodes": [
             {"id": "n01", "type": "ALERT_TRIGGER", "label": "start", "config": {}},
-            {"id": "n02", "type": "ORDER_COLLECTOR", "label": "orders", "config": {
-                "query_template": "*:*", "output_name": "orders",
+            {"id": "n02", "type": "EXECUTION_DATA_COLLECTOR", "label": "orders", "config": {
+                "source": "hs_client_order", "query_template": "*:*", "output_name": "orders",
             }},
             {"id": "n03", "type": "GROUP_BY", "label": "group", "config": {
                 "input_name": "orders", "group_by_column": "book",

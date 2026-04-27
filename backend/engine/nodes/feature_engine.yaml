@@ -4,6 +4,13 @@ description: "Compose feature transforms (window, slice, pivot, agg, rolling, de
 ui:
   color: "#0EA5E9"
   icon: SlidersHorizontal
+  palette:
+    section:
+      id: transform
+      label: Transform
+      order: 20
+      color: "#A78BFA"
+    node_order: 20
 
 input_ports:
   - name: dataset

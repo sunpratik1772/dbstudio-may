@@ -2,46 +2,32 @@
  * Frontend node registry — the only place outside of `generated.ts` that
  * the app imports when it needs node metadata.
  *
- * If you're wondering where the icons/colors/types come from:
- *   backend/engine/registry.py  ── (run gen_artifacts.py) ──▶  generated.ts
+ * Runtime source of truth:
+ *   backend/engine/registry.py  ── GET /node-manifest ──▶ nodeRegistryStore
+ *
+ * `generated.ts` is only the cold-start fallback before the backend refresh
+ * returns, or when the backend is unavailable.
  */
-import { HelpCircle } from 'lucide-react'
 import {
   NODE_UI,
   NODE_TYPES,
   NODE_CONTRACTS,
-  NODE_TYPED,
-  type NodeType,
+  PALETTE_SECTIONS,
   type NodeUIMeta,
   type NodeContract,
+  type PaletteSection,
   type NodeTypedSpec,
-  type NodeParamSpec,
-  type NodePortSpec,
 } from './generated'
+import { UNKNOWN_NODE_UI, useNodeRegistryStore } from '../store/nodeRegistryStore'
 
-export { NODE_UI, NODE_TYPES, NODE_CONTRACTS, NODE_TYPED }
-export type { NodeType, NodeUIMeta, NodeContract, NodeTypedSpec, NodeParamSpec, NodePortSpec }
-
-/** Structured ports + params from backend YAML (``gen_artifacts``). Returns null for unknown types. */
-export function getNodeTypedSpec(type: string): NodeTypedSpec | null {
-  return (NODE_TYPED as Record<string, NodeTypedSpec>)[type] ?? null
-}
+export { NODE_UI, NODE_TYPES, NODE_CONTRACTS, PALETTE_SECTIONS }
+export { UNKNOWN_NODE_UI, useNodeRegistryStore }
+export type NodeType = string
+export type { NodeUIMeta, NodeContract, PaletteSection, NodeTypedSpec }
 
 /** Legacy alias — existing components still import `NodeMeta` and `NODE_META`. */
 export type NodeMeta = NodeUIMeta
-export const NODE_META: Record<NodeType, NodeUIMeta> = NODE_UI
-
-/**
- * Display-name overrides for nodes whose internal type ID doesn't read
- * the way we want it to in the UI. Type IDs (e.g. `COMMS_COLLECTOR`)
- * are baked into workflow JSON, the backend registry, and contracts —
- * we keep those stable and rename only what the user sees.
- */
-const NODE_DISPLAY_OVERRIDE: Partial<Record<NodeType, string>> = {
-  COMMS_COLLECTOR: 'Oculus',
-  TRADE_DATA_COLLECTOR: 'Trade (Solr)',
-  MARKET_DATA_COLLECTOR: 'Mercury',
-}
+export const NODE_META: Record<string, NodeUIMeta> = NODE_UI
 
 function _titleCaseFromType(type: string): string {
   return type
@@ -51,19 +37,16 @@ function _titleCaseFromType(type: string): string {
     .join(' ')
 }
 
-/** Human-facing label for a node type. Honours display overrides. */
+/** Human-facing label — `ui.display_name` from NodeSpec when set, else title-cased type_id. */
 export function getNodeDisplayName(type: string): string {
-  return NODE_DISPLAY_OVERRIDE[type as NodeType] ?? _titleCaseFromType(type)
+  const meta = useNodeRegistryStore.getState().nodeUI[type]
+  if (meta?.displayName) return meta.displayName
+  return _titleCaseFromType(type)
 }
 
 /** Safe lookup that never throws — returns a neutral placeholder instead. */
 export function getNodeMeta(type: string): NodeUIMeta {
-  return (NODE_UI as Record<string, NodeUIMeta>)[type] ?? {
-    color: '#6B7280',
-    Icon: HelpCircle,
-    description: '',
-    configTags: [],
-  }
+  return useNodeRegistryStore.getState().nodeUI[type] ?? UNKNOWN_NODE_UI
 }
 
 const EMPTY_CONTRACT: NodeContract = {
@@ -74,12 +57,7 @@ const EMPTY_CONTRACT: NodeContract = {
   constraints: [],
 }
 
-/** Full generated contract (copilot / tools). Prefer NODE_TYPED + NODE_UI in the app shell. */
+/** Safe contract lookup — returns an empty contract for unknown node types. */
 export function getNodeContract(type: string): NodeContract {
-  return (NODE_CONTRACTS as Record<string, NodeContract>)[type] ?? EMPTY_CONTRACT
-}
-
-/** Constraint bullets from the backend contract — the only part of `NodeContract` the canvas needs. */
-export function getNodeConstraints(type: string): readonly string[] {
-  return getNodeContract(type).constraints
+  return useNodeRegistryStore.getState().nodeContracts[type] ?? EMPTY_CONTRACT
 }

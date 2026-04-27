@@ -4,6 +4,13 @@ description: "Entry point — binds alert payload to context"
 ui:
   color: "#7C3AED"
   icon: Siren
+  palette:
+    section:
+      id: trigger
+      label: Trigger
+      order: 0
+      color: "#F5A623"
+    node_order: 0
 
 input_ports:
   - name: alert_payload

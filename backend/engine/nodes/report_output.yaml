@@ -5,6 +5,13 @@ ui:
   color: "#047857"
   icon: FileSpreadsheet
   config_tags: [output_name]
+  palette:
+    section:
+      id: output
+      label: Output
+      order: 60
+      color: "#10B981"
+    node_order: 60
 
 input_ports:
   - name: datasets

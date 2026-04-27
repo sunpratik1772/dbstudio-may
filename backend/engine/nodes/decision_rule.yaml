@@ -4,6 +4,13 @@ description: "Evaluate flag_count or rules → ESCALATE/REVIEW/DISMISS + severit
 ui:
   color: "#D97706"
   icon: Gavel
+  palette:
+    section:
+      id: rule
+      label: Rule
+      order: 40
+      color: "#FBBF24"
+    node_order: 40
 
 input_ports:
   - name: dataset

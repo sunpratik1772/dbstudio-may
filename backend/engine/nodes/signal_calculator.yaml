@@ -5,6 +5,13 @@ ui:
   color: "#DC2626"
   icon: Signal
   config_tags: [signal_type, output_name]
+  palette:
+    section:
+      id: signal
+      label: Signal
+      order: 30
+      color: "#F472B6"
+    node_order: 30
 
 input_ports:
   - name: dataset
@@ -18,6 +25,12 @@ output_ports:
       Input DataFrame + exactly 5 signal columns: _signal_flag (bool),
       _signal_score (float in [0, 1] — same scale as DECISION_RULE.score),
       _signal_reason (str), _signal_type (str), _signal_window (str).
+    required_columns:
+      - _signal_flag
+      - _signal_score
+      - _signal_reason
+      - _signal_type
+      - _signal_window
   - name: flag_count
     type: scalar
     description: "Number of rows where _signal_flag == True. Stored as {output_name}_flag_count."
@@ -66,6 +79,12 @@ constraints:
   - "Custom scripts must operate on local variable 'df' and leave result in 'df'."
 
 extras:
+  signal_output_columns:
+    - _signal_flag
+    - _signal_score
+    - _signal_reason
+    - _signal_type
+    - _signal_window
   built_in_signal_params:
     FRONT_RUNNING:
       window_minutes: 5

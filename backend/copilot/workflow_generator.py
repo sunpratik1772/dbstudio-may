@@ -55,32 +55,41 @@ class WorkflowCopilot:
             validator=ValidatorAdapter(),
             auto_fixer=AutoFixer(),
         )
-        self._history: list[dict] = []
+        # Chat history is user/session state, not a process-global property.
+        # The HTTP layer may cache this WorkflowCopilot for expensive planner
+        # setup, so histories are keyed by explicit session_id. Calls without a
+        # session_id are intentionally stateless to avoid cross-user leakage.
+        self._histories: dict[str, list[dict]] = {}
 
     # ── multi-turn chat (separate concern from workflow generation) ───────────
-    def chat(self, user_message: str) -> str:
+    def chat(self, user_message: str, *, session_id: str | None = None) -> str:
         """Free-form chat used by the /copilot/chat endpoint.
 
-        This deliberately keeps separate conversation state from the
-        workflow generation harness — chat history and workflow
-        repair loops have totally different retention needs — but
-        both share the Gemini adapter so vendor config is unified.
+        Conversation state is only retained when the caller supplies a
+        `session_id`. Anonymous calls are single-turn by design: this backend
+        process is shared, and retaining a default/global history would leak
+        one user's chat context into another user's response.
         """
+        history = self._histories.setdefault(session_id, []) if session_id else []
         reply = self._llm.chat_turn(
             system_prompt=self._prompt_builder.system_prompt(),
-            history=self._history,
+            history=history,
             user_turn=user_message,
             # Chat is free-form prose, not JSON. Small temperature
             # lift keeps responses from feeling robotic.
             temperature=0.3,
             json_mode=False,
         )
-        self._history.append({"role": "user", "content": user_message})
-        self._history.append({"role": "assistant", "content": reply})
+        if session_id:
+            history.append({"role": "user", "content": user_message})
+            history.append({"role": "assistant", "content": reply})
         return reply
 
-    def reset(self) -> None:
-        self._history.clear()
+    def reset(self, *, session_id: str | None = None) -> None:
+        if session_id:
+            self._histories.pop(session_id, None)
+        else:
+            self._histories.clear()
 
     # ── workflow generation — delegates to AgentRunner ────────────────────────
     def generate_with_critic(
@@ -106,11 +115,14 @@ class WorkflowCopilot:
             selected_node_id=selected_node_id,
         )
 
-        if state.workflow is None:
+        if state.workflow is None or not state.is_valid:
             return {
                 "success": False,
                 "error": (state.validation or {}).get("summary", "No valid JSON produced"),
                 "raw": state.raw_text,
+                # The legacy response shape has a `history` slot, but the
+                # harness keeps repair-loop prompts private. Multi-turn
+                # conversational state lives in `chat()`.
                 "history": [],
                 "attempts": state.attempts,
                 "validation": state.validation,
@@ -135,6 +147,10 @@ class WorkflowCopilot:
     ) -> Iterator[dict]:
         """Stream AgentEvents to the legacy dict shape the frontend already
         consumes. See `generate_with_critic` for the edit-mode contract.
+
+        `AgentEvent.to_json()` is the wire shape consumed by
+        `/copilot/generate/stream`; keep frontend phase/status handling in
+        sync with `agent/harness/state.py`.
         """
         for event in self._runner.stream(
             user_request,

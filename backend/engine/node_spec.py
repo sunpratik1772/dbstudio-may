@@ -24,7 +24,7 @@ modules. Nothing else in this module reaches into either direction.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable
 
@@ -219,7 +219,7 @@ def _spec_from_yaml(yaml_path: Path | str, handler: Handler) -> NodeSpec:
             f"Node YAML {yaml_path!s} must set 'type_id' (or alias 'id')"
         )
 
-    return _spec(
+    spec = _spec(
         type_id,
         handler,
         data["description"],
@@ -233,6 +233,46 @@ def _spec_from_yaml(yaml_path: Path | str, handler: Handler) -> NodeSpec:
         extras=data.get("extras"),
         semantics_requires=tuple(sem.get("requires") or []),
     )
+    palette_meta = _palette_meta_from_ui(ui, type_id=str(type_id))
+    if palette_meta:
+        spec = replace(spec, ui={**spec.ui, **palette_meta})
+    return spec
+
+
+def _palette_meta_from_ui(ui: dict, *, type_id: str) -> dict[str, str | int]:
+    """Studio palette: all metadata under ui.palette (NodeSpec-only).
+
+    ui.palette.section — {id, label, color, order} shared by every node in
+    that rail section (must match across nodes; gen_artifacts validates).
+
+    ui.palette.node_order — sort within the section.
+
+    ui.display_name — optional short card title.
+    """
+    out: dict[str, str | int] = {}
+    pal = ui.get("palette")
+    if isinstance(pal, dict):
+        sec = pal.get("section") or {}
+        sid = sec.get("id")
+        if not sid:
+            raise ValueError(
+                f"Node {type_id}: ui.palette.section.id is required when ui.palette is set"
+            )
+        out["palette_group"] = str(sid)
+        out["palette_section_label"] = str(sec.get("label", sid))
+        out["palette_section_color"] = str(sec.get("color", "#6B7280"))
+        out["palette_section_order"] = int(sec.get("order", 0))
+        if pal.get("node_order") is None:
+            raise ValueError(f"Node {type_id}: ui.palette.node_order is required")
+        out["palette_order"] = int(pal["node_order"])
+    else:
+        raise ValueError(
+            f"Node {type_id}: ui.palette is required "
+            f"(section: id/label/color/order, node_order)"
+        )
+    if ui.get("display_name"):
+        out["display_name"] = str(ui["display_name"])
+    return out
 
 
 __all__ = ["NodeSpec", "Handler", "_spec", "_spec_from_yaml"]

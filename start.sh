@@ -8,7 +8,10 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "  dbSherpa — Trade Surveillance Engine"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-# Check Python
+BACKEND_ROOT="$SCRIPT_DIR/backend"
+VENV_PY="$BACKEND_ROOT/.venv/bin/python"
+
+# Check Python (for creating venv if missing)
 if ! command -v python3 &>/dev/null; then
   echo "❌ python3 not found. Install Python 3.11+ from https://python.org"
   exit 1
@@ -23,33 +26,37 @@ fi
 # Backend setup
 echo ""
 echo "📦 Setting up backend..."
-cd "$SCRIPT_DIR/backend"
+cd "$BACKEND_ROOT"
 if [ ! -d ".venv" ]; then
   python3 -m venv .venv
 fi
-source .venv/bin/activate
-pip install -q -r requirements.txt
-echo "✅ Backend dependencies installed"
+# Always use the venv interpreter (reliable even if activate is skipped in odd shells).
+"$VENV_PY" -m pip install -q -r requirements.txt
+echo "✅ Backend dependencies installed ($VENV_PY)"
 
-# Load backend/.env if present (for GEMINI_API_KEY etc.)
-if [ -f "$SCRIPT_DIR/backend/.env" ]; then
-  set -a
-  # shellcheck disable=SC1091
-  source "$SCRIPT_DIR/backend/.env"
-  set +a
-fi
+# Intentionally do not auto-source backend/.env here. Keep env files local and
+# untracked; export required values in the shell that launches this script.
+# If you prefer local dotenv loading during development, uncomment this block.
+# if [ -f "$BACKEND_ROOT/.env" ]; then
+#   set -a
+#   # shellcheck disable=SC1091
+#   source "$BACKEND_ROOT/.env"
+#   set +a
+# fi
 
 if [ -z "${GEMINI_API_KEY:-}" ]; then
   echo "⚠️  GEMINI_API_KEY is not set — Copilot + LLM summaries will fail."
   echo "    Quick fix:"
+  echo "      export GEMINI_API_KEY=...      # in this shell before re-running"
+  echo "    Optional local-only dotenv:"
   echo "      cp backend/.env.example backend/.env"
-  echo "      \$EDITOR backend/.env          # paste your key"
-  echo "    …or export GEMINI_API_KEY=... in your shell before re-running."
+  echo "      \$EDITOR backend/.env          # uncomment + paste your key"
 fi
 
-# Start backend in background
+# Start backend in background (cwd must be backend/ so `api:app` resolves)
 echo "🚀 Starting backend on http://localhost:8000"
-GEMINI_API_KEY="${GEMINI_API_KEY:-}" python3 -m uvicorn api:app --host 0.0.0.0 --port 8000 --reload &
+cd "$BACKEND_ROOT"
+GEMINI_API_KEY="${GEMINI_API_KEY:-}" "$VENV_PY" -m uvicorn api:app --host 0.0.0.0 --port 8000 --reload &
 BACKEND_PID=$!
 
 # Frontend setup
@@ -73,7 +80,7 @@ echo "  Frontend: http://localhost:5173"
 echo "  Backend:  http://localhost:8000"
 echo "  API Docs: http://localhost:8000/docs"
 echo ""
-echo "  Set GEMINI_API_KEY — copy backend/.env.example to backend/.env and fill it in"
+echo "  Set GEMINI_API_KEY — export it before launch, or opt into local dotenv loading"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 echo "Press Ctrl+C to stop all services"

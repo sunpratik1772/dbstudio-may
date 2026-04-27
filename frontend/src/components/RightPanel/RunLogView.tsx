@@ -1,6 +1,14 @@
+/**
+ * Read-only timeline for the last streamed workflow run.
+ *
+ * This component does not talk to the backend directly. `Topbar.handleRun`
+ * opens `/run/stream`, `services/api.ts` parses SSE frames, and
+ * `workflowStore.applyRunEvent` turns those frames into `runLog` rows. Keeping
+ * that flow centralized makes Config, Canvas, Output, and Run Log agree.
+ */
 import { Activity, Check, X as XIcon } from 'lucide-react'
 import { useWorkflowStore } from '../../store/workflowStore'
-import { NODE_UI, type NodeType } from '../../nodes'
+import { useNodeRegistryStore, UNKNOWN_NODE_UI, type NodeType } from '../../nodes'
 import type { RunLogEntry } from '../../types'
 import Shell, { Empty } from './Shell'
 
@@ -84,8 +92,8 @@ function SummaryBar() {
 }
 
 function EntryRow({ entry, last }: { entry: RunLogEntry; last: boolean }) {
-  const meta = NODE_UI[entry.node_type as NodeType]
-  const IconComp = meta?.Icon
+  const meta = useNodeRegistryStore((s) => s.nodeUI[entry.node_type as NodeType] ?? UNKNOWN_NODE_UI)
+  const IconComp = meta.Icon
   const durColor =
     entry.status === 'running' ? 'var(--running)' :
     entry.status === 'error' ? 'var(--danger)' :

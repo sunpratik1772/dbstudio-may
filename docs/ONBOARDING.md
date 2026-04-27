@@ -44,11 +44,10 @@ curl -X POST http://localhost:8000/run \
 | Node.js   | 20+     | `node --version`                           |
 | Gemini key| any     | get a key from `https://ai.google.dev`     |
 
-Copy the env template and paste your key:
+Export your Gemini key in the shell that launches the app:
 
 ```bash
-cp backend/.env.example backend/.env
-# then edit backend/.env and paste: GEMINI_API_KEY=AIza...
+export GEMINI_API_KEY=...
 ```
 
 Start the stack once to confirm it runs:

@@ -118,6 +118,70 @@ def ui_manifest() -> dict:
     }
 
 
+def palette_sections_from_manifest_nodes(nodes: list[dict]) -> list[dict]:
+    """
+    Dedupe Studio palette rail sections from flattened per-node UI metadata
+    (``palette_group`` / ``palette_section_*``). Used by ``gen_artifacts`` and
+    :func:`studio_manifest`.
+    """
+    by_id: dict[str, dict[str, str | int]] = {}
+    for n in nodes:
+        sid = n.get("palette_group")
+        if not sid:
+            raise ValueError(
+                f"palette_sections: node {n.get('type_id')!r} missing palette_group "
+                f"(set ui.palette in NodeSpec YAML)"
+            )
+        sid = str(sid)
+        label = str(n.get("palette_section_label", sid))
+        color = str(n.get("palette_section_color", "#6B7280"))
+        order = int(n.get("palette_section_order", 0))
+        row = {"id": sid, "label": label, "order": order, "color": color}
+        prev = by_id.get(sid)
+        if prev is None:
+            by_id[sid] = row
+            continue
+        if prev != row:
+            raise ValueError(
+                f"palette_sections: section {sid!r} has conflicting metadata "
+                f"across nodes (e.g. {n.get('type_id')!r}); ui.palette.section "
+                f"must match for every node in a section"
+            )
+    return list(by_id.values())
+
+
+def studio_manifest() -> dict:
+    """
+    Single payload for the Studio UI: palette rails, per-node UI + typed
+    ports/params, and copilot-style contracts. Always matches the live
+    :data:`NODE_SPECS` registry (no checked-in artifact required).
+    """
+    um = ui_manifest()
+    raw_nodes = um["nodes"]
+    palette = palette_sections_from_manifest_nodes(raw_nodes)
+    nodes_out: list[dict] = []
+    for entry in raw_nodes:
+        tid = entry["type_id"]
+        c = NODE_SPECS[tid].contract
+        nodes_out.append(
+            {
+                **entry,
+                "contract": {
+                    "description": c.get("description", entry["description"]),
+                    "inputs": c.get("inputs") or {},
+                    "outputs": c.get("outputs") or {},
+                    "config_schema": c.get("config_schema") or {},
+                    "constraints": list(c.get("constraints") or []),
+                },
+            }
+        )
+    return {
+        "version": um["version"],
+        "palette_sections": sorted(palette, key=lambda x: int(x["order"])),
+        "nodes": nodes_out,
+    }
+
+
 # Re-export the primitives so node modules that want to stay within
 # the `engine.registry` namespace still can. The canonical import path
 # for new code is `engine.node_spec` / `engine.ports`.
@@ -136,5 +200,7 @@ __all__ = [
     "get_spec",
     "contracts_document",
     "ui_manifest",
+    "palette_sections_from_manifest_nodes",
+    "studio_manifest",
     "asdict",  # re-export for scripts that dump specs
 ]

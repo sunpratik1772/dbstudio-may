@@ -5,6 +5,13 @@ ui:
   color: "#7C3AED"
   icon: Database
   config_tags: [source, output_name]
+  palette:
+    section:
+      id: integrations
+      label: Integrations
+      order: 10
+      color: "#00E5FF"
+    node_order: 13
 
 input_ports:
   - name: context

@@ -10,7 +10,7 @@
  * store; the canvas + RunLogView subscribe and animate as events
  * arrive. The button itself only flips between idle / loading state.
  */
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   Sun, Moon, LayoutTemplate, Upload, Download, ShieldCheck, Save, Play, Loader2, Trash2,
 } from 'lucide-react'
@@ -41,9 +41,9 @@ export default function Topbar() {
   const setRunError = useWorkflowStore((s) => s.setRunError)
   const resetRun = useWorkflowStore((s) => s.resetRun)
   const applyRunEvent = useWorkflowStore((s) => s.applyRunEvent)
-  const setRightPanelTab = useWorkflowStore((s) => s.setRightPanelTab)
   const setRightPanelMode = useWorkflowStore((s) => s.setRightPanelMode)
   const validationIssues = useWorkflowStore((s) => s.validationIssues)
+  const setValidationIssues = useWorkflowStore((s) => s.setValidationIssues)
   const markSaved = useWorkflowStore((s) => s.markSaved)
   const runLog = useWorkflowStore((s) => s.runLog)
   const runResult = useWorkflowStore((s) => s.runResult)
@@ -58,17 +58,20 @@ export default function Topbar() {
   const theme = useThemeStore((s) => s.theme)
   const toggleTheme = useThemeStore((s) => s.toggle)
   const [saving, setSaving] = useState(false)
+  const [validating, setValidating] = useState(false)
+  const [validatedSignature, setValidatedSignature] = useState<string | null>(null)
+  const [lastValidationValid, setLastValidationValid] = useState<boolean | null>(null)
 
   const nodeCount = workflow?.nodes.length ?? 0
   const edgeCount = workflow?.edges.length ?? 0
   const title = workflow?.name || 'Untitled workflow'
+  const workflowSignature = useMemo(() => workflow ? JSON.stringify(workflow) : null, [workflow])
 
   async function handleRun() {
     if (!workflow) return
     setRunning(true)
     resetRun()
     setRunError(null)
-    setRightPanelTab('runlog')
     setRightPanelMode('runlog')
     try {
       await api.runWorkflowStream(workflow, SAMPLE_PAYLOAD, (ev) => applyRunEvent(ev))
@@ -116,7 +119,40 @@ export default function Topbar() {
     URL.revokeObjectURL(url)
   }
 
+  async function handleValidate() {
+    if (!workflow || !workflowSignature) return
+    setValidating(true)
+    try {
+      const result = await api.validateWorkflow(workflow)
+      setValidationIssues(result.errors.length ? result.errors : null)
+      useWorkflowStore.setState({
+        runWarnings: result.warnings.length ? result.warnings : null,
+        runError: result.valid ? null : result.summary,
+      })
+      setValidatedSignature(workflowSignature)
+      setLastValidationValid(result.valid)
+      if (!result.valid) setRightPanelMode('runlog')
+    } catch (e) {
+      setRunError((e as Error).message)
+      setLastValidationValid(false)
+      setRightPanelMode('runlog')
+    } finally {
+      setValidating(false)
+    }
+  }
+
+  const isCurrentValidation = validatedSignature === workflowSignature
   const validateBadge = validationIssues && validationIssues.length > 0
+  const validationClean = Boolean(workflow && isCurrentValidation && lastValidationValid)
+  const validationTitle = !workflow
+    ? 'Load or generate a workflow before validating'
+    : validating
+      ? 'Validating workflow...'
+      : validationClean
+        ? 'Workflow validated'
+        : validateBadge && isCurrentValidation
+          ? `${validationIssues!.length} validation issue(s)`
+          : 'Validate workflow'
 
   return (
     <div
@@ -177,13 +213,15 @@ export default function Topbar() {
         <BarButton onClick={() => setDrawerOpen(true)} icon={<LayoutTemplate size={14} strokeWidth={2} />}>Templates</BarButton>
         <BarButton onClick={() => setDrawerOpen(true)} icon={<Upload size={14} strokeWidth={2} />}>Import</BarButton>
         <BarButton onClick={handleExport} icon={<Download size={14} strokeWidth={2} />} disabled={!workflow}>Export</BarButton>
-        <BarButton
-          onClick={() => { setRightPanelTab('config'); setRightPanelMode('config') }}
-          icon={<ShieldCheck size={14} strokeWidth={2} />}
-          tone={validateBadge ? 'danger' : undefined}
+        <StatusIconButton
+          onClick={() => { void handleValidate() }}
+          disabled={!workflow || validating}
+          title={validationTitle}
+          status={validationClean ? 'ok' : validateBadge && isCurrentValidation ? 'error' : 'idle'}
+          badge={validateBadge && isCurrentValidation ? validationIssues!.length : undefined}
         >
-          Validate{validateBadge ? ` · ${validationIssues!.length}` : ''}
-        </BarButton>
+          {validating ? <Loader2 size={15} className="animate-spin" /> : <ShieldCheck size={15} strokeWidth={2.2} />}
+        </StatusIconButton>
         <BarButton
           onClick={resetRun}
           icon={<Trash2 size={14} strokeWidth={2} />}
@@ -216,6 +254,85 @@ function IconButton({ children, onClick, title }: { children: React.ReactNode; o
       }}
     >
       {children}
+    </button>
+  )
+}
+
+function StatusIconButton({
+  children,
+  onClick,
+  disabled,
+  title,
+  status,
+  badge,
+}: {
+  children: React.ReactNode
+  onClick: () => void
+  disabled?: boolean
+  title?: string
+  status: 'idle' | 'ok' | 'error'
+  badge?: number
+}) {
+  const color = status === 'ok'
+    ? 'var(--success)'
+    : status === 'error'
+      ? 'var(--danger)'
+      : disabled
+        ? 'var(--text-3)'
+        : 'var(--text-2)'
+  const border = status === 'ok'
+    ? 'color-mix(in srgb, var(--success) 45%, var(--border))'
+    : status === 'error'
+      ? 'color-mix(in srgb, var(--danger) 45%, var(--border))'
+      : 'var(--border)'
+  const background = status === 'ok'
+    ? 'color-mix(in srgb, var(--success) 10%, transparent)'
+    : status === 'error'
+      ? 'color-mix(in srgb, var(--danger) 10%, transparent)'
+      : 'transparent'
+
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      aria-label={title}
+      className="relative flex items-center justify-center"
+      style={{
+        width: 36,
+        height: 36,
+        borderRadius: 8,
+        background,
+        color,
+        border: `1px solid ${border}`,
+        opacity: disabled ? 0.55 : 1,
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        transition: 'background 160ms, color 160ms, border-color 160ms, transform 160ms',
+        transform: status === 'ok' ? 'scale(1.02)' : 'scale(1)',
+      }}
+    >
+      {children}
+      {badge != null && badge > 0 && (
+        <span
+          className="num"
+          style={{
+            position: 'absolute',
+            top: -5,
+            right: -5,
+            minWidth: 16,
+            height: 16,
+            padding: '0 4px',
+            borderRadius: 999,
+            background: 'var(--danger)',
+            color: '#fff',
+            fontSize: 9,
+            lineHeight: '16px',
+            border: '1px solid var(--bg-1)',
+          }}
+        >
+          {badge}
+        </span>
+      )}
     </button>
   )
 }

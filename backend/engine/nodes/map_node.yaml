@@ -1,0 +1,86 @@
+type_id: MAP
+description: "Fan out a sub-workflow over a list of keys; aggregate results"
+
+ui:
+  color: "#DB2777"
+  icon: Repeat
+  config_tags: [keys_key, output_name]
+  palette:
+    section:
+      id: transform
+      label: Transform
+      order: 20
+      color: "#A78BFA"
+    node_order: 23
+
+input_ports:
+  - name: keys
+    type: object
+    description: "{values: [...]} list — typically from EXTRACT_LIST or GROUP_BY."
+    optional: true
+
+output_ports:
+  - name: results
+    type: object
+    description: >-
+      {results: {<key>: {<collected_name>: value, ...}}} — stored in
+      ctx.values[output_name]. Per-iteration datasets listed in
+      collect_datasets are ALSO published at the top level as
+      ctx.datasets[f"{output_name}_{key}_{dataset_name}"] so downstream
+      nodes can address them directly.
+
+params:
+  - name: keys_key
+    type: string
+    description: "ctx.values key holding the {values: [...]} list to iterate."
+    required: true
+  - name: iteration_ctx_key
+    type: string
+    description: >-
+      ctx.values key where the current iteration's key is written for each
+      sub-workflow run. Lets sub-workflow collectors template queries
+      against the current group.
+    required: true
+  - name: dataset_prefix
+    type: string
+    description: >-
+      Optional prefix used by an upstream GROUP_BY. When set, the per-iteration
+      dataset ctx.datasets[f"{dataset_prefix}_{key}"] is aliased into the child
+      ctx under iteration_dataset_alias.
+    default: ""
+    required: false
+  - name: iteration_dataset_alias
+    type: string
+    description: >-
+      Alias name for the per-iteration dataset inside the child ctx. No-op when
+      dataset_prefix is blank.
+    default: ""
+    required: false
+  - name: sub_workflow
+    type: object
+    description: "Nested DAG: {nodes: [...], edges: [...]}. Runs once per key."
+    required: true
+  - name: collect_values
+    type: string_list
+    description: "ctx.values keys to harvest from each iteration into results[key]."
+    default: []
+    required: false
+  - name: collect_datasets
+    type: string_list
+    description: >-
+      ctx.datasets names to harvest from each iteration. They become both
+      results[key][name] and ctx.datasets[f"{output_name}_{key}_{name}"].
+    default: []
+    required: false
+  - name: output_name
+    type: string
+    description: "ctx.values key for the aggregated {results: {...}} dict."
+    default: map_results
+    required: true
+
+semantics:
+  requires: []
+
+constraints:
+  - "sub_workflow is executed in topological order per iteration; child ctx is a shallow copy of parent."
+  - "Iteration-local writes do NOT leak back to the parent ctx except via collect_values / collect_datasets."

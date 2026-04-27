@@ -3,44 +3,208 @@ description: Trade / order rows from Solr (hs_client_order and hs_execution coll
 sources:
   - hs_client_order
   - hs_execution
-columns:
-  - name: trader_id
-    type: string
-    semantic: trader
-    description: Desk-scoped trader identifier (alert-bound in ALERT_TRIGGER).
-  - name: order_id
-    type: string
-    description: Unique order/execution id.
-  - name: timestamp
-    type: datetime
-    semantic: time
-    description: Event wall-clock time.
-  - name: currency_pair
-    type: string
-    description: Instrument traded (e.g. EUR/USD).
-  - name: side
-    type: string
-    description: BUY or SELL.
-  - name: qty
-    type: number
-    semantic: size
-    description: Quantity in base currency units.
-  - name: price
-    type: number
-    semantic: price
-    description: Execution / order price.
-  - name: book
-    type: string
-    description: Trading book the order belongs to.
-  - name: status
-    type: string
-    description: Order lifecycle status (NEW, FILLED, CANCELED, …).
-  - name: trade_version
-    type: integer
-    description: Required 1 for hs_execution reads; absent on hs_client_order.
-    optional: true
-  - name: signed_notional
-    type: number
-    semantic: notional
-    description: Added by FEATURE_ENGINE (apply_expr) — signed_notional = notional * sign(side).
-    optional: true
+  - hs_trades
+  - hs_orders_and_executions
+  - hs_quotes
+# Union of all per-source columns (used when no source is selected).
+columns: []
+source_schemas:
+  hs_client_order:
+    description: Client order rows (Solr hs_client_order).
+    base_query: "*:*"
+    columns:
+      - name: order_id
+        type: string
+        description: Unique order id.
+      - name: trader_id
+        type: string
+        semantic: trader
+        description: Desk-scoped trader identifier.
+      - name: book
+        type: string
+        description: Trading book.
+      - name: currency_pair
+        type: string
+        optional: true
+        description: Instrument (e.g. EUR/USD).
+      - name: instrument
+        type: string
+        optional: true
+        description: Instrument identifier used by order-lifecycle feeds.
+      - name: order_time
+        type: datetime
+        semantic: time
+        description: Order event time.
+      - name: event_time
+        type: datetime
+        optional: true
+        description: Lifecycle event timestamp when distinct from order_time.
+      - name: instance_id
+        type: string
+        optional: true
+        description: Surveillance scenario instance/group id used by FISL fixtures.
+      - name: order_type
+        type: string
+        optional: true
+        description: LIMIT, MARKET, …
+      - name: side
+        type: string
+        description: BUY or SELL.
+      - name: quantity
+        type: number
+        semantic: size
+        description: Order quantity.
+      - name: limit_price
+        type: number
+        semantic: price
+        description: Limit price when applicable.
+      - name: status
+        type: string
+        description: Order lifecycle status.
+      - name: venue
+        type: string
+        description: Execution venue.
+  hs_execution:
+    description: Proprietary execution / fill rows (Solr hs_execution).
+    base_query: "*:* AND trade_version:1"
+    columns:
+      - name: exec_id
+        type: string
+        description: Unique execution id.
+      - name: order_id
+        type: string
+        description: Parent order id.
+      - name: trader_id
+        type: string
+        semantic: trader
+        description: Trader identifier.
+      - name: book
+        type: string
+        description: Trading book.
+      - name: currency_pair
+        type: string
+        description: Instrument.
+      - name: exec_time
+        type: datetime
+        semantic: time
+        description: Execution time.
+      - name: side
+        type: string
+        description: BUY or SELL.
+      - name: exec_quantity
+        type: number
+        semantic: size
+        description: Filled quantity.
+      - name: exec_price
+        type: number
+        semantic: price
+        description: Execution price.
+      - name: venue
+        type: string
+        description: Venue.
+      - name: counterparty
+        type: string
+        description: Counterparty id or code.
+      - name: notional_usd
+        type: number
+        description: Notional in USD.
+      - name: trade_version
+        type: integer
+        description: Trade version (1 for current reads).
+      - name: signed_notional
+        type: number
+        semantic: notional
+        description: Added by FEATURE_ENGINE (apply_expr / derive) — optional on enriched frames.
+        optional: true
+  hs_trades:
+    description: Trade-level rows (Solr hs_trades).
+    base_query: "*:*"
+    columns:
+      - name: trade_id
+        type: string
+      - name: trader_id
+        type: string
+        semantic: trader
+      - name: book
+        type: string
+      - name: currency_pair
+        type: string
+      - name: trade_time
+        type: datetime
+        semantic: time
+      - name: side
+        type: string
+      - name: trade_quantity
+        type: number
+        semantic: size
+      - name: trade_price
+        type: number
+        semantic: price
+      - name: counterparty
+        type: string
+      - name: trade_version
+        type: integer
+  hs_orders_and_executions:
+    description: Combined order + execution shape.
+    base_query: "*:*"
+    columns:
+      - name: order_id
+        type: string
+      - name: exec_id
+        type: string
+      - name: trader_id
+        type: string
+        semantic: trader
+      - name: book
+        type: string
+      - name: currency_pair
+        type: string
+      - name: order_time
+        type: datetime
+        semantic: time
+      - name: exec_time
+        type: datetime
+      - name: side
+        type: string
+      - name: quantity
+        type: number
+        semantic: size
+      - name: exec_quantity
+        type: number
+      - name: limit_price
+        type: number
+        semantic: price
+      - name: exec_price
+        type: number
+      - name: status
+        type: string
+      - name: trade_version
+        type: integer
+  hs_quotes:
+    description: Quote rows (Solr hs_quotes).
+    base_query: "*:*"
+    columns:
+      - name: quote_id
+        type: string
+      - name: trader_id
+        type: string
+        semantic: trader
+      - name: currency_pair
+        type: string
+      - name: quote_time
+        type: datetime
+        semantic: time
+      - name: bid
+        type: number
+        semantic: price
+      - name: ask
+        type: number
+        semantic: price
+      - name: bid_size
+        type: number
+        semantic: size
+      - name: ask_size
+        type: number
+        semantic: size
+      - name: venue
+        type: string

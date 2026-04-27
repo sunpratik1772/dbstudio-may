@@ -5,6 +5,14 @@ ui:
   color: "#059669"
   icon: MessageSquareText
   config_tags: [output_name]
+  display_name: Oculus
+  palette:
+    section:
+      id: integrations
+      label: Integrations
+      order: 10
+      color: "#00E5FF"
+    node_order: 10
 
 input_ports:
   - name: context

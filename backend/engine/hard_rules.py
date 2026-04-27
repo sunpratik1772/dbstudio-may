@@ -206,7 +206,8 @@ def _rule_signal_calc_script(node: dict, dag: dict, result: _ResultSink) -> None
         result.add(
             ValidationErrorCode.UPLOAD_SCRIPT_DISABLED,
             f"Node '{node.get('id')}' uses mode='upload_script', but "
-            "DBSHERPA_ALLOW_UPLOAD_SCRIPT is not enabled.",
+            "DBSHERPA_ALLOW_UPLOAD_SCRIPT is not enabled. Use mode='configure' "
+            "with a built-in signal_type, or ask a platform engineer to enable scripts.",
             node_id=node.get("id"),
             field="config.mode",
         )
@@ -230,34 +231,6 @@ def _rule_signal_calc_script(node: dict, dag: dict, result: _ResultSink) -> None
             node_id=node.get("id"),
             field="config.script_path",
         )
-
-
-@register_hard_rule(
-    name="upload_script_gated",
-    code=ValidationErrorCode.UPLOAD_SCRIPT_DISABLED,
-    node_type="SIGNAL_CALCULATOR",
-    description=(
-        "SIGNAL_CALCULATOR.upload_script runs arbitrary Python via exec(). "
-        "Surface at validate-time whenever the env flag is off so authoring "
-        "tools can refuse to save the workflow."
-    ),
-)
-def _rule_upload_script_gated(node: dict, dag: dict, result: _ResultSink) -> None:
-    import os
-    config = node.get("config") or {}
-    if config.get("mode") != "upload_script":
-        return
-    if os.environ.get("DBSHERPA_ALLOW_UPLOAD_SCRIPT", "").lower() in ("1", "true", "yes"):
-        return
-    result.add(
-        ValidationErrorCode.UPLOAD_SCRIPT_DISABLED,
-        f"Node '{node.get('id')}' uses mode='upload_script' but the host has "
-        "DBSHERPA_ALLOW_UPLOAD_SCRIPT off. Use mode='configure' with a built-in "
-        "signal_type, or ask a platform engineer to enable scripts for this environment.",
-        node_id=node.get("id"),
-        field="config.mode",
-    )
-
 
 __all__ = [
     "HardRule",

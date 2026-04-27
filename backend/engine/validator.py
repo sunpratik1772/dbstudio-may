@@ -29,6 +29,7 @@ from .hard_rules import run_hard_rules
 from .ports import ParamType
 from .registry import NODE_SPECS, NodeSpec
 from .schema_version import SchemaVersionError, migrate_to_current
+from .signal_contract import get_signal_output_columns
 from .validation_codes import ValidationErrorCode
 
 # `code` is a stable machine-readable identifier. The frontend / copilot
@@ -102,7 +103,21 @@ class ValidationResult:
 # Top-level entry point
 # ---------------------------------------------------------------------------
 def validate_dag(dag: dict) -> ValidationResult:
-    """Run all checks. Callers use `result.valid` or surface `result.issues`."""
+    """Validate a workflow without executing it.
+
+    Read this as a pipeline:
+      1. Migrate/reject schema versions.
+      2. Check top-level DAG shape, registered node types, edges, and cycles.
+      3. Enforce topology conventions (entry/exit/orphans).
+      4. Validate each node config against typed NodeSpec params.
+      5. Validate wiring and field bindings using declared outputs.
+      6. Run registered hard rules.
+      7. Recursively validate MAP sub-workflows and re-scope their issues
+         under the parent MAP node for UI highlighting.
+
+    Callers use `result.valid` to gate execution or serialize
+    `result.issues` for the UI/copilot.
+    """
     result = ValidationResult()
 
     # --- Schema version gate -------------------------------------------------
@@ -523,65 +538,191 @@ def _validate_wiring(
 # ENRICH, SIGNAL_CALCULATOR) pass the dataset through under the same name —
 # the base schema is still the collector's schema plus appended columns.
 _COLLECTOR_SOURCE: dict[str, str] = {
+    "EXECUTION_DATA_COLLECTOR": "trades",
     "TRADE_DATA_COLLECTOR": "trades",
-    "ORDER_COLLECTOR": "orders",
     "MARKET_DATA_COLLECTOR": "market",
     "COMMS_COLLECTOR": "comms",
-    "SIGNAL_CALCULATOR": "signals",
+    "ORACLE_DATA_COLLECTOR": "oracle",
 }
+
+
+def _primary_output_name(node: dict) -> str | None:
+    cfg = node.get("config") or {}
+    if node.get("type") == "FEATURE_ENGINE":
+        inn = cfg.get("input_name")
+        if not inn:
+            return None
+        out = cfg.get("output_name")
+        return str(out) if out else str(inn)
+    out = cfg.get("output_name")
+    return str(out) if out else None
+
+
+def _build_output_to_node(nodes_by_id: dict[str, dict]) -> dict[str, dict]:
+    m: dict[str, dict] = {}
+    for n in nodes_by_id.values():
+        pname = _primary_output_name(n)
+        if pname:
+            m[pname] = n
+    return m
+
+
+def _feature_engine_added_columns(cfg: dict) -> set[str]:
+    out: set[str] = set()
+    for op in cfg.get("ops") or []:
+        if isinstance(op, dict) and op.get("out_col"):
+            out.add(str(op["out_col"]))
+    return out
+
+
+def _trace_registry_ds(
+    dataset_name: str,
+    output_to_node: dict[str, dict],
+    reg: Any,
+) -> Any | None:
+    """Walk producer chain from a dataset name back to a collector DataSource."""
+    seen: set[str] = set()
+    current: str | None = dataset_name
+    while current and current not in seen:
+        seen.add(current)
+        node = output_to_node.get(current)
+        if node is None:
+            return None
+        t = node.get("type", "")
+        cfg = node.get("config") or {}
+        if t in ("FEATURE_ENGINE", "SIGNAL_CALCULATOR", "DATA_HIGHLIGHTER"):
+            current = cfg.get("input_name")
+            continue
+        if t in _COLLECTOR_SOURCE:
+            return reg.get(_COLLECTOR_SOURCE[t])
+        current = cfg.get("input_name")
+    return None
+
+
+def _known_columns_for_dataset_name(
+    output_name: str,
+    output_to_node: dict[str, dict],
+    reg: Any,
+    cache: dict[str, frozenset[str] | None],
+    visiting: set[str],
+) -> frozenset[str] | None:
+    if output_name in cache:
+        return cache[output_name]
+    if output_name in visiting:
+        cache[output_name] = None
+        return None
+    visiting.add(output_name)
+    node = output_to_node.get(output_name)
+    if node is None:
+        cache[output_name] = None
+        visiting.remove(output_name)
+        return None
+    t = node.get("type", "")
+    cfg = node.get("config") or {}
+    result: frozenset[str] | None = None
+
+    if t in _COLLECTOR_SOURCE:
+        ds = reg.get(_COLLECTOR_SOURCE[t])
+        if ds is not None:
+            src = cfg.get("source")
+            result = frozenset(ds.column_names(src))
+    elif t == "SIGNAL_CALCULATOR":
+        inn = cfg.get("input_name")
+        sig_cols = frozenset(get_signal_output_columns())
+        if inn:
+            base = _known_columns_for_dataset_name(
+                inn, output_to_node, reg, cache, visiting
+            )
+            result = (base | sig_cols) if base is not None else None
+        else:
+            result = None
+    elif t == "FEATURE_ENGINE":
+        inn = cfg.get("input_name")
+        extras = frozenset(_feature_engine_added_columns(cfg))
+        if inn:
+            base = _known_columns_for_dataset_name(
+                inn, output_to_node, reg, cache, visiting
+            )
+            result = (base | extras) if base is not None else None
+        else:
+            result = None
+    elif t == "DATA_HIGHLIGHTER":
+        inn = cfg.get("input_name")
+        if inn:
+            result = _known_columns_for_dataset_name(
+                inn, output_to_node, reg, cache, visiting
+            )
+    else:
+        inn = cfg.get("input_name")
+        if inn:
+            result = _known_columns_for_dataset_name(
+                inn, output_to_node, reg, cache, visiting
+            )
+
+    cache[output_name] = result
+    visiting.remove(output_name)
+    return result
+
+
+def _field_binding_references_known_column(
+    field: str,
+    known: set[str],
+    semantics_ds: Any | None,
+) -> bool:
+    if not field or field in known:
+        return True
+    if semantics_ds is None:
+        return False
+    physical = semantics_ds.resolve_field(field, None)
+    return physical is not None and physical in known
 
 
 def _validate_field_bindings(
     nodes_by_id: dict[str, dict],
     result: ValidationResult,
 ) -> None:
-    """Warn when a SECTION_SUMMARY field_bindings entry names a column that
-    doesn't exist in the resolved DataSource.
+    """Flag SECTION_SUMMARY field_bindings that don't resolve to a known column.
 
-    The check is intentionally a *warning* (not an error) because:
-      * FEATURE_ENGINE / SIGNAL_CALCULATOR can add columns (e.g.
-        signed_notional, _signal_*) that aren't in the base registry entry.
-      * SIGNAL_CALCULATOR appends 5 _signal_* columns to any input dataset.
-      * We only resolve datasets that trace directly to a collector node —
-        if the lineage is ambiguous we skip silently to avoid false positives.
+    Lineage is traced through FEATURE_ENGINE, SIGNAL_CALCULATOR, and
+    DATA_HIGHLIGHTER so passthrough and derived columns are included.
+    Semantic tags (e.g. ``size``) resolve via the traced collector's
+    DataSource. Severity is *error* — unknown columns break stats at runtime.
     """
     from data_sources import get_registry
+
     reg = get_registry()
+    output_to_node = _build_output_to_node(nodes_by_id)
 
-    # Build output_name → DataSource from collector nodes only.
-    output_to_source: dict[str, Any] = {}
-    for node in nodes_by_id.values():
-        source_id = _COLLECTOR_SOURCE.get(node.get("type", ""))
-        if not source_id:
-            continue
-        ds = reg.get(source_id)
-        if ds is None:
-            continue
-        output_name = (node.get("config") or {}).get("output_name")
-        if output_name:
-            output_to_source[output_name] = ds
-
-    # Check field_bindings on every SECTION_SUMMARY node.
     for nid, node in nodes_by_id.items():
         if node.get("type") != "SECTION_SUMMARY":
             continue
         cfg = node.get("config") or {}
         input_name = cfg.get("input_name")
-        ds = output_to_source.get(input_name) if input_name else None
-        if ds is None:
-            continue  # can't resolve source — skip rather than false-positive
+        if not input_name:
+            continue
+        cache: dict[str, frozenset[str] | None] = {}
+        known_f = _known_columns_for_dataset_name(
+            input_name, output_to_node, reg, cache, set()
+        )
+        if known_f is None:
+            continue
+        known = set(known_f)
+        semantics_ds = _trace_registry_ds(input_name, output_to_node, reg)
 
-        known = set(ds.column_names())
         for i, binding in enumerate(cfg.get("field_bindings") or []):
             if not isinstance(binding, dict):
                 continue
             field = binding.get("field")
-            if field and field not in known:
+            if field and not _field_binding_references_known_column(
+                field, known, semantics_ds
+            ):
+                ds_id = semantics_ds.id if semantics_ds is not None else input_name
                 result.add(
                     _VC.UNKNOWN_COLUMN,
                     f"Node '{nid}' field_bindings[{i}].field='{field}' is not a known "
-                    f"column of '{ds.id}'. Known: {sorted(known)}.",
-                    severity="warning",
+                    f"column for dataset '{input_name}' (traced source '{ds_id}'). "
+                    f"Known: {sorted(known)}.",
+                    severity="error",
                     node_id=nid,
                     field=f"config.field_bindings[{i}].field",
                 )

@@ -77,12 +77,13 @@
       },
       {
         "id": "n03",
-        "type": "ORDER_COLLECTOR",
+        "type": "EXECUTION_DATA_COLLECTOR",
         "label": "Collect Orders",
         "config": {
           "query_template": "trader_id:{context.trader_id}",
           "output_name": "orders",
-          "window_key": "window"
+          "window_key": "window",
+          "source": "hs_client_order"
         }
       },
       {

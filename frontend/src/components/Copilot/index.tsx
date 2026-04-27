@@ -35,6 +35,7 @@ import {
 } from 'lucide-react'
 import { useWorkflowStore } from '../../store/workflowStore'
 import { api } from '../../services/api'
+import type { CopilotGuardrailsPayload } from '../../services/api'
 import type {
   CopilotMessage,
   CopilotStreamEvent,
@@ -47,11 +48,11 @@ import type {
 const PHASE_LABEL: Record<CopilotPhase, string> = {
   understanding: 'Understanding the problem',
   planning: 'Retrieving skills & contracts',
-  generating: 'Creating nodes',
+  generating: 'Drafting workflow',
   auto_fixing: 'Deterministic auto-fix',
-  critiquing: 'Reviewing workflow',
+  critiquing: 'Validating & repairing',
   finalizing: 'Finalizing workflow',
-  complete: 'Done',
+  complete: 'Workflow generated',
   error: 'Error',
 }
 
@@ -83,26 +84,30 @@ interface PhaseState {
 /**
  * Build the full ghost skeleton of phases the agent is going to walk
  * through. We render this immediately on send so the user sees the
- * full plan upfront ("understanding → planning → generating → N
- * critic passes → finalizing"), with each row lighting up as its
- * event arrives.
+ * core plan upfront. Repair passes are progressive: show pass 1 as
+ * the validation gate, and add pass 2/3 only if the backend actually
+ * enters them.
  */
-function buildPendingPhases(criticIter: number): PhaseState[] {
-  const rows: PhaseState[] = [
+function buildPendingPhases(): PhaseState[] {
+  return [
     { id: 'understanding', phase: 'understanding', label: PHASE_LABEL.understanding, status: 'pending' },
     { id: 'planning', phase: 'planning', label: PHASE_LABEL.planning, status: 'pending' },
     { id: 'generating', phase: 'generating', label: PHASE_LABEL.generating, status: 'pending' },
-  ]
-  for (let i = 1; i <= Math.max(1, criticIter); i++) {
-    rows.push({
-      id: `critiquing:${i}`,
+    {
+      id: 'critiquing:1',
       phase: 'critiquing',
-      label: `${PHASE_LABEL.critiquing} · pass ${i}`,
+      label: `${PHASE_LABEL.critiquing} · pass 1`,
       status: 'pending',
-    })
-  }
-  rows.push({ id: 'finalizing', phase: 'finalizing', label: PHASE_LABEL.finalizing, status: 'pending' })
-  return rows
+    },
+    { id: 'finalizing', phase: 'finalizing', label: PHASE_LABEL.finalizing, status: 'pending' },
+    { id: 'complete', phase: 'complete', label: PHASE_LABEL.complete, status: 'pending' },
+  ]
+}
+
+function shouldEditExistingWorkflow(prompt: string): boolean {
+  const text = prompt.toLowerCase()
+  if (/\b(create|generate|build|make|new)\b/.test(text)) return false
+  return /\b(fix|repair|edit|update|change|modify|add|remove|delete|replace|this|current|existing|canvas)\b/.test(text)
 }
 
 function CopilotAvatar({ size = 24 }: { size?: number }) {
@@ -400,6 +405,52 @@ function TypingDots() {
   )
 }
 
+function GuardrailsCard({ guardrails, error }: { guardrails: CopilotGuardrailsPayload | null; error: string | null }) {
+  const caps = guardrails?.capabilities
+  const skillNames = guardrails?.skills.map((s) => s.name).slice(0, 4).join(', ')
+  return (
+    <div
+      style={{
+        padding: '12px 14px',
+        borderRadius: 10,
+        background: 'var(--bg-2)',
+        border: '1px solid var(--border)',
+      }}
+    >
+      <div className="font-mono mb-2" style={{ fontSize: 10, color: 'var(--text-3)', letterSpacing: '0.18em', textTransform: 'uppercase' }}>
+        ACTIVE GUARDRAILS
+      </div>
+      {guardrails ? (
+        <div style={{ fontSize: 12.5, color: 'var(--text-1)', lineHeight: 1.55 }}>
+          <p>
+            Copilot is constrained to{' '}
+            <span style={{ color: 'var(--text-0)', fontWeight: 600 }}>{guardrails.nodes.length} live nodes</span>,{' '}
+            <span style={{ color: 'var(--text-0)', fontWeight: 600 }}>{guardrails.data_sources.length} data catalogs</span>, and{' '}
+            <span style={{ color: 'var(--text-0)', fontWeight: 600 }}>{guardrails.skills.length} skills</span>.
+          </p>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            <span className="num px-2 py-1 rounded" style={{ background: 'var(--bg-3)', color: caps?.upload_script_enabled ? 'var(--warning)' : 'var(--success)', border: '1px solid var(--border-soft)', fontSize: 10.5 }}>
+              upload_script {caps?.upload_script_enabled ? 'on' : 'off'}
+            </span>
+            <span className="num px-2 py-1 rounded" style={{ background: 'var(--bg-3)', color: 'var(--text-2)', border: '1px solid var(--border-soft)', fontSize: 10.5 }}>
+              signal modes: {caps?.allowed_signal_modes.join(', ')}
+            </span>
+          </div>
+          {skillNames && (
+            <p className="mt-2" style={{ color: 'var(--text-2)' }}>
+              Skills in prompt: {skillNames}{guardrails.skills.length > 4 ? '...' : ''}
+            </p>
+          )}
+        </div>
+      ) : (
+        <p style={{ fontSize: 12.5, color: error ? 'var(--danger)' : 'var(--text-2)', lineHeight: 1.55 }}>
+          {error ?? 'Loading node, source, skill, and host capability guardrails...'}
+        </p>
+      )}
+    </div>
+  )
+}
+
 export default function Copilot() {
   const { copilotMessages, addCopilotMessage, clearCopilotMessages, setWorkflow } = useWorkflowStore()
   const copilotWidth = useWorkflowStore((s) => s.copilotWidth)
@@ -419,6 +470,8 @@ export default function Copilot() {
   const [useGenerate, setUseGenerate] = useState(true)
   const [criticIter, setCriticIter] = useState(3)
   const [phases, setPhases] = useState<PhaseState[]>([])
+  const [guardrails, setGuardrails] = useState<CopilotGuardrailsPayload | null>(null)
+  const [guardrailError, setGuardrailError] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const rootRef = useRef<HTMLDivElement>(null)
@@ -426,6 +479,21 @@ export default function Copilot() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [copilotMessages, isLoading, phases])
+
+  useEffect(() => {
+    let active = true
+    api.getCopilotGuardrails()
+      .then((payload) => {
+        if (!active) return
+        setGuardrails(payload)
+        setGuardrailError(null)
+      })
+      .catch((err: Error) => {
+        if (!active) return
+        setGuardrailError(err.message || 'Unable to load guardrails')
+      })
+    return () => { active = false }
+  }, [])
 
   // "Fix with Copilot" CTAs elsewhere in the app set copilotDraft; we
   // adopt it into our local textarea state and clear the store slot so
@@ -464,12 +532,18 @@ export default function Copilot() {
         ev.phase === 'complete'
           ? ev.validation?.valid ?? undefined
           : ev.approved ?? undefined
+      const nextLabel = ev.phase === 'complete'
+        ? PHASE_LABEL.complete
+        : label
+      const nextDetail = ev.phase === 'complete' && ev.status === 'done' && ev.workflow
+        ? `${ev.workflow.name}: ${ev.workflow.nodes.length} nodes / ${ev.workflow.edges?.length ?? 0} edges`
+        : ev.detail
       const next: PhaseState = {
         id: rowId,
         phase: ev.phase,
-        label,
+        label: nextLabel,
         status: ev.status,
-        detail: ev.detail,
+        detail: nextDetail,
         errorCodes: errorCodes.length ? errorCodes : undefined,
         approved,
         appliedFixes: ev.applied && ev.applied.length ? ev.applied : undefined,
@@ -477,6 +551,20 @@ export default function Copilot() {
       if (existing >= 0) {
         const copy = [...prev]
         copy[existing] = next
+        // If the backend reaches finalizing/complete, no more critic rows are
+        // coming. The initial ghost plan still contains all requested repair
+        // passes, so close any untouched ones instead of leaving a fake spinner.
+        if (ev.phase === 'finalizing' || ev.phase === 'complete') {
+          for (let i = 0; i < copy.length; i++) {
+            if (copy[i].phase === 'critiquing' && copy[i].status !== 'done' && copy[i].status !== 'error') {
+              copy[i] = {
+                ...copy[i],
+                status: 'done',
+                detail: copy[i].detail ?? 'Validator clean',
+              }
+            }
+          }
+        }
         // When a phase completes, eagerly mark the next still-pending
         // row as running so users see the baton being passed even if
         // the backend hasn't yet emitted its `running` frame.
@@ -513,16 +601,13 @@ export default function Copilot() {
     setIsLoading(true)
     // Seed the timeline with the full ghost plan so the user sees the
     // whole pipeline upfront. Each row lights up as its event arrives.
-    setPhases(useGenerate ? buildPendingPhases(criticIter) : [])
+    setPhases(useGenerate ? buildPendingPhases() : [])
 
-    // Build the edit-mode context. When the canvas has a workflow
-    // loaded we always attach it — the backend treats the absence of
-    // current_workflow as "greenfield" and its presence as "edit this
-    // DAG". We collect error hints from three sources the user would
-    // want the Copilot to see: validator issues, per-node runtime
-    // failures from the last run, and any generic runError the UI is
-    // already showing in the topbar chip.
-    const ctxWorkflow = currentWorkflow ?? null
+    // Build context only for explicit edit/fix requests. Plain "create /
+    // generate / build" prompts are greenfield and replace whatever is on
+    // the canvas when the final validated workflow arrives.
+    const editExisting = Boolean(currentWorkflow && shouldEditExistingWorkflow(msg))
+    const ctxWorkflow = editExisting ? currentWorkflow : null
     const errorHints = ctxWorkflow
       ? collectErrorHints(validationIssues, runLog, runError)
       : null
@@ -550,6 +635,7 @@ export default function Copilot() {
         )
 
         if (finalWorkflow) {
+          useWorkflowStore.getState().resetRun()
           setWorkflow(finalWorkflow)
           const wf = finalWorkflow as NonNullable<CopilotStreamEvent['workflow']>
           const vr = finalValidation as CopilotStreamEvent['validation'] | null
@@ -641,23 +727,7 @@ export default function Copilot() {
         {copilotMessages.length === 0 && (
           <div className="space-y-5">
             {useGenerate && (
-              <div
-                style={{
-                  padding: '14px 14px',
-                  borderRadius: 10,
-                  background: 'var(--bg-2)',
-                  border: '1px solid var(--border)',
-                }}
-              >
-                <div className="font-mono mb-2" style={{ fontSize: 10, color: 'var(--text-3)', letterSpacing: '0.18em', textTransform: 'uppercase' }}>
-                  HOW PLAN MODE WORKS
-                </div>
-                <p style={{ fontSize: 12.5, color: 'var(--text-1)', lineHeight: 1.55 }}>
-                  The agent runs a 6-stage pipeline:{' '}
-                  <span style={{ color: 'var(--text-0)', fontWeight: 600 }}>context → template → plan → validate → repair → score</span>.
-                  Generation is constrained by the node catalog and data schema; it cannot invent types or columns. Scoring is per-rule; hard rules block, soft rules warn.
-                </p>
-              </div>
+              <GuardrailsCard guardrails={guardrails} error={guardrailError} />
             )}
             <div>
               <div className="font-mono mb-2 px-1" style={{ fontSize: 10, color: 'var(--text-3)', letterSpacing: '0.18em', textTransform: 'uppercase' }}>
@@ -701,6 +771,9 @@ export default function Copilot() {
 
         {(isLoading || phases.length > 0) && useGenerate && (
           <>
+            <div className="mb-3">
+              <GuardrailsCard guardrails={guardrails} error={guardrailError} />
+            </div>
             {isLoading && phases.length === 0 && (
               <div className="flex items-center gap-2 mb-3">
                 <CopilotAvatar size={24} />
@@ -721,10 +794,8 @@ export default function Copilot() {
 
       {/* Input */}
       <div className="p-3 border-t shrink-0" style={{ borderColor: 'var(--border)' }}>
-        {/* Context indicator — when the canvas has a workflow we're
-            going to attach it (and any errors) to the next send. Let
-            the user see that so they know "fix this" operates on what
-            they're looking at. */}
+        {/* Context indicator — a loaded workflow is available for explicit
+            edit/fix prompts, but greenfield create/generate prompts replace it. */}
         {currentWorkflow && (() => {
           const hints = collectErrorHints(validationIssues, runLog, runError)
           const selected = selectedNodeId
@@ -737,7 +808,12 @@ export default function Copilot() {
             ? 'color-mix(in srgb, var(--danger) 35%, transparent)'
             : 'color-mix(in srgb, var(--accent) 30%, transparent)'
           const chipColor = hints.length ? 'var(--danger)' : 'var(--accent)'
-          const parts: string[] = [`Editing "${currentWorkflow.name}"`]
+          const willEdit = shouldEditExistingWorkflow(input)
+          const parts: string[] = [
+            willEdit
+              ? `Editing "${currentWorkflow.name}"`
+              : `Generate will replace "${currentWorkflow.name}"`,
+          ]
           if (hints.length) {
             parts.push(`${hints.length} error${hints.length === 1 ? '' : 's'}`)
           } else {
@@ -749,9 +825,11 @@ export default function Copilot() {
           const label = parts.join(' · ')
           const title = hints.length
             ? hints.map((h) => `${(h.kind || 'error').toUpperCase()}${h.node_id ? ' @' + h.node_id : ''}: ${h.message}`).join('\n')
-            : selected
-              ? `The current canvas workflow is attached. Deictic references like "this" / "here" resolve to ${selected.id} (${selected.type}).`
-              : 'The current canvas workflow is sent with every prompt so Copilot can make targeted edits.'
+            : willEdit && selected
+              ? `This edit prompt will attach the current canvas. Deictic references like "this" / "here" resolve to ${selected.id} (${selected.type}).`
+              : willEdit
+                ? 'This prompt will attach the current canvas so Copilot can make a targeted edit.'
+                : 'Create/generate prompts start from a fresh workflow and replace the loaded canvas only after validation succeeds.'
           return (
             <div
               className="flex items-center gap-1.5 mb-2 px-2 py-1 rounded-md"

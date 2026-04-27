@@ -1,7 +1,17 @@
+/**
+ * Post-run output view.
+ *
+ * This complements `RunLogView`: the run log is a timeline, while this view
+ * surfaces workflow-level result facets, report downloads, and per-node output
+ * payload previews from `workflowStore.runLog` / `runResult`.
+ *
+ * `resolveDownloadHref` intentionally prefixes backend-relative report URLs
+ * with `/api` in dev so Vite proxies to FastAPI instead of serving SPA HTML.
+ */
 import { useState } from 'react'
 import { FileOutput, ChevronDown, ChevronRight, Download, FileText } from 'lucide-react'
 import { useWorkflowStore } from '../../store/workflowStore'
-import { NODE_UI, type NodeType } from '../../nodes'
+import { useNodeRegistryStore, UNKNOWN_NODE_UI, type NodeType } from '../../nodes'
 import type { RunLogEntry } from '../../types'
 import Shell, { Empty, SectionHeader } from './Shell'
 
@@ -195,9 +205,9 @@ function StageOutput({ entry }: { entry: RunLogEntry }) {
 }
 
 function OutputCard({ entry, defaultOpen }: { entry: RunLogEntry; defaultOpen: boolean }) {
-  const meta = NODE_UI[entry.node_type as NodeType]
+  const meta = useNodeRegistryStore((s) => s.nodeUI[entry.node_type as NodeType] ?? UNKNOWN_NODE_UI)
   const [open, setOpen] = useState(defaultOpen)
-  const IconComp = meta?.Icon
+  const IconComp = meta.Icon
   const tone =
     entry.status === 'error' ? 'var(--danger)' :
     entry.status === 'running' ? 'var(--running)' :

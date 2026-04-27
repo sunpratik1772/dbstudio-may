@@ -5,6 +5,14 @@ ui:
   color: "#0891B2"
   icon: CandlestickChart
   config_tags: [source, output_name]
+  palette:
+    section:
+      id: integrations
+      label: Integrations
+      order: 10
+      color: "#00E5FF"
+    node_order: 12
+  display_name: Mercury
 
 input_ports:
   - name: context

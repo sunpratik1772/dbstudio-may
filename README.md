@@ -8,7 +8,7 @@ regulator-grade Excel report.
 <img alt="dbSherpa" width="100%"
      src="https://img.shields.io/badge/python-3.11%2B-blue" />
 <img alt="React" src="https://img.shields.io/badge/react-18-61dafb" />
-<img alt="Tests" src="https://img.shields.io/badge/tests-151%20passing-brightgreen" />
+<img alt="Tests" src="https://img.shields.io/badge/tests-188%20passing-brightgreen" />
 <img alt="License" src="https://img.shields.io/badge/license-proprietary-lightgrey" />
 
 ---
@@ -83,9 +83,8 @@ contract, and the engine runs them the same way every time.
 git clone https://github.com/sunpratik1772/rebuilder.git dbsherpa
 cd dbsherpa
 
-# 2 — Drop in your Gemini key
-cp backend/.env.example backend/.env
-$EDITOR backend/.env          # paste GEMINI_API_KEY=AIza…
+# 2 — Export your Gemini key for this shell
+export GEMINI_API_KEY=...     # Copilot + narrative summaries
 
 # 3 — One script starts everything
 ./start.sh
@@ -149,14 +148,14 @@ dbsherpa/
 ```bash
 cd backend
 source .venv/bin/activate
-pytest tests/ -v                   # 66 unit + integration tests
+uv run pytest backend/tests -q      # full backend suite
 ```
 
-Frontend typecheck:
+Frontend typecheck/build:
 
 ```bash
 cd frontend
-./node_modules/.bin/tsc --noEmit
+npm run build
 ```
 
 See `docs/BACKEND_ARCHITECTURE.md §6 — Testing guide` for patterns
@@ -166,7 +165,7 @@ See `docs/BACKEND_ARCHITECTURE.md §6 — Testing guide` for patterns
 
 ## Status
 
-- **69 backend tests green**, frontend typecheck green.
+- **188 backend tests green**, frontend production build green.
 - Full Cloud Run deployment artifacts (`backend/deploy/`,
   `frontend/deploy/`).
 - Copilot chat + streaming generation with edit-mode (deictic

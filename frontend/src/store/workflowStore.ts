@@ -2,7 +2,7 @@
  * The single Zustand store that owns the workflow editor's runtime state.
  *
  * Anything that needs to be shared across panels (Topbar, Canvas,
- * NodeConfig, Copilot, RightPanel) lives here. State is split into
+ * Copilot, RightPanel) lives here. State is split into
  * cohesive slices — read the section banners (PANE-SIZE PERSISTENCE,
  * COPILOT, RUN STREAM, etc.) to find the right slice quickly.
  *
@@ -21,6 +21,9 @@
  *     re-renders consistently.
  *   • Copilot state is also here so the right-panel chat survives
  *     navigation between workflows.
+ *   • Right panel: `rightPanelMode` is the live shell state controlled
+ *     by ActivityRail. Old bottom-drawer state was removed; if you are
+ *     changing which right column is visible, use `rightPanelMode`.
  *
  * Tip: when you grep for "where does X come from?", search the store
  * first. ~95% of cross-component state is here.
@@ -63,11 +66,10 @@ function _defaultLabel(type: NodeType, existing: WorkflowNode[]): string {
 export const PANE_LIMITS = {
   paletteWidth:     { min: 180, max: 420, def: 224 },
   copilotWidth:     { min: 280, max: 640, def: 360 },
-  nodeConfigHeight: { min: 160, max: 640, def: 300 },
 } as const
 
 const _PANE_KEY = 'dbsherpa:panes:v1'
-type PaneSizes = { paletteWidth: number; copilotWidth: number; nodeConfigHeight: number }
+type PaneSizes = { paletteWidth: number; copilotWidth: number }
 
 function _clamp(v: number, min: number, max: number): number {
   if (Number.isNaN(v)) return min
@@ -78,7 +80,6 @@ function _readPaneSizes(): PaneSizes {
   const defaults = {
     paletteWidth: PANE_LIMITS.paletteWidth.def,
     copilotWidth: PANE_LIMITS.copilotWidth.def,
-    nodeConfigHeight: PANE_LIMITS.nodeConfigHeight.def,
   }
   if (typeof window === 'undefined') return defaults
   try {
@@ -88,7 +89,6 @@ function _readPaneSizes(): PaneSizes {
     return {
       paletteWidth: _clamp(parsed.paletteWidth ?? defaults.paletteWidth, PANE_LIMITS.paletteWidth.min, PANE_LIMITS.paletteWidth.max),
       copilotWidth: _clamp(parsed.copilotWidth ?? defaults.copilotWidth, PANE_LIMITS.copilotWidth.min, PANE_LIMITS.copilotWidth.max),
-      nodeConfigHeight: _clamp(parsed.nodeConfigHeight ?? defaults.nodeConfigHeight, PANE_LIMITS.nodeConfigHeight.min, PANE_LIMITS.nodeConfigHeight.max),
     }
   } catch {
     return defaults
@@ -104,7 +104,6 @@ function _writePaneSizes(sizes: PaneSizes): void {
   }
 }
 
-export type RightPanelTab = 'config' | 'result' | 'runlog' | 'skills'
 export type RightPanelMode = 'config' | 'runlog' | 'output' | 'copilot' | null
 
 /**
@@ -145,7 +144,7 @@ interface WorkflowStore {
   setDraftFilename: (filename: string) => void
   /** Called by Save-As when a draft is promoted to a saved workflow. */
   markSaved: (filename: string) => void
-  /** Clear the canvas back to a fresh "New workflow" state. */
+  /** Clear the canvas and unload any saved/draft workflow identity. */
   newBlankWorkflow: () => void
   clearWorkflow: () => void
   /** Add a new node (e.g. from a palette drop). Creates a stub workflow if none is loaded. Returns the new node id. */
@@ -170,18 +169,11 @@ interface WorkflowStore {
   workflowDrawerOpen: boolean
   setWorkflowDrawerOpen: (v: boolean) => void
 
-  /** Whether the bottom-docked NodeConfig panel is collapsed (only tab bar + run console visible). */
-  nodeConfigCollapsed: boolean
-  setNodeConfigCollapsed: (v: boolean) => void
-  toggleNodeConfig: () => void
-
   /* --- Pane sizing (VSCode-style draggable splitters) ------------------ */
   paletteWidth: number        // left palette width (px)
-  copilotWidth: number        // right copilot width (px)
-  nodeConfigHeight: number    // bottom NodeConfig dock height when expanded (px)
+  copilotWidth: number        // unified right panel width (px)
   setPaletteWidth: (px: number) => void
   setCopilotWidth: (px: number) => void
-  setNodeConfigHeight: (px: number) => void
 
   isRunning: boolean
   runResult: RunResult | null
@@ -208,11 +200,6 @@ interface WorkflowStore {
   copilotMessages: CopilotMessage[]
   addCopilotMessage: (msg: CopilotMessage) => void
   clearCopilotMessages: () => void
-
-  rightPanelTab: RightPanelTab
-  setRightPanelTab: (t: RightPanelTab) => void
-  copilotOpen: boolean
-  setCopilotOpen: (v: boolean) => void
 
   /**
    * Which view (if any) the unified right-side panel is showing.
@@ -389,15 +376,26 @@ export const useWorkflowStore = create<WorkflowStore>((set) => ({
       runTotalMs: null,
       selectedNodeId: null,
     }),
-  clearWorkflow: () =>
-    set({ workflow: null, sourceFilename: null, sourceKind: null }),
+  clearWorkflow: () => {
+    _queue.length = 0
+    _uiStartedAt.clear()
+    set({
+      workflow: null,
+      sourceFilename: null,
+      sourceKind: null,
+      selectedNodeId: null,
+      runResult: null,
+      runError: null,
+      runLog: [],
+      runTotalMs: null,
+      validationIssues: null,
+      runWarnings: null,
+      isRunning: false,
+    })
+  },
 
   workflowDrawerOpen: false,
   setWorkflowDrawerOpen: (v) => set({ workflowDrawerOpen: v }),
-
-  nodeConfigCollapsed: false,
-  setNodeConfigCollapsed: (v) => set({ nodeConfigCollapsed: v }),
-  toggleNodeConfig: () => set((s) => ({ nodeConfigCollapsed: !s.nodeConfigCollapsed })),
 
   /* Pane sizes — hydrated from localStorage so the user's layout sticks. */
   ...(() => {
@@ -405,7 +403,6 @@ export const useWorkflowStore = create<WorkflowStore>((set) => ({
     return {
       paletteWidth: s.paletteWidth,
       copilotWidth: s.copilotWidth,
-      nodeConfigHeight: s.nodeConfigHeight,
     }
   })(),
   setPaletteWidth: (px) =>
@@ -414,7 +411,6 @@ export const useWorkflowStore = create<WorkflowStore>((set) => ({
       _writePaneSizes({
         paletteWidth: next,
         copilotWidth: s.copilotWidth,
-        nodeConfigHeight: s.nodeConfigHeight,
       })
       return { paletteWidth: next }
     }),
@@ -424,19 +420,8 @@ export const useWorkflowStore = create<WorkflowStore>((set) => ({
       _writePaneSizes({
         paletteWidth: s.paletteWidth,
         copilotWidth: next,
-        nodeConfigHeight: s.nodeConfigHeight,
       })
       return { copilotWidth: next }
-    }),
-  setNodeConfigHeight: (px) =>
-    set((s) => {
-      const next = _clamp(px, PANE_LIMITS.nodeConfigHeight.min, PANE_LIMITS.nodeConfigHeight.max)
-      _writePaneSizes({
-        paletteWidth: s.paletteWidth,
-        copilotWidth: s.copilotWidth,
-        nodeConfigHeight: next,
-      })
-      return { nodeConfigHeight: next }
     }),
 
   addNode: (type, position) => {
@@ -595,17 +580,12 @@ export const useWorkflowStore = create<WorkflowStore>((set) => ({
   addCopilotMessage: (msg) => set((s) => ({ copilotMessages: [...s.copilotMessages, msg] })),
   clearCopilotMessages: () => set({ copilotMessages: [] }),
 
-  rightPanelTab: 'config',
-  setRightPanelTab: (t) => set({ rightPanelTab: t }),
-  copilotOpen: true,
-  setCopilotOpen: (v) => set({ copilotOpen: v, rightPanelMode: v ? 'copilot' : null }),
-
   rightPanelMode: 'copilot',
-  setRightPanelMode: (m) => set({ rightPanelMode: m, copilotOpen: m === 'copilot' }),
+  setRightPanelMode: (m) => set({ rightPanelMode: m }),
   toggleRightPanelMode: (m) =>
     set((s) => {
       const next = s.rightPanelMode === m ? null : m
-      return { rightPanelMode: next, copilotOpen: next === 'copilot' }
+      return { rightPanelMode: next }
     }),
 
   copilotDraft: null,

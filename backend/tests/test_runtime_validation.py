@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 
 from engine.context import RunContext
-from engine.dag_runner import check_input_port_schema, check_output_contract
+from engine.dag_runner import check_input_port_schema, check_output_contract, execute_nodes
 from engine.registry import get_spec
 
 
@@ -31,6 +32,24 @@ def test_decision_rule_input_fails_when_dataframe_missing_column():
     issues = check_input_port_schema(node, ctx)
     assert len(issues) == 1
     assert "_signal_flag" in issues[0]
+
+
+def test_execute_nodes_enforces_input_schema_before_handler():
+    """Input port checks must be part of the production runner path, not
+    merely a helper that tests call directly."""
+    ctx = RunContext(alert_payload={})
+    ctx.datasets["sig"] = pd.DataFrame({"wrong": [1]})
+    nodes = [
+        {
+            "id": "n01",
+            "type": "DECISION_RULE",
+            "label": "Rule",
+            "config": {"input_name": "sig"},
+        }
+    ]
+
+    with pytest.raises(ValueError, match="input contract"):
+        execute_nodes(nodes, [], ctx)
 
 
 def test_signal_calculator_output_ok():
