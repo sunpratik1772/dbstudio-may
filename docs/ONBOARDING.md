@@ -47,6 +47,7 @@ API docs: http://localhost:8000/docs
 | Add or change a dataset/source schema | [`HOW_TO_ONBOARD_A_DATASOURCE.md`](HOW_TO_ONBOARD_A_DATASOURCE.md) |
 | Build or test a workflow YAML from backend | [`HOW_TO_BUILD_A_WORKFLOW_FROM_BACKEND.md`](HOW_TO_BUILD_A_WORKFLOW_FROM_BACKEND.md) |
 | Build, validate, run, or generate a workflow in Studio | [`HOW_TO_BUILD_A_WORKFLOW_FROM_UI.md`](HOW_TO_BUILD_A_WORKFLOW_FROM_UI.md) |
+| Deploy frontend/backend separately to Cloud Run | [`CLOUD_RUN_SPLIT_DEPLOYMENT.md`](CLOUD_RUN_SPLIT_DEPLOYMENT.md) |
 | Understand backend architecture | [`BACKEND_ARCHITECTURE.md`](BACKEND_ARCHITECTURE.md) |
 | Understand frontend architecture | [`FRONTEND_ARCHITECTURE.md`](FRONTEND_ARCHITECTURE.md) |
 
