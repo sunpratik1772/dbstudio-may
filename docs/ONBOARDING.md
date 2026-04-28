@@ -43,6 +43,7 @@ API docs: http://localhost:8000/docs
 
 | Task | Canonical doc |
 | --- | --- |
+| Answer common dev/architect/PO questions | [`FAQ.md`](FAQ.md) |
 | Add or change a node | [`HOW_TO_DEFINE_A_NODE.md`](HOW_TO_DEFINE_A_NODE.md) |
 | Add or change a dataset/source schema | [`HOW_TO_ONBOARD_A_DATASOURCE.md`](HOW_TO_ONBOARD_A_DATASOURCE.md) |
 | Build or test a workflow YAML from backend | [`HOW_TO_BUILD_A_WORKFLOW_FROM_BACKEND.md`](HOW_TO_BUILD_A_WORKFLOW_FROM_BACKEND.md) |

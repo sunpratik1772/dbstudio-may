@@ -127,6 +127,7 @@ dbsherpa/
 │   ├── HOW_TO_ONBOARD_A_DATASOURCE.md
 │   ├── HOW_TO_BUILD_A_WORKFLOW_FROM_BACKEND.md
 │   ├── HOW_TO_BUILD_A_WORKFLOW_FROM_UI.md
+│   ├── FAQ.md
 │   ├── BACKEND_ARCHITECTURE.md    # Authoritative backend reference
 │   ├── FRONTEND_ARCHITECTURE.md   # High-level frontend overview
 │   └── CLOUD_RUN_SPLIT_DEPLOYMENT.md
@@ -141,6 +142,7 @@ dbsherpa/
 | I want to…                                 | Go to                                                          |
 |--------------------------------------------|----------------------------------------------------------------|
 | Start onboarding                            | [`docs/ONBOARDING.md`](docs/ONBOARDING.md)                     |
+| Read common dev/architect/PO questions      | [`docs/FAQ.md`](docs/FAQ.md)                                   |
 | Define a node                               | [`docs/HOW_TO_DEFINE_A_NODE.md`](docs/HOW_TO_DEFINE_A_NODE.md) |
 | Onboard a data source                       | [`docs/HOW_TO_ONBOARD_A_DATASOURCE.md`](docs/HOW_TO_ONBOARD_A_DATASOURCE.md) |
 | Build workflow YAML from backend            | [`docs/HOW_TO_BUILD_A_WORKFLOW_FROM_BACKEND.md`](docs/HOW_TO_BUILD_A_WORKFLOW_FROM_BACKEND.md) |
