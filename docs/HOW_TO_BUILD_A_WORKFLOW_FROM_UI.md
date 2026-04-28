@@ -1,8 +1,9 @@
 # How To Build A Workflow From The UI
 
-> The rule: the Studio UI is a live editor for the same workflow JSON the
-> backend runs. Node types, colors, sections, params, and contracts come from
-> the backend NodeSpec manifest.
+> The rule: Studio exports and imports workflows as YAML for humans, then
+> converts them to the same JSON-compatible DAG the backend validates and runs.
+> Node types, colors, sections, params, and contracts come from the backend
+> NodeSpec manifest.
 
 ## Start The App
 
@@ -135,11 +136,13 @@ It does not delete saved workflow files from disk.
 Copilot generations auto-save as drafts.
 
 - `Templates` opens saved/draft workflows.
-- `Save` writes the current workflow to the saved workflow store.
-- `Export` downloads JSON.
-- `Import` opens the workflow drawer path used for loading files.
+- `Save` writes the current workflow to the saved workflow store, using `.yaml` for new saves.
+- `Export` downloads human-readable workflow YAML.
+- `Import` accepts `.yaml`, `.yml`, and legacy `.json` workflow files.
 
-Saved and draft APIs are backed by JSON files on disk.
+Internally the canvas still holds the runtime JSON-compatible DAG object. YAML
+conversion happens at import/export and when the backend reads or writes
+workflow files.
 
 ## Troubleshooting
 

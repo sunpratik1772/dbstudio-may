@@ -177,7 +177,7 @@ backend/
 │   ├── skills-fi-wash.md
 │   └── …
 │
-├── workflows/                     # Ready-to-run workflow JSON
+├── workflows/                     # Ready-to-run workflows (.yaml preferred, .json supported)
 ├── drafts/                        # Copilot scratch workspace
 ├── demo_data/                     # CSV fixtures used by demo endpoint
 ├── contracts/
@@ -204,8 +204,27 @@ backend/
 
 ### 3.1 `NodeSpec` — the source of truth
 
-Every node type exports one `NODE_SPEC = _spec(...)` at module load.
-The factory:
+Every node type exports one `NODE_SPEC` at module load. New nodes should use
+the YAML form:
+
+```python
+NODE_SPEC = _spec_from_yaml(Path(__file__).with_suffix(".yaml"), handle_my_node)
+```
+
+That YAML plus the handler is the **canonical node contract** used by:
+
+- workflow creation in Copilot (`PromptBuilder` reads live NodeSpecs),
+- Studio UI forms and palette (`GET /node-manifest`),
+- pre-run validation (`validate_dag` reads typed params/ports),
+- runtime checks (`dag_runner` checks declared input/output ports).
+
+There is also a derived `NodeSpec.contract` dict. That dict feeds
+`/contracts`, `backend/contracts/node_contracts.json`, and prompt/docs
+compatibility. It is not the source of truth. If the derived contract looks
+wrong, fix the YAML/handler and regenerate artifacts.
+
+The lower-level Python factory is still available and builds the same
+`NodeSpec` object:
 
 ```
 _spec(

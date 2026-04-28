@@ -13,6 +13,23 @@ A node has two halves:
 
 `backend/engine/registry.py` auto-discovers every module under `backend/engine/nodes/` that exports `NODE_SPEC`. There is no central node list to edit.
 
+## Which Contract Are We Talking About?
+
+This repo uses the word "contract" in two related ways. Keep this distinction clear:
+
+| Name | Where it lives | Who uses it | Purpose |
+| --- | --- | --- | --- |
+| **Canonical node contract** | The YAML NodeSpec (`input_ports`, `output_ports`, `params`, `constraints`, `semantics`) plus the Python handler | Validator, runner, UI manifest, Copilot prompt builder, generated docs | The real source of truth. Edit this when node behavior changes. |
+| **Derived contract dict** | `NodeSpec.contract`, live `/contracts`, and generated `backend/contracts/node_contracts.json` | Copilot prompt text, older API consumers, generated fallback docs | A serialisable view built from the canonical NodeSpec. Do not edit this by hand. |
+
+So when someone says "node contract used for creation and validation", they mean:
+
+- **Creation/UI/Copilot:** `GET /node-manifest` and `contracts_document()` are built from the live `NODE_SPEC`.
+- **Validation:** `engine.validator.validate_dag()` reads the live `NodeSpec.params`, ports, hard rules, and data-source metadata.
+- **Runtime validation:** `engine.dag_runner` checks declared input/output ports before and after handlers run.
+
+The generated file `backend/contracts/node_contracts.json` is not the canonical source. It is a checked-in artifact for compatibility and offline/fallback use.
+
 ## Minimal Files
 
 Create:

@@ -48,29 +48,33 @@ Handler = Callable[[dict, RunContext], None]
 @dataclass(frozen=True)
 class NodeSpec:
     """
-    Full description of a node type. The runtime side needs `handler`;
-    the copilot needs `contract`; the frontend needs `ui`. One record,
-    one place to change.
+    Canonical description of one node type.
 
-    Typed fields (`input_ports`, `output_ports`, `params`) are filled in
-    either explicitly (for migrated nodes) or synthesised from the
-    legacy `contract["inputs"]/["outputs"]/["config_schema"]` string
-    dicts for nodes still waiting to be migrated.
+    Read this as the node's real contract:
+      * `params` tells the validator/UI which config keys exist.
+      * `input_ports` tells the runner what upstream data the node accepts.
+      * `output_ports` tells the runner what the handler must produce.
+      * `handler` is the implementation that must honour those declarations.
+
+    The `contract` dict below is derived from the typed fields. It exists
+    because Copilot, `/contracts`, and generated docs need a JSON-friendly
+    view. Do not treat `node_contracts.json` as the source of truth; edit the
+    YAML NodeSpec and regenerate artifacts instead.
     """
 
     type_id: str                # e.g. "ALERT_TRIGGER"
     description: str            # One-liner shown in palette tooltip
     handler: Handler            # Callable the dag_runner invokes
 
-    # Copilot contract (schema/constraints — mirrors node_contracts.json).
+    # Derived JSON-friendly view for Copilot/API/docs. The canonical contract
+    # is the typed params/ports above, usually loaded from YAML.
     contract: dict = field(default_factory=dict)
 
     # UI rendering hints (kept string-only so we can serialise to JSON /
     # TS without shipping the handler object across the wire).
     ui: dict = field(default_factory=dict)
 
-    # Typed specs — the new source of truth. Legacy string dicts are
-    # synthesised from these on demand for backward-compatible consumers.
+    # Typed specs — source of truth for validation, runtime checks, and UI forms.
     input_ports: tuple[PortSpec, ...] = field(default_factory=tuple)
     output_ports: tuple[PortSpec, ...] = field(default_factory=tuple)
     params: tuple[ParamSpec, ...] = field(default_factory=tuple)

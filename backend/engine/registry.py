@@ -81,11 +81,14 @@ def get_spec(type_id: str) -> NodeSpec:
 
 def contracts_document(version: str = "1.0") -> dict:
     """
-    Serialisable contracts document — served live by the
-    `/contracts` endpoint and consumed by the frontend artifact
-    generator. Structurally identical to the legacy static
-    `node_contracts.json` so existing consumers do not need to
-    change.
+    Serialisable view of every live NodeSpec.
+
+    Important naming note for maintainers:
+    `NodeSpec` is the canonical node contract used by validation/runtime.
+    This document is a derived JSON payload for Copilot, `/contracts`, and
+    generated artifacts. If it looks wrong, fix the node YAML/handler and run
+    `backend/scripts/gen_artifacts.py`; do not hand-edit
+    `backend/contracts/node_contracts.json`.
     """
     return {
         "version": version,
@@ -152,9 +155,15 @@ def palette_sections_from_manifest_nodes(nodes: list[dict]) -> list[dict]:
 
 def studio_manifest() -> dict:
     """
-    Single payload for the Studio UI: palette rails, per-node UI + typed
-    ports/params, and copilot-style contracts. Always matches the live
-    :data:`NODE_SPECS` registry (no checked-in artifact required).
+    Single payload for the Studio UI.
+
+    It includes:
+      * palette sections and node UI metadata,
+      * typed ports/params for config forms and validation display,
+      * a small derived contract block for docs/help text.
+
+    The payload is built from live :data:`NODE_SPECS`, so the frontend can
+    refresh after backend changes without a rebuild.
     """
     um = ui_manifest()
     raw_nodes = um["nodes"]

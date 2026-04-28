@@ -2,7 +2,7 @@
  * Top action bar.
  *
  * Owns: workflow name editing, theme toggle, drawer toggle (saved
- * workflows), import/export JSON, validate, save, and run.
+ * workflows), import/export YAML, validate, save, and run.
  * All actions delegate to workflowStore — this component is mostly a
  * styled set of buttons.
  *
@@ -10,7 +10,7 @@
  * store; the canvas + RunLogView subscribe and animate as events
  * arrive. The button itself only flips between idle / loading state.
  */
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import {
   Sun, Moon, LayoutTemplate, Upload, Download, ShieldCheck, Save, Play, Loader2, Trash2,
 } from 'lucide-react'
@@ -45,6 +45,7 @@ export default function Topbar() {
   const validationIssues = useWorkflowStore((s) => s.validationIssues)
   const setValidationIssues = useWorkflowStore((s) => s.setValidationIssues)
   const markSaved = useWorkflowStore((s) => s.markSaved)
+  const setWorkflow = useWorkflowStore((s) => s.setWorkflow)
   const runLog = useWorkflowStore((s) => s.runLog)
   const runResult = useWorkflowStore((s) => s.runResult)
   const runError = useWorkflowStore((s) => s.runError)
@@ -58,9 +59,11 @@ export default function Topbar() {
   const theme = useThemeStore((s) => s.theme)
   const toggleTheme = useThemeStore((s) => s.toggle)
   const [saving, setSaving] = useState(false)
+  const [exporting, setExporting] = useState(false)
   const [validating, setValidating] = useState(false)
   const [validatedSignature, setValidatedSignature] = useState<string | null>(null)
   const [lastValidationValid, setLastValidationValid] = useState<boolean | null>(null)
+  const importInputRef = useRef<HTMLInputElement | null>(null)
 
   const nodeCount = workflow?.nodes.length ?? 0
   const edgeCount = workflow?.edges.length ?? 0
@@ -90,8 +93,8 @@ export default function Topbar() {
     const name = rawName.trim()
     const targetFilename =
       sourceKind === 'saved' && name === workflow.name
-        ? (sourceFilename ?? `${slugify(name)}.json`)
-        : `${slugify(name)}.json`
+        ? (sourceFilename ?? `${slugify(name)}.yaml`)
+        : `${slugify(name)}.yaml`
     setSaving(true)
     try {
       const updated = { ...workflow, name }
@@ -108,15 +111,36 @@ export default function Topbar() {
     }
   }
 
-  function handleExport() {
+  async function handleExport() {
     if (!workflow) return
-    const blob = new Blob([JSON.stringify(workflow, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${slugify(workflow.name)}.json`
-    a.click()
-    URL.revokeObjectURL(url)
+    setExporting(true)
+    try {
+      const { content } = await api.workflowToYaml(workflow)
+      const blob = new Blob([content], { type: 'application/x-yaml' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${slugify(workflow.name)}.yaml`
+      a.click()
+      URL.revokeObjectURL(url)
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  async function handleImportFile(file: File) {
+    const text = await file.text()
+    const lower = file.name.toLowerCase()
+    try {
+      const imported =
+        lower.endsWith('.json')
+          ? JSON.parse(text)
+          : (await api.workflowFromYaml(text)).workflow
+      setWorkflow(imported)
+      resetRun()
+    } catch (e) {
+      window.alert(`Could not import workflow: ${(e as Error).message}`)
+    }
   }
 
   async function handleValidate() {
@@ -211,8 +235,25 @@ export default function Topbar() {
           {theme === 'dark' ? <Sun size={15} strokeWidth={2} /> : <Moon size={15} strokeWidth={2} />}
         </IconButton>
         <BarButton onClick={() => setDrawerOpen(true)} icon={<LayoutTemplate size={14} strokeWidth={2} />}>Templates</BarButton>
-        <BarButton onClick={() => setDrawerOpen(true)} icon={<Upload size={14} strokeWidth={2} />}>Import</BarButton>
-        <BarButton onClick={handleExport} icon={<Download size={14} strokeWidth={2} />} disabled={!workflow}>Export</BarButton>
+        <input
+          ref={importInputRef}
+          type="file"
+          accept=".yaml,.yml,.json,application/x-yaml,application/json"
+          style={{ display: 'none' }}
+          onChange={(event) => {
+            const file = event.target.files?.[0]
+            event.target.value = ''
+            if (file) void handleImportFile(file)
+          }}
+        />
+        <BarButton onClick={() => importInputRef.current?.click()} icon={<Upload size={14} strokeWidth={2} />}>Import</BarButton>
+        <BarButton
+          onClick={() => { void handleExport() }}
+          icon={exporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} strokeWidth={2} />}
+          disabled={!workflow || exporting}
+        >
+          Export
+        </BarButton>
         <StatusIconButton
           onClick={() => { void handleValidate() }}
           disabled={!workflow || validating}

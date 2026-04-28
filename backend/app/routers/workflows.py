@@ -5,8 +5,8 @@ Workflow CRUD for two parallel stores:
   drafts/      — in-flight or Copilot-generated workflows. Transient; users
                  promote a draft to a saved workflow by clicking Save As.
 
-Both are just JSON files on disk, so the handlers are nearly identical.
-They share a helper so keeping behaviour consistent is trivial.
+Files may be JSON or YAML. The runner still receives the same in-memory DAG
+dict either way; YAML is the human-friendly authoring/export format.
 """
 from __future__ import annotations
 
@@ -17,6 +17,9 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
+from engine.workflow_format import workflow_from_yaml, workflow_to_yaml
+
+from ..schemas import WorkflowYamlParseRequest, WorkflowYamlRenderRequest
 from ..deps import DRAFTS_DIR, WORKFLOWS_DIR
 
 
@@ -24,23 +27,45 @@ from ..deps import DRAFTS_DIR, WORKFLOWS_DIR
 # Shared file helpers
 # ---------------------------------------------------------------------------
 _SAFE_FILENAME = re.compile(r"^[A-Za-z0-9._-]+$")
+_WORKFLOW_SUFFIXES = {".json", ".yaml", ".yml"}
 
 
 def _safe_path(base: Path, filename: str) -> Path:
     """Reject filenames that try to escape the base directory."""
     if not _SAFE_FILENAME.match(filename):
         raise HTTPException(status_code=400, detail=f"Invalid filename '{filename}'")
+    if Path(filename).suffix not in _WORKFLOW_SUFFIXES:
+        raise HTTPException(status_code=400, detail="Workflow filename must end with .json, .yaml, or .yml")
     return base / filename
+
+
+def _read_workflow(path: Path) -> dict:
+    try:
+        text = path.read_text()
+        if path.suffix == ".json":
+            return json.loads(text)
+        return workflow_from_yaml(text)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"'{path.name}' is not valid JSON: {exc}")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"'{path.name}' is not valid workflow YAML: {exc}")
+
+
+def _write_workflow(path: Path, dag: dict[str, Any]) -> None:
+    if path.suffix == ".json":
+        path.write_text(json.dumps(dag, indent=2) + "\n")
+    else:
+        path.write_text(workflow_to_yaml(dag))
 
 
 def _list_dir(base: Path) -> list[dict]:
     items: list[dict] = []
     if not base.exists():
         return items
-    for f in sorted(base.glob("*.json")):
+    files = [f for f in base.iterdir() if f.is_file() and f.suffix in _WORKFLOW_SUFFIXES]
+    for f in sorted(files):
         try:
-            with open(f) as fh:
-                dag = json.load(fh)
+            dag = _read_workflow(f)
         except Exception:
             continue
         stat = f.stat()
@@ -66,15 +91,13 @@ def _load(base: Path, filename: str) -> dict:
     path = _safe_path(base, filename)
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"'{filename}' not found in {base.name}")
-    with open(path) as f:
-        return json.load(f)
+    return _read_workflow(path)
 
 
 def _save(base: Path, filename: str, dag: dict[str, Any]) -> dict:
     path = _safe_path(base, filename)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w") as f:
-        json.dump(dag, f, indent=2)
+    _write_workflow(path, dag)
     return {"saved": filename, "location": base.name}
 
 
@@ -90,6 +113,21 @@ def _delete(base: Path, filename: str) -> dict:
 # /workflows — saved (named, promoted) workflows
 # ---------------------------------------------------------------------------
 router = APIRouter(tags=["workflows"])
+
+
+@router.post("/workflow-format/yaml-to-json")
+def parse_workflow_yaml(req: WorkflowYamlParseRequest) -> dict:
+    """Convert human-authored workflow YAML into the runtime JSON DAG."""
+    try:
+        return {"workflow": workflow_from_yaml(req.content)}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/workflow-format/json-to-yaml")
+def render_workflow_yaml(req: WorkflowYamlRenderRequest) -> dict:
+    """Convert the runtime JSON DAG into downloadable workflow YAML."""
+    return {"content": workflow_to_yaml(req.workflow)}
 
 
 @router.get("/workflows")

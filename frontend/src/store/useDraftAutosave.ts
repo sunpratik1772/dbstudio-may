@@ -24,7 +24,7 @@ function slugify(name: string | undefined | null): string {
 }
 
 function autoDraftFilename(w: Workflow): string {
-  return `${slugify(w.name)}-${Date.now()}.json`
+  return `${slugify(w.name)}-${Date.now()}.yaml`
 }
 
 export function useDraftAutosave(): void {

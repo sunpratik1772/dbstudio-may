@@ -36,6 +36,20 @@ class ValidateWorkflowRequest(BaseModel):
     )
 
 
+class WorkflowYamlParseRequest(BaseModel):
+    content: str = Field(
+        ...,
+        description="Human-authored workflow YAML to parse into the runtime JSON DAG shape.",
+    )
+
+
+class WorkflowYamlRenderRequest(BaseModel):
+    workflow: dict[str, Any] = Field(
+        ...,
+        description="Runtime workflow DAG JSON to render as human-readable YAML.",
+    )
+
+
 class CopilotChatRequest(BaseModel):
     message: str = Field(..., description="Free-form user message for the copilot chat endpoint.")
     reset_history: bool = Field(

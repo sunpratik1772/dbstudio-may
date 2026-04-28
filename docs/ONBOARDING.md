@@ -45,7 +45,7 @@ API docs: http://localhost:8000/docs
 | --- | --- |
 | Add or change a node | [`HOW_TO_DEFINE_A_NODE.md`](HOW_TO_DEFINE_A_NODE.md) |
 | Add or change a dataset/source schema | [`HOW_TO_ONBOARD_A_DATASOURCE.md`](HOW_TO_ONBOARD_A_DATASOURCE.md) |
-| Build or test a workflow JSON from backend | [`HOW_TO_BUILD_A_WORKFLOW_FROM_BACKEND.md`](HOW_TO_BUILD_A_WORKFLOW_FROM_BACKEND.md) |
+| Build or test a workflow YAML from backend | [`HOW_TO_BUILD_A_WORKFLOW_FROM_BACKEND.md`](HOW_TO_BUILD_A_WORKFLOW_FROM_BACKEND.md) |
 | Build, validate, run, or generate a workflow in Studio | [`HOW_TO_BUILD_A_WORKFLOW_FROM_UI.md`](HOW_TO_BUILD_A_WORKFLOW_FROM_UI.md) |
 | Understand backend architecture | [`BACKEND_ARCHITECTURE.md`](BACKEND_ARCHITECTURE.md) |
 | Understand frontend architecture | [`FRONTEND_ARCHITECTURE.md`](FRONTEND_ARCHITECTURE.md) |
@@ -57,7 +57,7 @@ API docs: http://localhost:8000/docs
 | Node behavior and UI metadata | `backend/engine/nodes/<node>.yaml` + `<node>.py` |
 | Data-source columns and semantic tags | `backend/data_sources/metadata/<source>.yaml` |
 | Copilot domain knowledge | `backend/skills/*.md` |
-| Saved runnable workflows | `backend/workflows/*.json` |
+| Saved runnable workflows | `backend/workflows/*.yaml` preferred; legacy `.json` still loads |
 | Copilot templates | `backend/templates/*.json` |
 | Generated fallback artifacts | `backend/scripts/gen_artifacts.py` output |
 
@@ -126,4 +126,4 @@ Check:
 - No real `.env` or API keys are staged.
 - Generated artifacts are updated if NodeSpecs changed.
 - `node_detail.md` reflects the node catalog.
-- Workflows validate if you touched workflow JSON.
+- Workflows validate if you touched workflow YAML/JSON.

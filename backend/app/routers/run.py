@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 from engine import RunContext
 from engine.jobs import get_default_runner
 from engine.validator import validate_dag
+from engine.workflow_format import workflow_from_yaml
 
 from ..deps import WORKFLOWS_DIR
 from ..schemas import RunWorkflowRequest
@@ -81,7 +82,7 @@ class RunDemoRequest(BaseModel):
     workflow_filename: str = Field(
         default=_DEMO_WORKFLOW_FILENAME,
         description=(
-            "Name of a JSON file under `backend/workflows/` to execute. "
+            "Name of a .json/.yaml workflow file under `backend/workflows/` to execute. "
             "Defaults to the bundled demo workflow. `fxfronew_workflow.json` is "
             "the same DAG with report `output/fxfronew_report.xlsx`."
         ),
@@ -193,9 +194,16 @@ def _load_bundled_workflow(filename: str) -> dict:
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"workflow '{safe}' not found")
     try:
-        return json.loads(path.read_text())
+        text = path.read_text()
+        if path.suffix == ".json":
+            return json.loads(text)
+        if path.suffix in {".yaml", ".yml"}:
+            return workflow_from_yaml(text)
+        raise HTTPException(status_code=400, detail="workflow_filename must end with .json, .yaml, or .yml")
     except json.JSONDecodeError as exc:
         raise HTTPException(status_code=500, detail=f"workflow '{safe}' is not valid JSON: {exc}")
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail=f"workflow '{safe}' is not valid YAML: {exc}")
 
 
 @router.post("/run/demo")
@@ -206,7 +214,7 @@ def run_demo(req: Optional[RunDemoRequest] = None):
     a browser download.
 
     This endpoint is the fastest way to verify a deployment end-to-end
-    — no alert payload, no workflow JSON, no external data source
+    — no alert payload, no workflow authoring file, no external data source
     required. Reviewers can `curl -OJ $SERVICE_URL/run/demo` and open
     the resulting xlsx. Pass `return_json=true` in the body to get the
     normal JSON run summary instead (with a `download_url` field).

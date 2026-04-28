@@ -111,6 +111,10 @@ export const api = {
   getWorkflow: (filename: string) => request<Workflow>('GET', `/workflows/${filename}`),
   saveWorkflow: (filename: string, dag: Workflow) => request<{ saved: string }>('POST', `/workflows/${filename}`, dag),
   deleteWorkflow: (filename: string) => request<{ deleted: string }>('DELETE', `/workflows/${filename}`),
+  workflowFromYaml: (content: string) =>
+    request<{ workflow: Workflow }>('POST', '/workflow-format/yaml-to-json', { content }),
+  workflowToYaml: (workflow: Workflow) =>
+    request<{ content: string }>('POST', '/workflow-format/json-to-yaml', { workflow }),
 
   // -- Drafts (auto-saved, transient) --------------------------------
   listDrafts: () => request<{ drafts: StoredWorkflow[] }>('GET', '/drafts'),
