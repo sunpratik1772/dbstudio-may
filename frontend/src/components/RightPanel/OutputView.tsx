@@ -70,8 +70,29 @@ function StageOutput({ entry }: { entry: RunLogEntry }) {
   }
 
   const datasets = out.datasets ? Object.entries(out.datasets) : []
+  const showRawContext = !out.agent_response && out.context && Object.keys(out.context).length > 0
   return (
     <div className="space-y-2">
+      {out.agent_response && (
+        <div
+          className="rounded p-2"
+          style={{
+            background: 'color-mix(in srgb, var(--accent) 8%, var(--bg-0))',
+            border: '1px solid color-mix(in srgb, var(--accent) 26%, var(--border-soft))',
+          }}
+        >
+          <div
+            className="font-mono mb-1"
+            style={{ fontSize: 9.5, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'var(--text-3)' }}
+          >
+            agent response
+          </div>
+          <p style={{ fontSize: 11.5, color: 'var(--text-0)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+            {out.agent_response}
+          </p>
+        </div>
+      )}
+
       {datasets.map(([name, ds]) => (
         <div
           key={name}
@@ -170,13 +191,13 @@ function StageOutput({ entry }: { entry: RunLogEntry }) {
         </div>
       )}
 
-      {out.context && Object.keys(out.context).length > 0 && (
+      {showRawContext && (
         <details>
           <summary
             className="cursor-pointer font-mono"
             style={{ fontSize: 9.5, color: 'var(--text-3)', letterSpacing: '0.14em', textTransform: 'uppercase' }}
           >
-            context · {Object.keys(out.context).length}
+            context · {Object.keys(out.context ?? {}).length}
           </summary>
           <pre
             className="num mt-1 p-2 rounded overflow-x-auto"
@@ -192,7 +213,8 @@ function StageOutput({ entry }: { entry: RunLogEntry }) {
         && !out.section
         && !out.executive_summary_preview
         && !out.report_path
-        && !(out.context && Object.keys(out.context).length > 0) && (
+        && !out.agent_response
+        && !showRawContext && (
           <pre
             className="num p-2 rounded overflow-x-auto"
             style={{ fontSize: 10, color: 'var(--text-1)', background: 'var(--bg-0)', border: '1px solid var(--border-soft)', maxHeight: 200 }}

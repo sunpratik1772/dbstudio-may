@@ -36,6 +36,13 @@ params:
       Falls back to the built-in template when empty.
     required: false
     widget: textarea
+  - name: system_prompt
+    type: string
+    description: >-
+      System instruction for the executive-summary LLM. Rendered with
+      {section_text}, alert context, prompt_context vars, and context refs.
+    required: false
+    widget: textarea
   - name: prompt_context
     type: object
     description: >-
@@ -44,10 +51,24 @@ params:
       columns}}. Same shape as SECTION_SUMMARY.prompt_context.
     default: {}
     required: false
+  - name: model
+    type: string
+    description: "Optional LLM model override."
+    required: false
+  - name: temperature
+    type: number
+    description: "LLM temperature."
+    default: 0.2
+    required: false
+  - name: max_output_tokens
+    type: integer
+    description: "Maximum response tokens."
+    default: 1000
+    required: false
 
 semantics:
   requires: []
 
 constraints:
-  - "LLM model: claude-sonnet-4-6, max_tokens: 1000."
+  - "Default max_output_tokens: 1000."
   - "Must run after all SECTION_SUMMARY nodes."

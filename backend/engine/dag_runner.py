@@ -421,6 +421,10 @@ def _snapshot_output(node: dict, ctx: RunContext, before: dict) -> dict:
     if new_values:
         summary["context"] = {k: _jsonable(v) for k, v in new_values.items()}
 
+    agent_response = _agent_response(node, new_values, ctx)
+    if agent_response:
+        summary["agent_response"] = agent_response
+
     # Node-type specific highlights
     if node_type == "DECISION_RULE":
         summary["disposition"] = ctx.disposition
@@ -444,6 +448,179 @@ def _snapshot_output(node: dict, ctx: RunContext, before: dict) -> dict:
         summary["report_path"] = ctx.report_path
 
     return summary
+
+
+def _agent_response(node: dict, new_values: dict, ctx: RunContext) -> str | None:
+    """Return a concise human-readable response for agent-layer nodes."""
+    node_type = node.get("type")
+    if not _is_agent_node(node_type):
+        return None
+    cfg = node.get("config") or {}
+
+    def pick(default_key: str) -> object:
+        key = str(cfg.get("output_name") or default_key)
+        if key in new_values:
+            return new_values[key]
+        return ctx.get(key)
+
+    if node_type == "LLM_PLANNER":
+        plan = pick("plan")
+        steps = plan.get("steps") if isinstance(plan, dict) else []
+        if steps:
+            first = steps[0]
+            action = first.get("action") or first.get("tool") or "next step"
+            return f"Planned {len(steps)} step(s). First step: {action}."
+        return "Created an investigation plan."
+
+    if node_type == "PLAN_VALIDATOR":
+        result = pick("plan_validation")
+        return _validity_sentence(result, "Plan")
+
+    if node_type == "LLM_ACTION":
+        action = pick("action")
+        if isinstance(action, dict):
+            tool = action.get("tool") or "tool"
+            reasoning = action.get("reasoning")
+            confidence = action.get("confidence")
+            suffix = f" Confidence: {confidence}." if confidence is not None else ""
+            return f"Selected `{tool}` as the next action.{suffix}" + (f" {reasoning}" if reasoning else "")
+        return "Selected the next action."
+
+    if node_type == "ACTION_VALIDATOR":
+        result = pick("action_validation")
+        return _validity_sentence(result, "Action")
+
+    if node_type == "GUARDRAIL":
+        result = pick("guardrail_result")
+        return _validity_sentence(result, "Safety guardrail")
+
+    if node_type == "TOOL_EXECUTOR":
+        result = pick("last_result")
+        if isinstance(result, dict):
+            status = result.get("status", "ok")
+            output = result.get("output_name") or result.get("artifact_path") or result.get("node_type")
+            rows = result.get("rows")
+            bits = [f"Tool execution finished with status `{status}`."]
+            if output:
+                bits.append(f"Output: {output}.")
+            if rows is not None:
+                bits.append(f"Rows: {rows}.")
+            return " ".join(bits)
+        return "Executed the selected tool."
+
+    if node_type == "LLM_CRITIC":
+        result = pick("validation")
+        if isinstance(result, dict):
+            valid = bool(result.get("valid"))
+            confidence = result.get("confidence")
+            issues = result.get("issues") or []
+            suggestions = result.get("suggestions") or []
+            status = "accepted the result" if valid else "found issues"
+            text = f"The critic {status}"
+            if confidence is not None:
+                text += f" with confidence {confidence}"
+            text += "."
+            if issues:
+                text += " Issues: " + "; ".join(map(str, issues[:3])) + "."
+            if suggestions:
+                text += " Suggestions: " + "; ".join(map(str, suggestions[:3])) + "."
+            return text
+        return "Critiqued the latest result."
+
+    if node_type == "STATE_MANAGER":
+        state = pick("retry_context")
+        iteration = state.get("iteration") if isinstance(state, dict) else None
+        return f"Updated agent memory." + (f" Iteration is now {iteration}." if iteration is not None else "")
+
+    if node_type == "LLM_EVALUATOR":
+        result = pick("evaluator_status")
+        if isinstance(result, dict):
+            done = bool(result.get("done"))
+            confidence = result.get("confidence")
+            missing = result.get("missing") or []
+            text = "The goal is satisfied" if done else "The goal is not satisfied yet"
+            if confidence is not None:
+                text += f" with confidence {confidence}"
+            text += "."
+            if missing:
+                text += " Missing: " + "; ".join(map(str, missing[:3])) + "."
+            return text
+        return "Evaluated goal satisfaction."
+
+    if node_type == "LOOP_CONTROLLER":
+        result = pick("loop_decision")
+        if isinstance(result, dict):
+            action = "continue" if result.get("continue") else "stop"
+            reason = result.get("stop_reason") or "decision made"
+            iteration = result.get("iteration")
+            return f"Loop controller decided to {action}. Reason: {reason}. Iteration: {iteration}."
+        return "Updated loop control."
+
+    if node_type == "LLM_SYNTHESIZER":
+        result = pick("final_output")
+        return _payload_text(result) or "Synthesized the final response."
+
+    if node_type == "LLM_CONTEXTUALIZER":
+        result = pick("enriched_context")
+        return _payload_text(result) or "Enriched the context for downstream reasoning."
+
+    if node_type == "AGGREGATOR_NODE":
+        return "Aggregated selected context values and datasets."
+
+    if node_type == "DATA_REDUCER":
+        summary_key = f"{str(cfg.get('output_name') or 'reduced_data')}_summary"
+        result = new_values.get(summary_key) or ctx.get(summary_key)
+        return _payload_text(result) or "Reduced the dataset for agent review."
+
+    if node_type == "ERROR_HANDLER":
+        result = pick("recovery_strategy")
+        return _payload_text(result) or "Selected a recovery strategy."
+
+    return None
+
+
+def _is_agent_node(node_type: object) -> bool:
+    if not isinstance(node_type, str):
+        return False
+    spec = NODE_SPECS.get(node_type)
+    return bool(spec and spec.ui.get("palette_group") == "agent")
+
+
+def _validity_sentence(result: object, subject: str) -> str:
+    if not isinstance(result, dict):
+        return f"{subject} validation completed."
+    valid = bool(result.get("valid"))
+    errors = result.get("errors") or result.get("issues") or []
+    text = f"{subject} validation {'passed' if valid else 'failed'}."
+    if errors:
+        text += " " + "; ".join(map(str, errors[:3])) + "."
+    return text
+
+
+def _payload_text(payload: object) -> str | None:
+    if payload is None:
+        return None
+    if isinstance(payload, str):
+        return payload
+    if isinstance(payload, dict):
+        for key in ("response", "text", "summary", "memo", "narrative", "answer", "final_output"):
+            value = payload.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        result = payload.get("result")
+        if isinstance(result, dict):
+            done = result.get("done")
+            confidence = result.get("confidence")
+            missing = result.get("missing") or []
+            if done is not None or confidence is not None or missing:
+                text = f"Escalation readiness is {'complete' if done else 'incomplete'}"
+                if confidence is not None:
+                    text += f" with confidence {confidence}"
+                text += "."
+                if missing:
+                    text += " Missing: " + "; ".join(map(str, missing[:3])) + "."
+                return text
+    return None
 
 
 def _jsonable(v):

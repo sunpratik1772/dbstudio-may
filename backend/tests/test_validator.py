@@ -138,6 +138,262 @@ class TestParams:
         codes = {i.code for i in result.errors}
         assert "BAD_ENUM_VALUE" in codes or "BAD_PARAM_TYPE" in codes
 
+    def test_bad_prompt_template_braces_rejected(self):
+        result = validate_dag(
+            {
+                "schema_version": "1.0",
+                "nodes": [
+                    {"id": "n01", "type": "ALERT_TRIGGER", "label": "Alert", "config": {}},
+                    {
+                        "id": "n02",
+                        "type": "LLM_ACTION",
+                        "label": "Action",
+                        "config": {
+                            "prompt_template": 'Return JSON like {"tool": "aggregation"}',
+                        },
+                    },
+                ],
+                "edges": [{"from": "n01", "to": "n02"}],
+            }
+        )
+
+        assert not result.valid
+        assert any(
+            i.code == "BAD_PROMPT_TEMPLATE" and i.node_id == "n02"
+            for i in result.errors
+        )
+
+    def test_prompt_ref_unknown_dataset_column_rejected(self):
+        result = validate_dag(
+            {
+                "schema_version": "1.0",
+                "nodes": [
+                    {"id": "n01", "type": "ALERT_TRIGGER", "label": "Alert", "config": {}},
+                    {
+                        "id": "n02",
+                        "type": "COMMS_COLLECTOR",
+                        "label": "Comms",
+                        "config": {
+                            "query_template": "user:{context.trader_id}",
+                            "output_name": "comms",
+                        },
+                    },
+                    {
+                        "id": "n03",
+                        "type": "LLM_CRITIC",
+                        "label": "Critic",
+                        "config": {
+                            "prompt_template": "Keyword hits: {comms.keyword_hit_count}",
+                        },
+                    },
+                    {
+                        "id": "n04",
+                        "type": "REPORT_OUTPUT",
+                        "label": "Report",
+                        "config": {"output_path": "output/test.xlsx"},
+                    },
+                ],
+                "edges": [
+                    {"from": "n01", "to": "n02"},
+                    {"from": "n02", "to": "n03"},
+                    {"from": "n03", "to": "n04"},
+                ],
+            }
+        )
+
+        assert not result.valid
+        assert any(
+            i.code == "BAD_PROMPT_REF" and i.node_id == "n03"
+            for i in result.errors
+        )
+
+    def test_prompt_ref_known_dataset_column_agg_allowed(self):
+        result = validate_dag(
+            {
+                "schema_version": "1.0",
+                "nodes": [
+                    {"id": "n01", "type": "ALERT_TRIGGER", "label": "Alert", "config": {}},
+                    {
+                        "id": "n02",
+                        "type": "COMMS_COLLECTOR",
+                        "label": "Comms",
+                        "config": {
+                            "query_template": "user:{context.trader_id}",
+                            "output_name": "comms",
+                        },
+                    },
+                    {
+                        "id": "n03",
+                        "type": "LLM_CRITIC",
+                        "label": "Critic",
+                        "config": {
+                            "prompt_template": "Keyword hits: {comms._keyword_hit.sum}",
+                        },
+                    },
+                    {
+                        "id": "n04",
+                        "type": "REPORT_OUTPUT",
+                        "label": "Report",
+                        "config": {"output_path": "output/test.xlsx"},
+                    },
+                ],
+                "edges": [
+                    {"from": "n01", "to": "n02"},
+                    {"from": "n02", "to": "n03"},
+                    {"from": "n03", "to": "n04"},
+                ],
+            }
+        )
+
+        assert result.valid, result.to_json()
+
+    def test_prompt_ref_unknown_special_ref_rejected(self):
+        result = validate_dag(
+            {
+                "schema_version": "1.0",
+                "nodes": [
+                    {"id": "n01", "type": "ALERT_TRIGGER", "label": "Alert", "config": {}},
+                    {
+                        "id": "n02",
+                        "type": "MARKET_DATA_COLLECTOR",
+                        "label": "Market",
+                        "config": {
+                            "source": "EBS",
+                            "query_template": "symbol:{context.currency_pair}",
+                            "output_name": "market_data",
+                        },
+                    },
+                    {
+                        "id": "n03",
+                        "type": "LLM_CRITIC",
+                        "label": "Critic",
+                        "config": {
+                            "prompt_template": "Ticks: {market_data.@tick_count}",
+                        },
+                    },
+                    {
+                        "id": "n04",
+                        "type": "REPORT_OUTPUT",
+                        "label": "Report",
+                        "config": {"output_path": "output/test.xlsx"},
+                    },
+                ],
+                "edges": [
+                    {"from": "n01", "to": "n02"},
+                    {"from": "n02", "to": "n03"},
+                    {"from": "n03", "to": "n04"},
+                ],
+            }
+        )
+
+        assert not result.valid
+        assert any(
+            i.code == "BAD_PROMPT_REF" and i.node_id == "n03"
+            for i in result.errors
+        )
+
+    def test_section_summary_dotted_stats_ref_allowed_when_computed(self):
+        result = validate_dag(
+            {
+                "schema_version": "1.0",
+                "nodes": [
+                    {"id": "n01", "type": "ALERT_TRIGGER", "label": "Alert", "config": {}},
+                    {
+                        "id": "n02",
+                        "type": "EXECUTION_DATA_COLLECTOR",
+                        "label": "Orders",
+                        "config": {
+                            "source": "hs_client_order",
+                            "query_template": "*:*",
+                            "output_name": "client_orders",
+                        },
+                    },
+                    {
+                        "id": "n03",
+                        "type": "SECTION_SUMMARY",
+                        "label": "Client Orders Summary",
+                        "config": {
+                            "section_name": "client_orders_summary",
+                            "input_name": "client_orders",
+                            "mode": "templated",
+                            "field_bindings": [
+                                {"field": "order_id", "agg": "count"},
+                                {"field": "quantity", "agg": "sum"},
+                            ],
+                            "llm_prompt_template": (
+                                "Total orders: {stats.order_id_count}. "
+                                "Total quantity: {stats.quantity_sum}."
+                            ),
+                        },
+                    },
+                    {
+                        "id": "n04",
+                        "type": "REPORT_OUTPUT",
+                        "label": "Report",
+                        "config": {"output_path": "output/test.xlsx"},
+                    },
+                ],
+                "edges": [
+                    {"from": "n01", "to": "n02"},
+                    {"from": "n02", "to": "n03"},
+                    {"from": "n03", "to": "n04"},
+                ],
+            }
+        )
+
+        assert result.valid, result.to_json()
+
+    def test_section_summary_dotted_stats_ref_rejected_when_not_computed(self):
+        result = validate_dag(
+            {
+                "schema_version": "1.0",
+                "nodes": [
+                    {"id": "n01", "type": "ALERT_TRIGGER", "label": "Alert", "config": {}},
+                    {
+                        "id": "n02",
+                        "type": "EXECUTION_DATA_COLLECTOR",
+                        "label": "Orders",
+                        "config": {
+                            "source": "hs_client_order",
+                            "query_template": "*:*",
+                            "output_name": "client_orders",
+                        },
+                    },
+                    {
+                        "id": "n03",
+                        "type": "SECTION_SUMMARY",
+                        "label": "Client Orders Summary",
+                        "config": {
+                            "section_name": "client_orders_summary",
+                            "input_name": "client_orders",
+                            "mode": "templated",
+                            "field_bindings": [
+                                {"field": "order_id", "agg": "count"},
+                            ],
+                            "llm_prompt_template": "Bad stat: {stats.order_count}.",
+                        },
+                    },
+                    {
+                        "id": "n04",
+                        "type": "REPORT_OUTPUT",
+                        "label": "Report",
+                        "config": {"output_path": "output/test.xlsx"},
+                    },
+                ],
+                "edges": [
+                    {"from": "n01", "to": "n02"},
+                    {"from": "n02", "to": "n03"},
+                    {"from": "n03", "to": "n04"},
+                ],
+            }
+        )
+
+        assert not result.valid
+        assert any(
+            i.code == "BAD_PROMPT_REF" and i.node_id == "n03"
+            for i in result.errors
+        )
+
 
 # ---------------------------------------------------------------------------
 # cycle detection

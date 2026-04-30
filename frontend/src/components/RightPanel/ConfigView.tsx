@@ -9,7 +9,7 @@
 import { useMemo, useState } from 'react'
 import { Settings2, ChevronDown, ChevronRight, ArrowRight, ArrowLeftRight, Sliders, Eye } from 'lucide-react'
 import { useWorkflowStore } from '../../store/workflowStore'
-import { useNodeRegistryStore, UNKNOWN_NODE_UI, type NodeType, type NodeContract } from '../../nodes'
+import { useNodeRegistryStore, UNKNOWN_NODE_UI, type NodeType, type NodeContract, type NodeTypedSpec } from '../../nodes'
 
 const EMPTY_CONFIG_CONTRACT: NodeContract = {
   description: '',
@@ -24,7 +24,7 @@ import Shell, { Empty, SectionHeader } from './Shell'
 /* -------------------------------------------------------------------------- */
 /* Field inference — legacy fallback for older string-only contracts.         */
 /* -------------------------------------------------------------------------- */
-type FieldKind = 'input-ref' | 'output-name' | 'boolean' | 'number' | 'string' | 'stringEnum' | 'stringArray' | 'json'
+type FieldKind = 'input-ref' | 'output-name' | 'boolean' | 'number' | 'string' | 'textarea' | 'stringEnum' | 'stringArray' | 'json'
 
 interface FieldDescriptor {
   key: string
@@ -33,16 +33,33 @@ interface FieldDescriptor {
   enumValues?: readonly string[]
 }
 
+type ParamSpec = NodeTypedSpec['params'][number]
+
 function classifyField(key: string, hint: string): FieldDescriptor {
   const h = hint.toLowerCase()
   if (key === 'input_name' || key.endsWith('_input_name') || key === 'input') return { key, hint, kind: 'input-ref' }
   if (key === 'output_name' || key.endsWith('_output_name')) return { key, hint, kind: 'output-name' }
+  if (key === 'system_prompt' || key === 'prompt_template' || key === 'llm_prompt_template') return { key, hint, kind: 'textarea' }
   if (h.startsWith('boolean')) return { key, hint, kind: 'boolean' }
   if (h.startsWith('number') || h.startsWith('integer') || h.startsWith('int')) return { key, hint, kind: 'number' }
   if (h.startsWith('array of strings') || h.startsWith('list of strings') || h.startsWith('list[str]')) return { key, hint, kind: 'stringArray' }
   if (h.startsWith('object') || h.startsWith('array') || h.startsWith('list')) return { key, hint, kind: 'json' }
   const enums = Array.from(hint.matchAll(/'([^']+)'/g)).map((m) => m[1])
   if (h.startsWith('string') && enums.length >= 2) return { key, hint, kind: 'stringEnum', enumValues: enums }
+  return { key, hint, kind: 'string' }
+}
+
+function fieldFromParam(param: ParamSpec): FieldDescriptor {
+  const key = param.name
+  const hint = param.description
+  if (param.widget === 'input_ref' || param.type === 'input_ref') return { key, hint, kind: 'input-ref' }
+  if (key === 'output_name' || key.endsWith('_output_name')) return { key, hint, kind: 'output-name' }
+  if (param.widget === 'checkbox' || param.type === 'boolean') return { key, hint, kind: 'boolean' }
+  if (param.widget === 'number' || param.type === 'number' || param.type === 'integer') return { key, hint, kind: 'number' }
+  if (param.widget === 'select' || param.type === 'enum') return { key, hint, kind: 'stringEnum', enumValues: param.enum ?? [] }
+  if (param.widget === 'chips' || param.type === 'string_list') return { key, hint, kind: 'stringArray' }
+  if (param.widget === 'textarea' || param.widget === 'code' || param.type === 'code') return { key, hint, kind: 'textarea' }
+  if (param.widget === 'json' || param.type === 'object' || param.type === 'array') return { key, hint, kind: 'json' }
   return { key, hint, kind: 'string' }
 }
 
@@ -266,6 +283,17 @@ function ParamInput({ field, value, upstream, onChange }: {
       />
     )
   }
+  if (field.kind === 'textarea') {
+    return (
+      <textarea
+        value={typeof value === 'string' ? value : ''}
+        onChange={(e) => onChange(e.target.value)}
+        rows={Math.min(14, Math.max(5, String(value ?? '').split('\n').length))}
+        spellCheck={false}
+        style={{ ...inputStyle, resize: 'vertical', minHeight: 120, lineHeight: 1.5 }}
+      />
+    )
+  }
   if (field.kind === 'output-name' || field.kind === 'string') {
     return (
       <input
@@ -314,6 +342,9 @@ export default function ConfigView() {
   const contract = useNodeRegistryStore((s) =>
     node ? (s.nodeContracts[node.type as NodeType] ?? EMPTY_CONFIG_CONTRACT) : EMPTY_CONFIG_CONTRACT,
   )
+  const typedSpec = useNodeRegistryStore((s) =>
+    node ? s.nodeTyped[node.type as NodeType] : undefined,
+  )
 
   if (!node) {
     return (
@@ -327,8 +358,14 @@ export default function ConfigView() {
     )
   }
   const upstream = workflow ? computeUpstream(node, workflow.nodes, workflow.edges) : []
-  const fields = Object.entries(contract.configSchema).map(([k, v]) => classifyField(k, v))
+  const fields = typedSpec?.params.length
+    ? typedSpec.params.map(fieldFromParam)
+    : Object.entries(contract.configSchema).map(([k, v]) => classifyField(k, v))
   const cfg = (node.config ?? {}) as Record<string, unknown>
+  const promptFields = fields.filter((f) => f.key === 'system_prompt' || f.key === 'prompt_template' || f.key === 'llm_prompt_template')
+  const llmSettingFields = fields.filter((f) => ['use_llm', 'model', 'temperature', 'max_output_tokens'].includes(f.key))
+  const specialFieldKeys = new Set([...promptFields, ...llmSettingFields].map((f) => f.key))
+  const nonPromptFields = fields.filter((f) => !specialFieldKeys.has(f.key))
   const inputName = typeof cfg.input_name === 'string' ? cfg.input_name : null
   const outputName = typeof cfg.output_name === 'string' ? cfg.output_name : null
   const inputs = Object.entries(contract.inputs)
@@ -413,8 +450,44 @@ export default function ConfigView() {
             ))}
       </Group>
 
-      <Group title="Params" count={fields.length}>
-        {fields.length === 0 ? (
+      {promptFields.length > 0 && (
+        <Group title="Prompts" count={promptFields.length}>
+          <div className="mb-2" style={{ fontSize: 10.5, color: 'var(--text-2)', lineHeight: 1.5 }}>
+            Copilot writes these per-node prompt templates. Runtime values such as
+            <span className="num" style={{ color: 'var(--text-1)' }}> {'{context.trader_id}'} </span>
+            are filled when the node executes.
+          </div>
+          {promptFields.map((f) => (
+            <ParamRow
+              key={f.key}
+              field={f}
+              value={cfg[f.key]}
+              upstream={upstream}
+              onChange={(v) => updateNodeConfig(node.id, { [f.key]: v })}
+            />
+          ))}
+        </Group>
+      )}
+
+      {llmSettingFields.length > 0 && (
+        <Group title="LLM Settings" count={llmSettingFields.length}>
+          <div className="mb-2" style={{ fontSize: 10.5, color: 'var(--text-2)', lineHeight: 1.5 }}>
+            Gemini runtime controls for this node. `temperature` controls response variability.
+          </div>
+          {llmSettingFields.map((f) => (
+            <ParamRow
+              key={f.key}
+              field={f}
+              value={cfg[f.key]}
+              upstream={upstream}
+              onChange={(v) => updateNodeConfig(node.id, { [f.key]: v })}
+            />
+          ))}
+        </Group>
+      )}
+
+      <Group title="Params" count={nonPromptFields.length}>
+        {nonPromptFields.length === 0 ? (
           <div style={{ fontSize: 11, color: 'var(--text-3)' }}>No configurable fields.</div>
         ) : (
           <>
@@ -422,7 +495,7 @@ export default function ConfigView() {
               <Sliders size={11} />
               <span className="font-mono" style={{ letterSpacing: '0.18em', textTransform: 'uppercase' }}>Editable</span>
             </div>
-            {fields.map((f) => (
+            {nonPromptFields.map((f) => (
               <ParamRow
                 key={f.key}
                 field={f}

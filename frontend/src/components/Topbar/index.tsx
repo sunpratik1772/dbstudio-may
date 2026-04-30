@@ -187,21 +187,28 @@ export default function Topbar() {
         borderBottom: '1px solid var(--border)',
       }}
     >
-      {/* Left: WF logo + brand */}
+      {/* Left: dbSherpa logo + brand */}
       <div className="flex items-center gap-3">
         <div
-          className="flex items-center justify-center font-mono"
+          className="flex items-center justify-center overflow-hidden"
           style={{
             width: 32, height: 32,
-            borderRadius: 6,
-            background: 'var(--text-0)',
-            color: 'var(--bg-0)',
-            fontSize: 12,
-            fontWeight: 700,
-            letterSpacing: '0.04em',
+            borderRadius: 8,
+            background: theme === 'dark' ? '#17181d' : '#ffffff',
+            border: '1px solid var(--border-soft)',
           }}
+          aria-label="dbSherpa"
         >
-          ds
+          <img
+            src={theme === 'dark' ? '/brand/dbsherpa-logo-dark.png' : '/brand/dbsherpa-logo-light.png'}
+            alt=""
+            style={{
+              width: 28,
+              height: 28,
+              objectFit: 'contain',
+              display: 'block',
+            }}
+          />
         </div>
         <div className="flex flex-col justify-center leading-tight gap-0.5">
           <span

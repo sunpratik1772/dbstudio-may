@@ -77,6 +77,7 @@ export interface RunLogEntry {
     executive_summary_preview?: string
     executive_summary_chars?: number
     report_path?: string
+    agent_response?: string
   }
   error?: string
   trace?: string

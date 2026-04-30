@@ -7,23 +7,106 @@ This file documents every node: what it does, inputs, outputs, static UI metadat
 
 | Node | Display | Section | Use |
 | --- | --- | --- | --- |
+| `ACTION_VALIDATOR` | Action Validator | `agent` | Validate LLM-selected tool and args before execution |
+| `AGGREGATOR_NODE` | Aggregator Node | `agent` | Merge selected values and optionally concatenate datasets |
 | `ALERT_TRIGGER` | Alert Trigger | `trigger` | Entry point — binds alert payload to context |
 | `COMMS_COLLECTOR` | Oculus | `integrations` | Query Oculus comms with keyword scanning |
 | `CONSOLIDATED_SUMMARY` | Consolidated Summary | `narrative` | LLM executive summary across all sections |
 | `DATA_HIGHLIGHTER` | Data Highlighter | `transform` | Apply colour rules to dataset rows |
+| `DATA_REDUCER` | Data Reducer | `agent` | Reduce a dataset to a bounded preview and summary for downstream LLM nodes |
 | `DECISION_RULE` | Decision Rule | `rule` | Evaluate flag_count or rules → ESCALATE/REVIEW/DISMISS + severity |
+| `ERROR_HANDLER` | Error Handler | `agent` | Classify failures and select retry, fallback, abort, or continue strategy |
 | `EXECUTION_DATA_COLLECTOR` | Solr Data Collector | `integrations` | Query Solr for client orders, executions, trades, and quotes |
 | `EXTRACT_LIST` | Extract List | `transform` | Emit the unique values of a column as an ordered list — cascade primitive for fan-out keys. |
 | `EXTRACT_SCALAR` | Extract Scalar | `transform` | Reduce a column of an upstream DataFrame to a single scalar (first, unique_single, max, min, count, sum, mean). |
 | `FEATURE_ENGINE` | Feature Engine | `transform` | Compose feature transforms (window, slice, pivot, agg, rolling, derive) |
 | `GROUP_BY` | Group By | `transform` | Split a dataset by column value into one DataFrame per group |
+| `GUARDRAIL` | Guardrail | `agent` | Apply deterministic safety checks to action/result state |
+| `LLM_ACTION` | llm.action | `agent` | llm.action — choose the next tool call using critic feedback and retry context |
+| `LLM_CONTEXTUALIZER` | llm.contextualizer | `agent` | llm.contextualizer — combine query and retrieved docs into enriched context |
+| `LLM_CRITIC` | llm.critic | `agent` | llm.critic — validate the latest action result and emit actionable feedback |
+| `LLM_EVALUATOR` | llm.evaluator | `agent` | llm.evaluator — decide whether the current workflow goal is satisfied |
+| `LLM_PLANNER` | llm.planner | `agent` | llm.planner — create a step plan from goal and context |
+| `LLM_SYNTHESIZER` | llm.synthesizer | `agent` | llm.synthesizer — produce final output and optional JSON/text artifact |
+| `LOOP_CONTROLLER` | Loop Controller | `agent` | Compute retry-loop continuation from iteration, done, and confidence state |
 | `MAP` | Map | `transform` | Fan out a sub-workflow over a list of keys; aggregate results |
 | `MARKET_DATA_COLLECTOR` | Mercury | `integrations` | Query EBS/Mercury tick data, normalise timestamps |
 | `ORACLE_DATA_COLLECTOR` | Oracle Data Collector | `integrations` | Query Oracle surveillance warehouse order/execution extracts |
+| `PLAN_VALIDATOR` | Plan Validator | `agent` | Validate generated plan structure, dependencies, and tool names |
 | `REPORT_OUTPUT` | Report Output | `output` | Generate Excel report with tabs & highlights |
 | `SECTION_SUMMARY` | Section Summary | `narrative` | Aggregate stats + LLM narrative section |
 | `SIGNAL_CALCULATOR` | Signal Calculator | `signal` | Compute signals — always outputs 5 columns |
+| `STATE_MANAGER` | State Manager | `agent` | Track retry history and iteration state |
 | `TIME_WINDOW` | Time Window | `transform` | Expand an event time into a [start_time, end_time] window for downstream filtering. |
+| `TOOL_EXECUTOR` | Tool Executor | `agent` | Bridge an LLM action into deterministic built-in or registered node execution |
+
+## `ACTION_VALIDATOR` — Action Validator
+
+**Use:** Validate LLM-selected tool and args before execution
+
+**Static metadata**
+
+| Field | Value |
+| --- | --- |
+| Type | `ACTION_VALIDATOR` |
+| Display name | Action Validator |
+| UI section | `agent` |
+| Palette order | `40` |
+| Color | `#7C3AED` |
+| Icon | `Gavel` |
+| Config tags | `output_name` |
+
+**Inputs**
+
+| Name | Type | Required | Description | Requirements |
+| --- | --- | --- | --- | --- |
+| `state` | `text` | yes | object from RunContext |  |
+
+**Outputs**
+
+| Name | Type | Optional | Stored at | Description | Requirements |
+| --- | --- | --- | --- | --- | --- |
+| `output` | `object` | no | `` | object stored in ctx.values |  |
+
+**Config parameters**
+
+| Name | Type | Required | Widget | Default | Enum/options | Description |
+| --- | --- | --- | --- | --- | --- | --- |
+| `output_name` | `string` | no | `text` |  |  | string — ctx.values key to write |
+
+## `AGGREGATOR_NODE` — Aggregator Node
+
+**Use:** Merge selected values and optionally concatenate datasets
+
+**Static metadata**
+
+| Field | Value |
+| --- | --- |
+| Type | `AGGREGATOR_NODE` |
+| Display name | Aggregator Node |
+| UI section | `agent` |
+| Palette order | `130` |
+| Color | `#7C3AED` |
+| Icon | `FileStack` |
+| Config tags | `output_name` |
+
+**Inputs**
+
+| Name | Type | Required | Description | Requirements |
+| --- | --- | --- | --- | --- |
+| `state` | `text` | yes | object from RunContext |  |
+
+**Outputs**
+
+| Name | Type | Optional | Stored at | Description | Requirements |
+| --- | --- | --- | --- | --- | --- |
+| `output` | `object` | no | `` | object stored in ctx.values |  |
+
+**Config parameters**
+
+| Name | Type | Required | Widget | Default | Enum/options | Description |
+| --- | --- | --- | --- | --- | --- | --- |
+| `output_name` | `string` | no | `text` |  |  | string — ctx.values key to write |
 
 ## `ALERT_TRIGGER` — Alert Trigger
 
@@ -142,11 +225,15 @@ This file documents every node: what it does, inputs, outputs, static UI metadat
 | Name | Type | Required | Widget | Default | Enum/options | Description |
 | --- | --- | --- | --- | --- | --- | --- |
 | `llm_prompt_template` | `string` | no | `textarea` |  |  | Custom prompt with {section_text}, {trader_id}, {currency_pair}, {disposition}, {flag_count} placeholders, plus any vars defined under prompt_context.vars and (when mode=dataset\|mixed) {dataset}. Cross-dataset refs like {executions.notional.sum} resolve inline. Falls back to the built-in template when empty. |
+| `system_prompt` | `string` | no | `textarea` |  |  | System instruction for the executive-summary LLM. Rendered with {section_text}, alert context, prompt_context vars, and context refs. |
 | `prompt_context` | `object` | no | `json` | `{}` |  | Optional structured slot block: {mode: template\|dataset\|mixed, vars: {name: ref_expr, ...}, dataset: {ref, format, max_rows, columns}}. Same shape as SECTION_SUMMARY.prompt_context. |
+| `model` | `string` | no | `text` |  |  | Optional LLM model override. |
+| `temperature` | `number` | no | `number` | `0.2` |  | LLM temperature. |
+| `max_output_tokens` | `integer` | no | `number` | `1000` |  | Maximum response tokens. |
 
 **Constraints**
 
-- LLM model: claude-sonnet-4-6, max_tokens: 1000.
+- Default max_output_tokens: 1000.
 - Must run after all SECTION_SUMMARY nodes.
 
 ## `DATA_HIGHLIGHTER` — Data Highlighter
@@ -191,6 +278,40 @@ This file documents every node: what it does, inputs, outputs, static UI metadat
 - Rules are applied in order — last matching rule wins.
 - Rows with no matching rule get colour #FFFFFF and empty label.
 - Buggy rules (unresolved refs, syntax errors, missing columns) are skipped with a warning. The run continues.
+
+## `DATA_REDUCER` — Data Reducer
+
+**Use:** Reduce a dataset to a bounded preview and summary for downstream LLM nodes
+
+**Static metadata**
+
+| Field | Value |
+| --- | --- |
+| Type | `DATA_REDUCER` |
+| Display name | Data Reducer |
+| UI section | `agent` |
+| Palette order | `140` |
+| Color | `#7C3AED` |
+| Icon | `ListFilter` |
+| Config tags | `output_name` |
+
+**Inputs**
+
+| Name | Type | Required | Description | Requirements |
+| --- | --- | --- | --- | --- |
+| `state` | `text` | yes | object from RunContext |  |
+
+**Outputs**
+
+| Name | Type | Optional | Stored at | Description | Requirements |
+| --- | --- | --- | --- | --- | --- |
+| `reduced_data` | `dataframe` | no | `` | DataFrame stored in ctx.datasets[output_name] |  |
+
+**Config parameters**
+
+| Name | Type | Required | Widget | Default | Enum/options | Description |
+| --- | --- | --- | --- | --- | --- | --- |
+| `output_name` | `string` | no | `text` |  |  | string — ctx.values key to write |
 
 ## `DECISION_RULE` — Decision Rule
 
@@ -241,6 +362,40 @@ This file documents every node: what it does, inputs, outputs, static UI metadat
 
 - Threshold mode (default) requires escalate_threshold >= review_threshold.
 - Rule mode short-circuits: first matching rule sets disposition + severity.
+
+## `ERROR_HANDLER` — Error Handler
+
+**Use:** Classify failures and select retry, fallback, abort, or continue strategy
+
+**Static metadata**
+
+| Field | Value |
+| --- | --- |
+| Type | `ERROR_HANDLER` |
+| Display name | Error Handler |
+| UI section | `agent` |
+| Palette order | `150` |
+| Color | `#7C3AED` |
+| Icon | `Gavel` |
+| Config tags | `output_name` |
+
+**Inputs**
+
+| Name | Type | Required | Description | Requirements |
+| --- | --- | --- | --- | --- |
+| `state` | `text` | yes | object from RunContext |  |
+
+**Outputs**
+
+| Name | Type | Optional | Stored at | Description | Requirements |
+| --- | --- | --- | --- | --- | --- |
+| `output` | `object` | no | `` | object stored in ctx.values |  |
+
+**Config parameters**
+
+| Name | Type | Required | Widget | Default | Enum/options | Description |
+| --- | --- | --- | --- | --- | --- | --- |
+| `output_name` | `string` | no | `text` |  |  | string — ctx.values key to write |
 
 ## `EXECUTION_DATA_COLLECTOR` — Solr Data Collector
 
@@ -459,6 +614,338 @@ This file documents every node: what it does, inputs, outputs, static UI metadat
 
 - Output dataset names contain the raw key value — keep keys filesystem-safe.
 
+## `GUARDRAIL` — Guardrail
+
+**Use:** Apply deterministic safety checks to action/result state
+
+**Static metadata**
+
+| Field | Value |
+| --- | --- |
+| Type | `GUARDRAIL` |
+| Display name | Guardrail |
+| UI section | `agent` |
+| Palette order | `50` |
+| Color | `#7C3AED` |
+| Icon | `Siren` |
+| Config tags | `output_name` |
+
+**Inputs**
+
+| Name | Type | Required | Description | Requirements |
+| --- | --- | --- | --- | --- |
+| `state` | `text` | yes | object from RunContext |  |
+
+**Outputs**
+
+| Name | Type | Optional | Stored at | Description | Requirements |
+| --- | --- | --- | --- | --- | --- |
+| `output` | `object` | no | `` | object stored in ctx.values |  |
+
+**Config parameters**
+
+| Name | Type | Required | Widget | Default | Enum/options | Description |
+| --- | --- | --- | --- | --- | --- | --- |
+| `output_name` | `string` | no | `text` |  |  | string — ctx.values key to write |
+
+## `LLM_ACTION` — llm.action
+
+**Use:** llm.action — choose the next tool call using critic feedback and retry context
+
+**Static metadata**
+
+| Field | Value |
+| --- | --- |
+| Type | `LLM_ACTION` |
+| Display name | llm.action |
+| UI section | `agent` |
+| Palette order | `30` |
+| Color | `#7C3AED` |
+| Icon | `Crosshair` |
+| Config tags | `output_name` |
+
+**Inputs**
+
+| Name | Type | Required | Description | Requirements |
+| --- | --- | --- | --- | --- |
+| `state` | `text` | yes | object from RunContext |  |
+
+**Outputs**
+
+| Name | Type | Optional | Stored at | Description | Requirements |
+| --- | --- | --- | --- | --- | --- |
+| `output` | `object` | no | `` | object stored in ctx.values |  |
+
+**Config parameters**
+
+| Name | Type | Required | Widget | Default | Enum/options | Description |
+| --- | --- | --- | --- | --- | --- | --- |
+| `use_llm` | `boolean` | no | `checkbox` |  |  | boolean — call configured LLM when true; otherwise use deterministic fallback |
+| `system_prompt` | `string` | no | `text` |  |  | string — system instruction for this LLM role; rendered with prompt_context and state placeholders |
+| `prompt_template` | `string` | no | `text` |  |  | string — user prompt template; can reference {goal}, {state}, {datasets}, {alert_payload}, prompt_context vars, and node-specific slots |
+| `prompt_context` | `object` | no | `json` |  |  | object — optional structured slots: {mode, vars, dataset} using the shared prompt_context grammar |
+| `model` | `string` | no | `text` |  |  | string — optional model override |
+| `temperature` | `number` | no | `number` |  |  | number — model temperature |
+| `max_output_tokens` | `integer` | no | `number` |  |  | integer — output token cap |
+| `output_name` | `string` | no | `text` |  |  | string — ctx.values key to write |
+| `plan_key` | `string` | no | `text` |  |  | string — ctx.values key for plan |
+| `validation_key` | `string` | no | `text` |  |  | string — ctx.values key for critic feedback |
+| `retry_context_key` | `string` | no | `text` |  |  | string — ctx.values key for retry history |
+| `args` | `object` | no | `json` |  |  | object — static tool args merged into action |
+| `tool` | `string` | no | `text` |  |  | string — fallback tool |
+
+## `LLM_CONTEXTUALIZER` — llm.contextualizer
+
+**Use:** llm.contextualizer — combine query and retrieved docs into enriched context
+
+**Static metadata**
+
+| Field | Value |
+| --- | --- |
+| Type | `LLM_CONTEXTUALIZER` |
+| Display name | llm.contextualizer |
+| UI section | `agent` |
+| Palette order | `120` |
+| Color | `#7C3AED` |
+| Icon | `MessageSquareText` |
+| Config tags | `output_name` |
+
+**Inputs**
+
+| Name | Type | Required | Description | Requirements |
+| --- | --- | --- | --- | --- |
+| `state` | `text` | yes | object from RunContext |  |
+
+**Outputs**
+
+| Name | Type | Optional | Stored at | Description | Requirements |
+| --- | --- | --- | --- | --- | --- |
+| `output` | `object` | no | `` | object stored in ctx.values |  |
+
+**Config parameters**
+
+| Name | Type | Required | Widget | Default | Enum/options | Description |
+| --- | --- | --- | --- | --- | --- | --- |
+| `use_llm` | `boolean` | no | `checkbox` |  |  | boolean — call configured LLM when true; otherwise use deterministic fallback |
+| `system_prompt` | `string` | no | `text` |  |  | string — system instruction for this LLM role; rendered with prompt_context and state placeholders |
+| `prompt_template` | `string` | no | `text` |  |  | string — user prompt template; can reference {goal}, {state}, {datasets}, {alert_payload}, prompt_context vars, and node-specific slots |
+| `prompt_context` | `object` | no | `json` |  |  | object — optional structured slots: {mode, vars, dataset} using the shared prompt_context grammar |
+| `model` | `string` | no | `text` |  |  | string — optional model override |
+| `temperature` | `number` | no | `number` |  |  | number — model temperature |
+| `max_output_tokens` | `integer` | no | `number` |  |  | integer — output token cap |
+| `output_name` | `string` | no | `text` |  |  | string — ctx.values key to write |
+| `query` | `string` | no | `text` |  |  | string — query text |
+| `retrieved_docs` | `string` | no | `text` |  |  | array — documents to contextualize |
+| `docs_key` | `string` | no | `text` |  |  | string — ctx.values key containing retrieved docs |
+
+## `LLM_CRITIC` — llm.critic
+
+**Use:** llm.critic — validate the latest action result and emit actionable feedback
+
+**Static metadata**
+
+| Field | Value |
+| --- | --- |
+| Type | `LLM_CRITIC` |
+| Display name | llm.critic |
+| UI section | `agent` |
+| Palette order | `70` |
+| Color | `#7C3AED` |
+| Icon | `Gavel` |
+| Config tags | `output_name` |
+
+**Inputs**
+
+| Name | Type | Required | Description | Requirements |
+| --- | --- | --- | --- | --- |
+| `state` | `text` | yes | object from RunContext |  |
+
+**Outputs**
+
+| Name | Type | Optional | Stored at | Description | Requirements |
+| --- | --- | --- | --- | --- | --- |
+| `output` | `object` | no | `` | object stored in ctx.values |  |
+
+**Config parameters**
+
+| Name | Type | Required | Widget | Default | Enum/options | Description |
+| --- | --- | --- | --- | --- | --- | --- |
+| `use_llm` | `boolean` | no | `checkbox` |  |  | boolean — call configured LLM when true; otherwise use deterministic fallback |
+| `system_prompt` | `string` | no | `text` |  |  | string — system instruction for this LLM role; rendered with prompt_context and state placeholders |
+| `prompt_template` | `string` | no | `text` |  |  | string — user prompt template; can reference {goal}, {state}, {datasets}, {alert_payload}, prompt_context vars, and node-specific slots |
+| `prompt_context` | `object` | no | `json` |  |  | object — optional structured slots: {mode, vars, dataset} using the shared prompt_context grammar |
+| `model` | `string` | no | `text` |  |  | string — optional model override |
+| `temperature` | `number` | no | `number` |  |  | number — model temperature |
+| `max_output_tokens` | `integer` | no | `number` |  |  | integer — output token cap |
+| `output_name` | `string` | no | `text` |  |  | string — ctx.values key to write |
+| `action_key` | `string` | no | `text` |  |  | string — ctx.values key for last action |
+| `result_key` | `string` | no | `text` |  |  | string — ctx.values key for last result |
+| `expected_schema` | `object` | no | `json` |  |  | object — expected result/schema hints |
+
+## `LLM_EVALUATOR` — llm.evaluator
+
+**Use:** llm.evaluator — decide whether the current workflow goal is satisfied
+
+**Static metadata**
+
+| Field | Value |
+| --- | --- |
+| Type | `LLM_EVALUATOR` |
+| Display name | llm.evaluator |
+| UI section | `agent` |
+| Palette order | `90` |
+| Color | `#7C3AED` |
+| Icon | `Crosshair` |
+| Config tags | `output_name` |
+
+**Inputs**
+
+| Name | Type | Required | Description | Requirements |
+| --- | --- | --- | --- | --- |
+| `state` | `text` | yes | object from RunContext |  |
+
+**Outputs**
+
+| Name | Type | Optional | Stored at | Description | Requirements |
+| --- | --- | --- | --- | --- | --- |
+| `output` | `object` | no | `` | object stored in ctx.values |  |
+
+**Config parameters**
+
+| Name | Type | Required | Widget | Default | Enum/options | Description |
+| --- | --- | --- | --- | --- | --- | --- |
+| `use_llm` | `boolean` | no | `checkbox` |  |  | boolean — call configured LLM when true; otherwise use deterministic fallback |
+| `system_prompt` | `string` | no | `text` |  |  | string — system instruction for this LLM role; rendered with prompt_context and state placeholders |
+| `prompt_template` | `string` | no | `text` |  |  | string — user prompt template; can reference {goal}, {state}, {datasets}, {alert_payload}, prompt_context vars, and node-specific slots |
+| `prompt_context` | `object` | no | `json` |  |  | object — optional structured slots: {mode, vars, dataset} using the shared prompt_context grammar |
+| `model` | `string` | no | `text` |  |  | string — optional model override |
+| `temperature` | `number` | no | `number` |  |  | number — model temperature |
+| `max_output_tokens` | `integer` | no | `number` |  |  | integer — output token cap |
+| `output_name` | `string` | no | `text` |  |  | string — ctx.values key to write |
+| `validation_key` | `string` | no | `text` |  |  | string — ctx.values key for critic validation |
+| `result_key` | `string` | no | `text` |  |  | string — ctx.values key for result to evaluate |
+
+## `LLM_PLANNER` — llm.planner
+
+**Use:** llm.planner — create a step plan from goal and context
+
+**Static metadata**
+
+| Field | Value |
+| --- | --- |
+| Type | `LLM_PLANNER` |
+| Display name | llm.planner |
+| UI section | `agent` |
+| Palette order | `10` |
+| Color | `#7C3AED` |
+| Icon | `NotebookText` |
+| Config tags | `output_name` |
+
+**Inputs**
+
+| Name | Type | Required | Description | Requirements |
+| --- | --- | --- | --- | --- |
+| `state` | `text` | yes | object from RunContext |  |
+
+**Outputs**
+
+| Name | Type | Optional | Stored at | Description | Requirements |
+| --- | --- | --- | --- | --- | --- |
+| `output` | `object` | no | `` | object stored in ctx.values |  |
+
+**Config parameters**
+
+| Name | Type | Required | Widget | Default | Enum/options | Description |
+| --- | --- | --- | --- | --- | --- | --- |
+| `use_llm` | `boolean` | no | `checkbox` |  |  | boolean — call configured LLM when true; otherwise use deterministic fallback |
+| `system_prompt` | `string` | no | `text` |  |  | string — system instruction for this LLM role; rendered with prompt_context and state placeholders |
+| `prompt_template` | `string` | no | `text` |  |  | string — user prompt template; can reference {goal}, {state}, {datasets}, {alert_payload}, prompt_context vars, and node-specific slots |
+| `prompt_context` | `object` | no | `json` |  |  | object — optional structured slots: {mode, vars, dataset} using the shared prompt_context grammar |
+| `model` | `string` | no | `text` |  |  | string — optional model override |
+| `temperature` | `number` | no | `number` |  |  | number — model temperature |
+| `max_output_tokens` | `integer` | no | `number` |  |  | integer — output token cap |
+| `output_name` | `string` | no | `text` |  |  | string — ctx.values key to write |
+| `goal` | `string` | no | `text` |  |  | string — user goal |
+| `plan` | `string` | no | `text` |  |  | array — optional deterministic plan override |
+
+## `LLM_SYNTHESIZER` — llm.synthesizer
+
+**Use:** llm.synthesizer — produce final output and optional JSON/text artifact
+
+**Static metadata**
+
+| Field | Value |
+| --- | --- |
+| Type | `LLM_SYNTHESIZER` |
+| Display name | llm.synthesizer |
+| UI section | `agent` |
+| Palette order | `110` |
+| Color | `#7C3AED` |
+| Icon | `NotebookText` |
+| Config tags | `output_name` |
+
+**Inputs**
+
+| Name | Type | Required | Description | Requirements |
+| --- | --- | --- | --- | --- |
+| `state` | `text` | yes | object from RunContext |  |
+
+**Outputs**
+
+| Name | Type | Optional | Stored at | Description | Requirements |
+| --- | --- | --- | --- | --- | --- |
+| `output` | `object` | no | `` | object stored in ctx.values |  |
+
+**Config parameters**
+
+| Name | Type | Required | Widget | Default | Enum/options | Description |
+| --- | --- | --- | --- | --- | --- | --- |
+| `use_llm` | `boolean` | no | `checkbox` |  |  | boolean — call configured LLM when true; otherwise use deterministic fallback |
+| `system_prompt` | `string` | no | `text` |  |  | string — system instruction for this LLM role; rendered with prompt_context and state placeholders |
+| `prompt_template` | `string` | no | `text` |  |  | string — user prompt template; can reference {goal}, {state}, {datasets}, {alert_payload}, prompt_context vars, and node-specific slots |
+| `prompt_context` | `object` | no | `json` |  |  | object — optional structured slots: {mode, vars, dataset} using the shared prompt_context grammar |
+| `model` | `string` | no | `text` |  |  | string — optional model override |
+| `temperature` | `number` | no | `number` |  |  | number — model temperature |
+| `max_output_tokens` | `integer` | no | `number` |  |  | integer — output token cap |
+| `output_name` | `string` | no | `text` |  |  | string — ctx.values key to write |
+| `output_path` | `string` | no | `text` |  |  | string — optional artifact path |
+| `result_key` | `string` | no | `text` |  |  | string — ctx.values key to summarize |
+| `final_output` | `object` | no | `json` |  |  | object — optional deterministic final output override |
+
+## `LOOP_CONTROLLER` — Loop Controller
+
+**Use:** Compute retry-loop continuation from iteration, done, and confidence state
+
+**Static metadata**
+
+| Field | Value |
+| --- | --- |
+| Type | `LOOP_CONTROLLER` |
+| Display name | Loop Controller |
+| UI section | `agent` |
+| Palette order | `100` |
+| Color | `#7C3AED` |
+| Icon | `Repeat` |
+| Config tags | `output_name` |
+
+**Inputs**
+
+| Name | Type | Required | Description | Requirements |
+| --- | --- | --- | --- | --- |
+| `state` | `text` | yes | object from RunContext |  |
+
+**Outputs**
+
+| Name | Type | Optional | Stored at | Description | Requirements |
+| --- | --- | --- | --- | --- | --- |
+| `output` | `object` | no | `` | object stored in ctx.values |  |
+
+**Config parameters**
+
+| Name | Type | Required | Widget | Default | Enum/options | Description |
+| --- | --- | --- | --- | --- | --- | --- |
+| `output_name` | `string` | no | `text` |  |  | string — ctx.values key to write |
+
 ## `MAP` — Map
 
 **Use:** Fan out a sub-workflow over a list of keys; aggregate results
@@ -586,6 +1073,40 @@ This file documents every node: what it does, inputs, outputs, static UI metadat
 | `output_name` | `string` | yes | `text` | `oracle_data` |  | Dataset name in ctx.datasets. |
 | `mock_csv_path` | `string` | no | `text` | `""` |  | Demo-mode override: path to a CSV used verbatim instead of the synthetic generator. |
 
+## `PLAN_VALIDATOR` — Plan Validator
+
+**Use:** Validate generated plan structure, dependencies, and tool names
+
+**Static metadata**
+
+| Field | Value |
+| --- | --- |
+| Type | `PLAN_VALIDATOR` |
+| Display name | Plan Validator |
+| UI section | `agent` |
+| Palette order | `20` |
+| Color | `#7C3AED` |
+| Icon | `Gavel` |
+| Config tags | `output_name` |
+
+**Inputs**
+
+| Name | Type | Required | Description | Requirements |
+| --- | --- | --- | --- | --- |
+| `state` | `text` | yes | object from RunContext |  |
+
+**Outputs**
+
+| Name | Type | Optional | Stored at | Description | Requirements |
+| --- | --- | --- | --- | --- | --- |
+| `output` | `object` | no | `` | object stored in ctx.values |  |
+
+**Config parameters**
+
+| Name | Type | Required | Widget | Default | Enum/options | Description |
+| --- | --- | --- | --- | --- | --- | --- |
+| `output_name` | `string` | no | `text` |  |  | string — ctx.values key to write |
+
 ## `REPORT_OUTPUT` — Report Output
 
 **Use:** Generate Excel report with tabs & highlights
@@ -675,11 +1196,15 @@ This file documents every node: what it does, inputs, outputs, static UI metadat
 | `event_template` | `string` | no | `text` | `""` |  | Python format string used to render each event row in event_narrative mode. Row columns are passed as keyword args. Example: '{timestamp}  {side} {quantity} @ {limit_price}'. |
 | `max_events` | `integer` | no | `number` | `40` |  | Cap events passed to the LLM in event_narrative mode. |
 | `llm_prompt_template` | `string` | no | `textarea` |  |  | Prompt with {stats}, {facts}, {events}, {section}, {disposition}, {trader_id}, {currency_pair} placeholders, plus any vars defined under prompt_context.vars and (when mode=dataset\|mixed) {dataset}. Cross-dataset refs like {executions.notional.sum} resolve inline. |
+| `system_prompt` | `string` | no | `textarea` |  |  | System instruction for the section narrative LLM. Rendered with the same prompt_context vars and context refs as llm_prompt_template. |
 | `prompt_context` | `object` | no | `json` | `{}` |  | Optional structured slot block: {mode: template\|dataset\|mixed, vars: {name: ref_expr, ...}, dataset: {ref, format, max_rows, columns}}. vars resolve cross-dataset refs into named slots; the serialized dataset (csv/json/markdown) is exposed as {dataset}. |
+| `model` | `string` | no | `text` |  |  | Optional LLM model override. |
+| `temperature` | `number` | no | `number` | `0.2` |  | LLM temperature. |
+| `max_output_tokens` | `integer` | no | `number` | `600` |  | Maximum response tokens. |
 
 **Constraints**
 
-- LLM model: claude-sonnet-4-6, max_tokens: 600.
+- Default max_output_tokens: 600.
 - fact_pack_llm retries at most once when required facts are missing from the narrative.
 
 ## `SIGNAL_CALCULATOR` — Signal Calculator
@@ -729,6 +1254,40 @@ This file documents every node: what it does, inputs, outputs, static UI metadat
 - Missing signal columns are auto-filled with defaults (False, 0.0, '', '', '').
 - Custom scripts must operate on local variable 'df' and leave result in 'df'.
 
+## `STATE_MANAGER` — State Manager
+
+**Use:** Track retry history and iteration state
+
+**Static metadata**
+
+| Field | Value |
+| --- | --- |
+| Type | `STATE_MANAGER` |
+| Display name | State Manager |
+| UI section | `agent` |
+| Palette order | `80` |
+| Color | `#7C3AED` |
+| Icon | `FileStack` |
+| Config tags | `output_name` |
+
+**Inputs**
+
+| Name | Type | Required | Description | Requirements |
+| --- | --- | --- | --- | --- |
+| `state` | `text` | yes | object from RunContext |  |
+
+**Outputs**
+
+| Name | Type | Optional | Stored at | Description | Requirements |
+| --- | --- | --- | --- | --- | --- |
+| `output` | `object` | no | `` | object stored in ctx.values |  |
+
+**Config parameters**
+
+| Name | Type | Required | Widget | Default | Enum/options | Description |
+| --- | --- | --- | --- | --- | --- | --- |
+| `output_name` | `string` | no | `text` |  |  | string — ctx.values key to write |
+
 ## `TIME_WINDOW` — Time Window
 
 **Use:** Expand an event time into a [start_time, end_time] window for downstream filtering.
@@ -773,3 +1332,40 @@ This file documents every node: what it does, inputs, outputs, static UI metadat
 
 - Output dict keys: start_time (ISO str), end_time (ISO str), buffer_minutes {pre, post}.
 - If the event time cannot be resolved, publishes an empty dict — downstream collectors treat that as no-filter.
+
+## `TOOL_EXECUTOR` — Tool Executor
+
+**Use:** Bridge an LLM action into deterministic built-in or registered node execution
+
+**Static metadata**
+
+| Field | Value |
+| --- | --- |
+| Type | `TOOL_EXECUTOR` |
+| Display name | Tool Executor |
+| UI section | `agent` |
+| Palette order | `60` |
+| Color | `#7C3AED` |
+| Icon | `SlidersHorizontal` |
+| Config tags | `output_name` |
+
+**Inputs**
+
+| Name | Type | Required | Description | Requirements |
+| --- | --- | --- | --- | --- |
+| `state` | `text` | yes | object from RunContext |  |
+
+**Outputs**
+
+| Name | Type | Optional | Stored at | Description | Requirements |
+| --- | --- | --- | --- | --- | --- |
+| `output` | `object` | no | `` | object stored in ctx.values |  |
+
+**Config parameters**
+
+| Name | Type | Required | Widget | Default | Enum/options | Description |
+| --- | --- | --- | --- | --- | --- | --- |
+| `action_key` | `string` | no | `text` |  |  | string — ctx.values action key |
+| `tool` | `string` | no | `text` |  |  | string — optional static tool override |
+| `args` | `object` | no | `json` |  |  | object — static args merged into action args |
+| `output_name` | `string` | no | `text` |  |  | string — defaults to last_result |

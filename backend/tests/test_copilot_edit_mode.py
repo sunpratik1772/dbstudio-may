@@ -51,11 +51,19 @@ def _small_workflow() -> dict:
     }
 
 
-def test_initial_prompt_identity_without_context() -> None:
+def test_initial_prompt_greenfield_includes_live_context_guidance() -> None:
     pb = PromptBuilder()
-    assert pb.initial_prompt("Create an FX front-running workflow") == (
-        "Create an FX front-running workflow"
+    prompt = pb.initial_prompt(
+        "Create an FX front-running workflow",
+        matched_skills=["skills-agentic-workflow-builder"],
     )
+
+    assert "Create a NEW workflow" in prompt
+    assert "Create an FX front-running workflow" in prompt
+    assert "current Node I/O Contracts" in prompt
+    assert "current Data Source Column Schemas" in prompt
+    assert "skills-agentic-workflow-builder" in prompt
+    assert "{dataset.column.agg}" in prompt
 
 
 def test_system_prompt_uses_live_contracts_not_stale_file(tmp_path) -> None:
@@ -116,12 +124,15 @@ def test_initial_prompt_edit_mode_with_workflow() -> None:
     prompt = pb.initial_prompt(
         "Fix the SECTION_SUMMARY error",
         current_workflow=_small_workflow(),
+        matched_skills=["skills-agentic-workflow-builder"],
     )
     # Should switch to edit mode — look for the edit-mode header and
     # the embedded workflow JSON.
     assert "EXISTING workflow" in prompt
     assert '"n01"' in prompt and '"n14"' in prompt
     assert "SECTION_SUMMARY" in prompt
+    assert "Current generation context" in prompt
+    assert "skills-agentic-workflow-builder" in prompt
     # Editing rules must be present so the LLM knows to preserve IDs.
     assert "Preserve existing node IDs" in prompt
     # User request appears at the bottom.
@@ -234,3 +245,16 @@ def test_initial_prompt_includes_incremental_edit_guidance() -> None:
     assert "inserting a new node between" in prompt
     assert "deleting a node" in prompt
     assert "fresh IDs continuing the `nNN` sequence" in prompt
+
+
+def test_repair_prompt_reminds_model_to_use_current_inventories() -> None:
+    prompt = PromptBuilder().repair_prompt(
+        [{"code": "BAD_PROMPT_REF", "node_id": "n03", "message": "bad ref"}],
+        attempt=2,
+        total=3,
+    )
+
+    assert "current Node I/O Contracts" in prompt
+    assert "Data Source Column Schemas" in prompt
+    assert "Surveillance Skills Library" in prompt
+    assert "BAD_PROMPT_REF" in prompt

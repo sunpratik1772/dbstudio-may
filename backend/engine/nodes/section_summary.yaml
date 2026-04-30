@@ -91,7 +91,16 @@ params:
       Prompt with {stats}, {facts}, {events}, {section}, {disposition},
       {trader_id}, {currency_pair} placeholders, plus any vars defined
       under prompt_context.vars and (when mode=dataset|mixed) {dataset}.
+      In templated mode, {stats} renders a text block and
+      {stats.<field>_<agg>} can reference a computed field_binding stat.
       Cross-dataset refs like {executions.notional.sum} resolve inline.
+    required: false
+    widget: textarea
+  - name: system_prompt
+    type: string
+    description: >-
+      System instruction for the section narrative LLM. Rendered with the
+      same prompt_context vars and context refs as llm_prompt_template.
     required: false
     widget: textarea
   - name: prompt_context
@@ -103,10 +112,24 @@ params:
       serialized dataset (csv/json/markdown) is exposed as {dataset}.
     default: {}
     required: false
+  - name: model
+    type: string
+    description: "Optional LLM model override."
+    required: false
+  - name: temperature
+    type: number
+    description: "LLM temperature."
+    default: 0.2
+    required: false
+  - name: max_output_tokens
+    type: integer
+    description: "Maximum response tokens."
+    default: 600
+    required: false
 
 semantics:
   requires: []
 
 constraints:
-  - "LLM model: claude-sonnet-4-6, max_tokens: 600."
+  - "Default max_output_tokens: 600."
   - "fact_pack_llm retries at most once when required facts are missing from the narrative."

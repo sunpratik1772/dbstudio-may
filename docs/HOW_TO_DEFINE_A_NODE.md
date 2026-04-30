@@ -1,6 +1,6 @@
 # How To Define A Node
 
-> The rule: a node is defined by one YAML NodeSpec plus one Python handler.
+> The rule: a node is normally defined by one YAML NodeSpec plus one Python handler.
 > The UI, Copilot contracts, validator, generated artifacts, and node docs all
 > read from that NodeSpec. Do not add frontend constants by hand.
 
@@ -11,7 +11,7 @@ A node has two halves:
 - `backend/engine/nodes/<node_name>.yaml` describes the public contract: type id, description, UI metadata, ports, params, constraints, and semantics.
 - `backend/engine/nodes/<node_name>.py` implements the handler and exports `NODE_SPEC = _spec_from_yaml(...)`.
 
-`backend/engine/registry.py` auto-discovers every module under `backend/engine/nodes/` that exports `NODE_SPEC`. There is no central node list to edit.
+`backend/engine/registry.py` auto-discovers every module under `backend/engine/nodes/` that exports `NODE_SPEC`, or a grouped `NODE_SPECS` tuple for tightly coupled internal node families. There is no central node list to edit.
 
 ## Which Contract Are We Talking About?
 
@@ -41,6 +41,17 @@ backend/tests/test_my_node.py
 ```
 
 Use lowercase snake case for filenames and uppercase snake case for `type_id`.
+
+## Grouped Node Specs
+
+Prefer one YAML-backed `NODE_SPEC` per node. Use a grouped `NODE_SPECS` tuple only when all of these are true:
+
+- The nodes are a cohesive internal family with shared helpers and shared params.
+- Splitting them would create more duplicated boilerplate than clarity.
+- Each generated `NodeSpec` still declares complete params, ports, UI metadata, and constraints.
+- Tests cover every exported type id and handler behavior.
+
+Current example: `backend/engine/nodes/agent_layer.py` groups the LLM/helper primitives because they share prompt rendering, state access, and fallback execution utilities. Ordinary data, transform, report, and collector nodes should stay YAML-backed.
 
 ## NodeSpec YAML
 
@@ -186,7 +197,7 @@ npm --prefix frontend run build
 ## Checklist
 
 - YAML has `type_id`, `description`, `ui.palette`, ports, params, constraints.
-- Python exports `NODE_SPEC`.
+- Python exports `NODE_SPEC`, or narrowly scoped `NODE_SPECS` for a cohesive internal family.
 - Handler writes exactly the outputs the YAML declares.
 - No frontend files were hand-edited except generated artifacts.
 - `node_detail.md` includes the new node after artifact generation.

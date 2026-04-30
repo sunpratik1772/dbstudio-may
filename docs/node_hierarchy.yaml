@@ -1,0 +1,665 @@
+source_document: docs/NODE_IO_HIERARCHY_TABLE.md
+signature:
+- node_name
+- mandatory_input
+- optional_input_dynamic_parameters
+- mandatory_output
+- optional_output_dynamic_parameters
+- combination_when_to_use
+row_identity: 'section :: node_name'
+sections:
+- section: Trigger
+  rows:
+  - node_name: ALERT_TRIGGER
+    mandatory_input: '`ctx.alert_payload`'
+    optional_input_dynamic_parameters: If `standard_fields` selected show standard context keys; if `custom_fields[]` added
+      show `name`, `type`, `required`, `default`; if `strict_required_fields=true` validate required payload keys
+    mandatory_output: '`ctx.values[declared_field]`, `ctx.values.context_keys`'
+    optional_output_dynamic_parameters: Extra payload keys only if declared or standard
+    combination_when_to_use: Always first node; use to expose values like `trader_id`, `event_time`, `book` for collectors,
+      windows, prompts, and decisions.
+    row_id: 'Trigger :: ALERT_TRIGGER'
+- section: Integration Nodes
+  rows:
+  - node_name: SOLR_DATA_CONNECTOR
+    mandatory_input: '`source`, `output_name`; implicit `ctx.values` for context refs'
+    optional_input_dynamic_parameters: If `filter_mode=builder` show source-specific filters; if `filter_mode=raw_query` show
+      `query_template`; if upstream `TIME_WINDOW` exists show `window_key`; if `loop_over_books=true` show `books`; if demo/debug
+      show `mock_csv_path`; if `trader_filter_key` set read that context key
+    mandatory_output: '`ctx.datasets[output_name]`, `ctx.values[{output_name}_count]`'
+    optional_output_dynamic_parameters: '`ctx.values[_{output_name}_resolved_query]`, dataset provenance; schema depends on
+      `source`; implemented by current `execution_data_collector.yaml`'
+    combination_when_to_use: Use to start any trade/order/quote data branch; pair with `TIME_WINDOW` for date filtering, `FEATURE_ENGINE`
+      for enrichment, or `GROUP_BY` for per-book/per-venue splits.
+    row_id: 'Integration Nodes :: SOLR_DATA_CONNECTOR'
+  - node_name: SOLR_DATA_CONNECTOR -> hs_client_order
+    mandatory_input: '`source=hs_client_order`, `output_name`'
+    optional_input_dynamic_parameters: 'Show order filters: `trader_id`, `book`, `currency_pair/instrument`, `order_time/window`,
+      `status`, `venue`'
+    mandatory_output: Orders DataFrame
+    optional_output_dynamic_parameters: Optional columns from `trades.yaml` such as `instrument`, `event_time`, `instance_id`,
+      `order_type`
+    combination_when_to_use: Use when workflow needs order lifecycle, spoof/layering, cancellations, grouping by `book`, `venue`,
+      or `instance_id`.
+    row_id: 'Integration Nodes :: SOLR_DATA_CONNECTOR -> hs_client_order'
+  - node_name: SOLR_DATA_CONNECTOR -> hs_execution
+    mandatory_input: '`source=hs_execution`, `output_name`'
+    optional_input_dynamic_parameters: Show execution filters; require/auto-pin `trade_version:1`; show `window_key` for `exec_time`
+    mandatory_output: Executions DataFrame
+    optional_output_dynamic_parameters: '`signed_notional` only if later added by `FEATURE_ENGINE`'
+    combination_when_to_use: Use for executed trades, front-running, wash trade, notional/price features, and signal calculation
+      on fills.
+    row_id: 'Integration Nodes :: SOLR_DATA_CONNECTOR -> hs_execution'
+  - node_name: SOLR_DATA_CONNECTOR -> hs_trades
+    mandatory_input: '`source=hs_trades`, `output_name`'
+    optional_input_dynamic_parameters: Show trade filters and `trade_time/window`
+    mandatory_output: Trades DataFrame
+    optional_output_dynamic_parameters: Source-specific optional metadata
+    combination_when_to_use: Use when trade-level rows are enough and order/execution lifecycle detail is not needed.
+    row_id: 'Integration Nodes :: SOLR_DATA_CONNECTOR -> hs_trades'
+  - node_name: SOLR_DATA_CONNECTOR -> hs_orders_and_executions
+    mandatory_input: '`source=hs_orders_and_executions`, `output_name`'
+    optional_input_dynamic_parameters: Show combined order/execution filters
+    mandatory_output: Combined order/execution DataFrame
+    optional_output_dynamic_parameters: Mixed order/execution time columns
+    combination_when_to_use: Use when a single downstream node needs both order and execution columns without a join node.
+    row_id: 'Integration Nodes :: SOLR_DATA_CONNECTOR -> hs_orders_and_executions'
+  - node_name: SOLR_DATA_CONNECTOR -> hs_quotes
+    mandatory_input: '`source=hs_quotes`, `output_name`'
+    optional_input_dynamic_parameters: 'Show quote filters: `currency_pair`, `quote_time/window`, `venue`'
+    mandatory_output: Quotes DataFrame
+    optional_output_dynamic_parameters: Quote venue/size fields
+    combination_when_to_use: Use with market/quote surveillance or to compare order/execution behavior against quote conditions.
+    row_id: 'Integration Nodes :: SOLR_DATA_CONNECTOR -> hs_quotes'
+  - node_name: COMMS_COLLECTOR
+    mandatory_input: '`output_name`; implicit `ctx.values` for query refs'
+    optional_input_dynamic_parameters: If `query_mode=builder` show trader/time filters; if `query_mode=raw_query` show `query_template`;
+      if `keywords` used show chips; if `keyword_categories` used show category builder; if `emit_hits_only=true` publish
+      hits dataset; if upstream `TIME_WINDOW` exists show `window_key`; if demo/debug show `mock_csv_path`
+    mandatory_output: '`ctx.datasets[output_name]`, `ctx.values[{output_name}_keyword_hits]`'
+    optional_output_dynamic_parameters: '`ctx.datasets[{output_name}_hits]`, `ctx.values[{output_name}_hits_count]`, `_matched_categories`,
+      `_hit_<category>`'
+    combination_when_to_use: Use in parallel with trade data when narrative or decision should consider intent, timing, cover-up
+      language, or suspicious comms.
+    row_id: 'Integration Nodes :: COMMS_COLLECTOR'
+  - node_name: COMMS_COLLECTOR -> plain keywords
+    mandatory_input: '`keywords[]`, `output_name`'
+    optional_input_dynamic_parameters: Show keyword chips and query/window controls
+    mandatory_output: Comms DataFrame with `_keyword_hit`, `_matched_keywords`
+    optional_output_dynamic_parameters: Hits-only sibling if `emit_hits_only=true`
+    combination_when_to_use: Use for simple suspicious-term scans; combine with `SECTION_SUMMARY -> event_narrative` on `{output_name}_hits`.
+    row_id: 'Integration Nodes :: COMMS_COLLECTOR -> plain keywords'
+  - node_name: COMMS_COLLECTOR -> categories
+    mandatory_input: '`keyword_categories`, `output_name`'
+    optional_input_dynamic_parameters: For each category show category name and keyword chips
+    mandatory_output: Comms DataFrame with category annotations
+    optional_output_dynamic_parameters: Dynamic `_hit_<category>` columns
+    combination_when_to_use: Use when decisions or summaries need category-specific evidence like `INTENT`, `TIMING`, `COVERUP`.
+    row_id: 'Integration Nodes :: COMMS_COLLECTOR -> categories'
+  - node_name: MARKET_DATA_COLLECTOR
+    mandatory_input: '`source`, `output_name`'
+    optional_input_dynamic_parameters: If `filter_mode=builder` show `symbol_ref`; if `filter_mode=raw_query` show `query_template`;
+      if upstream `TIME_WINDOW` exists show `window_key`; if demo/debug show `mock_csv_path`
+    mandatory_output: '`ctx.datasets[output_name]`, `ctx.values[{output_name}_tick_count]`'
+    optional_output_dynamic_parameters: Dataset provenance; resolved query if implemented
+    combination_when_to_use: Use when signal/summary needs price context; pair with `TIME_WINDOW` and report as supporting
+      evidence tab.
+    row_id: 'Integration Nodes :: MARKET_DATA_COLLECTOR'
+  - node_name: MARKET_DATA_COLLECTOR -> EBS
+    mandatory_input: '`source=EBS`, `output_name`'
+    optional_input_dynamic_parameters: Show symbol/currency and window filters
+    mandatory_output: Normalized tick DataFrame
+    optional_output_dynamic_parameters: Optional source audit metadata
+    combination_when_to_use: Use for FX market tick evidence.
+    row_id: 'Integration Nodes :: MARKET_DATA_COLLECTOR -> EBS'
+  - node_name: MARKET_DATA_COLLECTOR -> Mercury
+    mandatory_input: '`source=Mercury`, `output_name`'
+    optional_input_dynamic_parameters: Show symbol/currency and window filters
+    mandatory_output: Normalized tick DataFrame
+    optional_output_dynamic_parameters: Optional source audit metadata
+    combination_when_to_use: Use for Mercury feed evidence or alternative market source comparison.
+    row_id: 'Integration Nodes :: MARKET_DATA_COLLECTOR -> Mercury'
+  - node_name: ORACLE_DATA_COLLECTOR
+    mandatory_input: '`source`, `output_name`'
+    optional_input_dynamic_parameters: If `query_mode=base_query` use metadata query; if `query_mode=builder` show source
+      filters; if `query_mode=raw_sql` show `query_template`; if upstream `TIME_WINDOW` exists show `window_key`; if demo/debug
+      show `mock_csv_path`
+    mandatory_output: '`ctx.datasets[output_name]`, `ctx.values[{output_name}_count]`'
+    optional_output_dynamic_parameters: '`ctx.values[_{output_name}_resolved_query]`, dataset provenance'
+    combination_when_to_use: Use for warehouse/reference extracts; combine with Solr/comms data for cross-source reports.
+    row_id: 'Integration Nodes :: ORACLE_DATA_COLLECTOR'
+  - node_name: ORACLE_DATA_COLLECTOR -> oracle_orders
+    mandatory_input: '`source=oracle_orders`, `output_name`'
+    optional_input_dynamic_parameters: 'Show order filters: trader, book, instrument, order time, side/status'
+    mandatory_output: Oracle orders DataFrame
+    optional_output_dynamic_parameters: Optional warehouse-specific columns
+    combination_when_to_use: Use when authoritative warehouse order data is preferred over live Solr.
+    row_id: 'Integration Nodes :: ORACLE_DATA_COLLECTOR -> oracle_orders'
+  - node_name: ORACLE_DATA_COLLECTOR -> oracle_executions
+    mandatory_input: '`source=oracle_executions`, `output_name`'
+    optional_input_dynamic_parameters: 'Show execution filters: trader, book, instrument, exec time, side/counterparty'
+    mandatory_output: Oracle executions DataFrame
+    optional_output_dynamic_parameters: Optional warehouse-specific columns
+    combination_when_to_use: Use for warehouse execution evidence and reconciliation workflows.
+    row_id: 'Integration Nodes :: ORACLE_DATA_COLLECTOR -> oracle_executions'
+- section: Source Pushdown Vs Post-Fetch Transform
+  rows:
+  - node_name: DATA_CONNECTOR -> source projection
+    mandatory_input: '`source`, `output_name`, `columns[]`'
+    optional_input_dynamic_parameters: '`columns` comes from selected `data_source.yaml` schema; allow `all_columns=true`
+      for exploratory runs'
+    mandatory_output: Dataset with selected source columns only
+    optional_output_dynamic_parameters: Omitted source columns are unavailable downstream unless re-fetched
+    combination_when_to_use: 'Use before pulling rows when the user knows which source columns are needed for signals, summaries,
+      reports, or joins. Example: fetch only `order_id`, `trader_id`, `order_time`, `side`, `quantity`, `status`.'
+    row_id: 'Source Pushdown Vs Post-Fetch Transform :: DATA_CONNECTOR -> source projection'
+  - node_name: DATA_CONNECTOR -> source filters
+    mandatory_input: '`source`, `output_name`, `filters[]`'
+    optional_input_dynamic_parameters: Each filter shows `column`, `operator`, `value`; columns come from `data_source.yaml`;
+      values can be literal or `{context.key}`; operators include `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `between`, `in`,
+      `contains`
+    mandatory_output: Dataset containing only rows matching source-native filters
+    optional_output_dynamic_parameters: Filter audit metadata / resolved query
+    combination_when_to_use: 'Use before pulling rows whenever condition uses physical source columns. Example: `trader_id
+      = {context.trader_id}`, `order_time between {window.start_time} and {window.end_time}`, `status in [CANCELLED, PARTIAL]`.'
+    row_id: 'Source Pushdown Vs Post-Fetch Transform :: DATA_CONNECTOR -> source filters'
+  - node_name: DATA_CONNECTOR -> source sort
+    mandatory_input: '`source`, `output_name`, `sort[]`'
+    optional_input_dynamic_parameters: Each sort row shows `column`, `direction`; columns come from source schema
+    mandatory_output: Dataset ordered by source-native fields
+    optional_output_dynamic_parameters: Stable ordering for reports/summaries
+    combination_when_to_use: 'Use before pulling when source can sort efficiently. Example: latest comms by `timestamp desc`,
+      orders by `order_time asc`, executions by `exec_time asc`.'
+    row_id: 'Source Pushdown Vs Post-Fetch Transform :: DATA_CONNECTOR -> source sort'
+  - node_name: DATA_CONNECTOR -> source limit
+    mandatory_input: '`source`, `output_name`, `limit`'
+    optional_input_dynamic_parameters: Optional `offset` / pagination token for large sources
+    mandatory_output: Dataset capped at source
+    optional_output_dynamic_parameters: Count metadata may show returned count vs total available if connector supports it
+    combination_when_to_use: 'Use before pulling to avoid huge payloads. Example: top 5,000 orders in alert window or latest
+      200 comms.'
+    row_id: 'Source Pushdown Vs Post-Fetch Transform :: DATA_CONNECTOR -> source limit'
+  - node_name: DATA_CONNECTOR -> source query bundle
+    mandatory_input: '`source`, `columns[]`, `filters[]`, `sort[]`, `limit`, `output_name`'
+    optional_input_dynamic_parameters: If `filter_mode=builder` show structured query controls; if `filter_mode=raw_query`
+      show raw query and still allow `columns/sort/limit` when supported
+    mandatory_output: Minimal dataset needed by workflow
+    optional_output_dynamic_parameters: Resolved query / query plan metadata
+    combination_when_to_use: Preferred default for connectors. Pull less data first, then use downstream transforms only for
+      values created after the pull.
+    row_id: 'Source Pushdown Vs Post-Fetch Transform :: DATA_CONNECTOR -> source query bundle'
+  - node_name: FILTER_ROWS
+    mandatory_input: '`input_name`, `condition`, `output_name`'
+    optional_input_dynamic_parameters: Condition builder uses columns available after upstream transforms/signals/joins; optional
+      raw expression advanced mode
+    mandatory_output: Filtered DataFrame
+    optional_output_dynamic_parameters: Filtered row count metadata
+    combination_when_to_use: 'Use after pull only when condition depends on derived columns. Example: keep `_signal_flag ==
+      true`, `signed_notional > 10000000`, `_highlight_label != ''''`. Do not use for simple source filters that can be pushed
+      into connector.'
+    row_id: 'Source Pushdown Vs Post-Fetch Transform :: FILTER_ROWS'
+  - node_name: SELECT_COLUMNS` / `PROJECT_SCHEMA
+    mandatory_input: '`input_name`, `columns[]`, `output_name`'
+    optional_input_dynamic_parameters: Columns come from upstream lineage, including derived/signal/highlight columns; optional
+      rename mapping
+    mandatory_output: Projected DataFrame
+    optional_output_dynamic_parameters: Column mapping metadata
+    combination_when_to_use: 'Use after enrichment when preparing report tabs, CSV exports, LLM dataset summaries, or join
+      inputs. Example: keep `exec_id`, `exec_time`, `side`, `signed_notional`, `_signal_score`, `_signal_reason`.'
+    row_id: 'Source Pushdown Vs Post-Fetch Transform :: SELECT_COLUMNS` / `PROJECT_SCHEMA'
+  - node_name: SORT_LIMIT
+    mandatory_input: '`input_name`, `sort[]`, `limit`, `output_name`'
+    optional_input_dynamic_parameters: Sort columns come from upstream lineage; can sort on derived/signal fields
+    mandatory_output: Sorted/capped DataFrame
+    optional_output_dynamic_parameters: Returned row count metadata
+    combination_when_to_use: 'Use after scoring/enrichment for top-N evidence. Example: top 25 rows by `_signal_score desc`,
+      latest 50 communications by `timestamp desc`, largest 100 trades by `abs_notional desc`.'
+    row_id: 'Source Pushdown Vs Post-Fetch Transform :: SORT_LIMIT'
+- section: Transform Nodes
+  rows:
+  - node_name: TIME_WINDOW
+    mandatory_input: Either `event_time_key` or `start_time_literal`; `output_name`
+    optional_input_dynamic_parameters: If `anchor_mode=context_key` show `event_time_key`, `end_time_key`; if `anchor_mode=literal`
+      show `start_time_literal`, `end_time_literal`; always show `pre_minutes`, `post_minutes`
+    mandatory_output: '`ctx.values[output_name] = {start_time, end_time, buffer_minutes}`'
+    optional_output_dynamic_parameters: Empty `{}` if anchor cannot resolve
+    combination_when_to_use: Use before collectors when multiple datasets must share the same time window; do not use for
+      row bucketing inside a DataFrame.
+    row_id: 'Transform Nodes :: TIME_WINDOW'
+  - node_name: FEATURE_ENGINE
+    mandatory_input: '`input_name`, `ops[]`, `output_name`'
+    optional_input_dynamic_parameters: If `ops[].op` selected show op-specific fields; if `ops[].as` set publish intermediate
+      dataset; if `apply_expr` selected show advanced warning/code field
+    mandatory_output: '`ctx.datasets[output_name]`'
+    optional_output_dynamic_parameters: '`ctx.datasets[ops[].as]`, derived column lineage'
+    combination_when_to_use: 'Use for in-table transformations: add columns, aggregate tables, pivot, bucket, lifecycle labels;
+      do not use for workflow fan-out.'
+    row_id: 'Transform Nodes :: FEATURE_ENGINE'
+  - node_name: FEATURE_ENGINE -> window_bucket
+    mandatory_input: '`time_col`, `interval_ms`, `out_col`'
+    optional_input_dynamic_parameters: '`as`'
+    mandatory_output: DataFrame with `out_col`
+    optional_output_dynamic_parameters: Intermediate dataset if `as`
+    combination_when_to_use: Use to create per-row time buckets like `minute_bucket`; combine with `groupby_agg` or `pivot`.
+    row_id: 'Transform Nodes :: FEATURE_ENGINE -> window_bucket'
+  - node_name: FEATURE_ENGINE -> time_slice
+    mandatory_input: '`time_col`, `windows[]`, `out_col`'
+    optional_input_dynamic_parameters: '`on_miss`, `as`; each window shows `name`, `start`, `end`'
+    mandatory_output: DataFrame with phase/slice column
+    optional_output_dynamic_parameters: Intermediate dataset if `as`
+    combination_when_to_use: Use to label rows `before`, `during`, `after`; useful before summaries/highlights.
+    row_id: 'Transform Nodes :: FEATURE_ENGINE -> time_slice'
+  - node_name: FEATURE_ENGINE -> groupby_agg
+    mandatory_input: '`by[]`, `aggs{column: reducer}`'
+    optional_input_dynamic_parameters: '`as`'
+    mandatory_output: Aggregated DataFrame
+    optional_output_dynamic_parameters: Intermediate dataset if `as`
+    combination_when_to_use: Use when output should be one aggregated table; if you need one dataset per group, use `GROUP_BY`
+      instead.
+    row_id: 'Transform Nodes :: FEATURE_ENGINE -> groupby_agg'
+  - node_name: FEATURE_ENGINE -> pivot
+    mandatory_input: '`index`, `columns`, `values`'
+    optional_input_dynamic_parameters: '`aggfunc`, `as`'
+    mandatory_output: Pivoted DataFrame
+    optional_output_dynamic_parameters: Intermediate dataset if `as`
+    combination_when_to_use: Use for ladder/cross-tab tables, e.g. `minute_bucket` x `side` quantity.
+    row_id: 'Transform Nodes :: FEATURE_ENGINE -> pivot'
+  - node_name: FEATURE_ENGINE -> rolling
+    mandatory_input: '`window`, `col`, `agg`'
+    optional_input_dynamic_parameters: '`out_col`, `as`'
+    mandatory_output: DataFrame with rolling column
+    optional_output_dynamic_parameters: Intermediate dataset if `as`
+    combination_when_to_use: Use for moving average/sum/min/max features over ordered rows.
+    row_id: 'Transform Nodes :: FEATURE_ENGINE -> rolling'
+  - node_name: FEATURE_ENGINE -> derive
+    mandatory_input: '`out_col`, vector `expr`'
+    optional_input_dynamic_parameters: '`as`'
+    mandatory_output: DataFrame with derived column
+    optional_output_dynamic_parameters: Intermediate dataset if `as`
+    combination_when_to_use: Use for vector expressions like `notional_usd / exec_quantity`; avoid Python if/else here.
+    row_id: 'Transform Nodes :: FEATURE_ENGINE -> derive'
+  - node_name: FEATURE_ENGINE -> apply_expr
+    mandatory_input: '`out_col`, row `expr`'
+    optional_input_dynamic_parameters: '`as`; advanced/capability warning'
+    mandatory_output: DataFrame with derived column
+    optional_output_dynamic_parameters: Intermediate dataset if `as`
+    combination_when_to_use: Use for row-wise conditional logic like signed notional; advanced because it evaluates expressions.
+    row_id: 'Transform Nodes :: FEATURE_ENGINE -> apply_expr'
+  - node_name: FEATURE_ENGINE -> rename
+    mandatory_input: '`mapping{old:new}`'
+    optional_input_dynamic_parameters: '`as`'
+    mandatory_output: DataFrame with renamed columns
+    optional_output_dynamic_parameters: Intermediate dataset if `as`
+    combination_when_to_use: Use to normalize source-specific names before generic downstream nodes.
+    row_id: 'Transform Nodes :: FEATURE_ENGINE -> rename'
+  - node_name: FEATURE_ENGINE -> lifecycle_event
+    mandatory_input: '`group_by`, `status_col`, `out_col`'
+    optional_input_dynamic_parameters: '`sort_by`, `as`'
+    mandatory_output: DataFrame with lifecycle transition column
+    optional_output_dynamic_parameters: Intermediate dataset if `as`
+    combination_when_to_use: Use for order lifecycle narratives; combine with `SECTION_SUMMARY -> event_narrative`.
+    row_id: 'Transform Nodes :: FEATURE_ENGINE -> lifecycle_event'
+  - node_name: DATA_HIGHLIGHTER
+    mandatory_input: '`input_name`, `output_name`'
+    optional_input_dynamic_parameters: If `rule_mode=presets` show preset checkboxes; if `rule_mode=builder` show rule builder;
+      if `rule_mode=raw` show raw expression; if no rules configured use safe defaults only if explicitly enabled
+    mandatory_output: '`ctx.datasets[output_name]` with `_highlight_colour`, `_highlight_label`'
+    optional_output_dynamic_parameters: Highlight labels/colours depend on matching rules
+    combination_when_to_use: Use when output/report needs visual row evidence; commonly after `SIGNAL_CALCULATOR`, `COMMS_COLLECTOR`,
+      or `FEATURE_ENGINE`.
+    row_id: 'Transform Nodes :: DATA_HIGHLIGHTER'
+  - node_name: DATA_HIGHLIGHTER -> presets
+    mandatory_input: '`preset_rules[]`'
+    optional_input_dynamic_parameters: Show only presets whose columns exist, e.g. `_signal_flag`, `_keyword_hit`, `side`,
+      `status`
+    mandatory_output: Highlighted DataFrame
+    optional_output_dynamic_parameters: Skipped presets for missing columns
+    combination_when_to_use: Use for common conditions like `_signal_flag == True`, `_keyword_hit == True`, `status == CANCELLED`,
+      `side == BUY/SELL`.
+    row_id: 'Transform Nodes :: DATA_HIGHLIGHTER -> presets'
+  - node_name: DATA_HIGHLIGHTER -> builder
+    mandatory_input: '`rules[].left`, `rules[].operator`, `rules[].value`, `rules[].colour`, `rules[].label`'
+    optional_input_dynamic_parameters: '`rules[].value_ref` for context/dataset refs'
+    mandatory_output: Highlighted DataFrame
+    optional_output_dynamic_parameters: Multiple rules; last match wins
+    combination_when_to_use: Use when each column condition should be selected from dropdowns, e.g. `timestamp >= window.start_time`
+      or `_signal_score > 0.8`.
+    row_id: 'Transform Nodes :: DATA_HIGHLIGHTER -> builder'
+  - node_name: DATA_HIGHLIGHTER -> raw
+    mandatory_input: '`rules[].condition`, `colour`, `label`'
+    optional_input_dynamic_parameters: Ref-expression chips
+    mandatory_output: Highlighted DataFrame
+    optional_output_dynamic_parameters: Invalid rules skipped or validated before run
+    combination_when_to_use: Use only for advanced pandas expressions not representable in the builder.
+    row_id: 'Transform Nodes :: DATA_HIGHLIGHTER -> raw'
+  - node_name: FILTER_ROWS
+    mandatory_input: '`input_name`, `condition`, `output_name`'
+    optional_input_dynamic_parameters: If `condition_mode=builder` show column/operator/value; if `raw` show expression; columns
+      include derived/signal/highlight fields
+    mandatory_output: '`ctx.datasets[output_name]` filtered rows'
+    optional_output_dynamic_parameters: '`ctx.values[{output_name}_count]`'
+    combination_when_to_use: Use for post-fetch filtering, e.g. `_signal_flag == True` after `SIGNAL_CALCULATOR`; not for
+      source-native filters like trader/time/status.
+    row_id: 'Transform Nodes :: FILTER_ROWS'
+  - node_name: SELECT_COLUMNS` / `PROJECT_SCHEMA
+    mandatory_input: '`input_name`, `columns[]`, `output_name`'
+    optional_input_dynamic_parameters: '`rename_map`, `include_metadata_columns`, `strict_missing_columns`'
+    mandatory_output: '`ctx.datasets[output_name]` projected columns'
+    optional_output_dynamic_parameters: Projection metadata
+    combination_when_to_use: Use before report/CSV/LLM/join to reduce columns after all needed fields are derived.
+    row_id: 'Transform Nodes :: SELECT_COLUMNS` / `PROJECT_SCHEMA'
+  - node_name: SORT_LIMIT
+    mandatory_input: '`input_name`, `sort[]`, `limit`, `output_name`'
+    optional_input_dynamic_parameters: '`offset`, `tie_breaker`, `keep_all_if_under_limit`'
+    mandatory_output: '`ctx.datasets[output_name]` sorted/capped rows'
+    optional_output_dynamic_parameters: '`ctx.values[{output_name}_count]`'
+    combination_when_to_use: Use for top-N suspicious rows after signals/features exist, e.g. `_signal_score desc limit 25`.
+    row_id: 'Transform Nodes :: SORT_LIMIT'
+  - node_name: GROUP_BY
+    mandatory_input: '`input_name`, `group_by_column`, `output_prefix`'
+    optional_input_dynamic_parameters: '`keys_output_name`, `dropna`, `order`, `key_slug_mode`'
+    mandatory_output: '`ctx.values[keys_output_name] = {values:[keys]}`'
+    optional_output_dynamic_parameters: Dynamic datasets `ctx.datasets[{output_prefix}_{key}]`
+    combination_when_to_use: Use when rows must be split into separate datasets for `MAP`, per-book tabs, or per-venue analysis.
+    row_id: 'Transform Nodes :: GROUP_BY'
+  - node_name: GROUP_BY -> basic
+    mandatory_input: Dataset and grouping column
+    optional_input_dynamic_parameters: Defaults `output_prefix={input}_by_{column}`, `keys_output_name={input}_{column}_keys`
+    mandatory_output: Keys object
+    optional_output_dynamic_parameters: Dynamic dataset family
+    combination_when_to_use: Use for simple split like orders by `book`, `venue`, `instance_id`, `trader_id`.
+    row_id: 'Transform Nodes :: GROUP_BY -> basic'
+  - node_name: GROUP_BY -> ordered
+    mandatory_input: Dataset and grouping column
+    optional_input_dynamic_parameters: If `order=sort` sort keys; if `order=desc` reverse sort; if `first_seen` preserve first
+      appearance
+    mandatory_output: Ordered keys object
+    optional_output_dynamic_parameters: Ordered dynamic dataset family
+    combination_when_to_use: Use when map/report output order matters.
+    row_id: 'Transform Nodes :: GROUP_BY -> ordered'
+  - node_name: GROUP_BY -> safe keys
+    mandatory_input: Dataset and grouping column
+    optional_input_dynamic_parameters: If `key_slug_mode=safe_slug/hash_suffix` normalize dataset suffixes
+    mandatory_output: Safe dynamic dataset names
+    optional_output_dynamic_parameters: Raw-to-safe key map
+    combination_when_to_use: Use when key values may contain spaces, slashes, currencies, or long IDs.
+    row_id: 'Transform Nodes :: GROUP_BY -> safe keys'
+  - node_name: MAP
+    mandatory_input: '`keys_key`, `iteration_ctx_key`, `sub_workflow`, `output_name`'
+    optional_input_dynamic_parameters: If `dataset_prefix` set show required `iteration_dataset_alias`; show `collect_values`
+      and `collect_datasets` after child workflow outputs exist
+    mandatory_output: '`ctx.values[output_name] = {results:{key:{...}}}`'
+    optional_output_dynamic_parameters: '`ctx.datasets[{output_name}_{key}_{dataset_name}]` for collected datasets'
+    combination_when_to_use: Use after `GROUP_BY` or `EXTRACT_LIST` to run the same mini-workflow per key.
+    row_id: 'Transform Nodes :: MAP'
+  - node_name: MAP -> key-only
+    mandatory_input: '`keys_key`, `iteration_ctx_key`, `sub_workflow`'
+    optional_input_dynamic_parameters: '`collect_values`, `collect_datasets`'
+    mandatory_output: Aggregate results object
+    optional_output_dynamic_parameters: Collected values/datasets
+    combination_when_to_use: Use when iteration only needs the key as context, e.g. one query per book.
+    row_id: 'Transform Nodes :: MAP -> key-only'
+  - node_name: MAP -> dataset fan-out
+    mandatory_input: '`keys_key`, `dataset_prefix`, `iteration_dataset_alias`, `sub_workflow`'
+    optional_input_dynamic_parameters: Child nodes use alias as stable `input_name`
+    mandatory_output: Aggregate results object
+    optional_output_dynamic_parameters: Dynamic collected datasets
+    combination_when_to_use: Use when each key already has a sliced dataset from `GROUP_BY`; child workflow can refer to alias
+      like `orders`.
+    row_id: 'Transform Nodes :: MAP -> dataset fan-out'
+  - node_name: EXTRACT_LIST
+    mandatory_input: '`input_name`, `column`, `output_name`'
+    optional_input_dynamic_parameters: '`order`, `dropna`, `max_values`'
+    mandatory_output: '`ctx.values[output_name] = {values:[...]}`'
+    optional_output_dynamic_parameters: Truncated values if `max_values` set
+    combination_when_to_use: Use to create fan-out keys without splitting rows; combine with `MAP -> key-only`.
+    row_id: 'Transform Nodes :: EXTRACT_LIST'
+  - node_name: EXTRACT_LIST -> first_seen
+    mandatory_input: '`input_name`, `column`'
+    optional_input_dynamic_parameters: '`dropna`, `max_values`'
+    mandatory_output: Values in first-seen order
+    optional_output_dynamic_parameters: None
+    combination_when_to_use: Use when source row order should drive processing/report order.
+    row_id: 'Transform Nodes :: EXTRACT_LIST -> first_seen'
+  - node_name: EXTRACT_LIST -> sort/desc
+    mandatory_input: '`input_name`, `column`, `order`'
+    optional_input_dynamic_parameters: '`dropna`, `max_values`'
+    mandatory_output: Sorted values
+    optional_output_dynamic_parameters: None
+    combination_when_to_use: Use for alphabetic/numeric ordered map iterations.
+    row_id: 'Transform Nodes :: EXTRACT_LIST -> sort/desc'
+  - node_name: EXTRACT_SCALAR
+    mandatory_input: '`input_name`, `reducer`, `output_name`'
+    optional_input_dynamic_parameters: If `reducer != row_count` show `column`; if `reducer=unique_single` show `fail_on_ambiguous`
+    mandatory_output: '`ctx.values[output_name] = scalar`'
+    optional_output_dynamic_parameters: Null/empty scalar depending on reducer and data
+    combination_when_to_use: Use when one scalar needs to feed a query, decision, prompt, or report filename.
+    row_id: 'Transform Nodes :: EXTRACT_SCALAR'
+  - node_name: EXTRACT_SCALAR -> row_count
+    mandatory_input: '`input_name`, `reducer=row_count`, `output_name`'
+    optional_input_dynamic_parameters: No `column`
+    mandatory_output: Row count scalar
+    optional_output_dynamic_parameters: None
+    combination_when_to_use: Use for counts without selecting a meaningless column.
+    row_id: 'Transform Nodes :: EXTRACT_SCALAR -> row_count'
+  - node_name: EXTRACT_SCALAR -> column reducer
+    mandatory_input: '`input_name`, `column`, reducer'
+    optional_input_dynamic_parameters: 'Reducers: `first`, `unique_single`, `max`, `min`, `count`, `sum`, `mean`, `any`, `all`'
+    mandatory_output: Reduced scalar
+    optional_output_dynamic_parameters: Ambiguity handling for `unique_single`
+    combination_when_to_use: Use for values like total quantity, max signal score, selected trader, or latest timestamp.
+    row_id: 'Transform Nodes :: EXTRACT_SCALAR -> column reducer'
+- section: Signal And Rule Nodes
+  rows:
+  - node_name: SIGNAL_CALCULATOR
+    mandatory_input: '`input_name`, `output_name`, `mode`'
+    optional_input_dynamic_parameters: If `mode=configure` show `signal_type` and signal params; if `mode=upload_script` show
+      `script_content`/`script_path` only when capability enabled
+    mandatory_output: '`ctx.datasets[output_name]` with `_signal_flag`, `_signal_score`, `_signal_reason`, `_signal_type`,
+      `_signal_window`; `ctx.values[{output_name}_flag_count]`'
+    optional_output_dynamic_parameters: Custom/generated helper columns depending on signal implementation
+    combination_when_to_use: Use after data is collected/enriched; combine with `DECISION_RULE`, `DATA_HIGHLIGHTER`, and `SECTION_SUMMARY`.
+    row_id: 'Signal And Rule Nodes :: SIGNAL_CALCULATOR'
+  - node_name: SIGNAL_CALCULATOR -> FRONT_RUNNING
+    mandatory_input: '`exec_time`, `exec_price` columns; `window_minutes`, `price_move_threshold`'
+    optional_input_dynamic_parameters: Column mapping overrides if input schema differs
+    mandatory_output: Signal DataFrame
+    optional_output_dynamic_parameters: '`_signal_reason` based on price move'
+    combination_when_to_use: Use for execution price move patterns around client/order context.
+    row_id: 'Signal And Rule Nodes :: SIGNAL_CALCULATOR -> FRONT_RUNNING'
+  - node_name: SIGNAL_CALCULATOR -> WASH_TRADE
+    mandatory_input: '`side`, `exec_quantity`; `window_minutes`, `ratio_threshold`'
+    optional_input_dynamic_parameters: Column mapping overrides if input schema differs
+    mandatory_output: Signal DataFrame
+    optional_output_dynamic_parameters: '`_signal_reason` based on buy/sell ratio'
+    combination_when_to_use: Use for offsetting buy/sell volume patterns.
+    row_id: 'Signal And Rule Nodes :: SIGNAL_CALCULATOR -> WASH_TRADE'
+  - node_name: SIGNAL_CALCULATOR -> SPOOFING
+    mandatory_input: '`status`; `cancel_ratio_threshold`, `window`'
+    optional_input_dynamic_parameters: Column mapping overrides if input schema differs
+    mandatory_output: Signal DataFrame
+    optional_output_dynamic_parameters: '`_signal_reason` based on cancel ratio'
+    combination_when_to_use: Use for cancellation-heavy order behavior.
+    row_id: 'Signal And Rule Nodes :: SIGNAL_CALCULATOR -> SPOOFING'
+  - node_name: SIGNAL_CALCULATOR -> LAYERING
+    mandatory_input: '`order_type`, `side`; `min_layers`, `window`'
+    optional_input_dynamic_parameters: Column mapping overrides if input schema differs
+    mandatory_output: Signal DataFrame
+    optional_output_dynamic_parameters: '`_signal_reason` based on layer imbalance'
+    combination_when_to_use: Use for limit-order side imbalance or layered order patterns.
+    row_id: 'Signal And Rule Nodes :: SIGNAL_CALCULATOR -> LAYERING'
+  - node_name: SIGNAL_CALCULATOR -> upload_script
+    mandatory_input: '`input_name`, script, `output_name`'
+    optional_input_dynamic_parameters: '`params`; only visible if server capability enabled'
+    mandatory_output: Signal DataFrame with fixed signal columns
+    optional_output_dynamic_parameters: Any extra script-created columns
+    combination_when_to_use: Use only for admin-approved custom detection; not normal workflow authoring.
+    row_id: 'Signal And Rule Nodes :: SIGNAL_CALCULATOR -> upload_script'
+  - node_name: DECISION_RULE
+    mandatory_input: '`input_name`, `mode`'
+    optional_input_dynamic_parameters: If `mode=threshold` show thresholds; if `mode=rules` show ordered rules; advanced show
+      `severity_map`, `output_branches`
+    mandatory_output: '`ctx.disposition`, `ctx.output_branch`, `ctx.values.disposition`, `ctx.values.severity`, `ctx.values.score`,
+      `ctx.values.flag_count`, `ctx.values.matched_rule`'
+    optional_output_dynamic_parameters: Branch names from `output_branches`
+    combination_when_to_use: Use after signal calculation to set workflow outcome for report, routing, and prompts.
+    row_id: 'Signal And Rule Nodes :: DECISION_RULE'
+  - node_name: DECISION_RULE -> threshold
+    mandatory_input: '`review_threshold`, `escalate_threshold`'
+    optional_input_dynamic_parameters: '`severity_map`, `output_branches`'
+    mandatory_output: Disposition/severity/score/branch
+    optional_output_dynamic_parameters: Custom branch labels
+    combination_when_to_use: Use for simple `flag_count` based routing.
+    row_id: 'Signal And Rule Nodes :: DECISION_RULE -> threshold'
+  - node_name: DECISION_RULE -> rules
+    mandatory_input: '`rules[].name`, `rules[].when`, `rules[].disposition`'
+    optional_input_dynamic_parameters: '`rules[].severity`, fallback thresholds/disposition'
+    mandatory_output: Disposition/severity/score/branch/matched rule
+    optional_output_dynamic_parameters: First matching rule wins
+    combination_when_to_use: Use for combinations like signal count + comms hit + max score + context condition.
+    row_id: 'Signal And Rule Nodes :: DECISION_RULE -> rules'
+- section: Narrative Nodes
+  rows:
+  - node_name: SECTION_SUMMARY
+    mandatory_input: '`input_name`, `section_name`, `mode`'
+    optional_input_dynamic_parameters: If `mode=templated_stats` show `stats` and template fields; if `fact_pack_llm` show
+      `facts`, `required_facts`, strictness, prompt; if `event_narrative` show event controls; if `dataset_llm` show dataset
+      slice controls
+    mandatory_output: '`ctx.sections[section_name] = {name, mode, stats, narrative, dataset}`'
+    optional_output_dynamic_parameters: Verification metadata, prompt inputs, rows/columns sent to LLM
+    combination_when_to_use: Use when a DataFrame needs to become a report section; choose mode based on deterministic stats
+      vs grounded LLM vs event timeline.
+    row_id: 'Narrative Nodes :: SECTION_SUMMARY'
+  - node_name: SECTION_SUMMARY -> templated_stats
+    mandatory_input: '`stats[]` or template; `input_name`'
+    optional_input_dynamic_parameters: '`include_row_count`, `include_signal_hits`, `include_keyword_hits`, `render_mode`'
+    mandatory_output: Section object with deterministic stats/narrative
+    optional_output_dynamic_parameters: No LLM required
+    combination_when_to_use: Use placeholders like `{stats}`, `{trader_id}`, `{disposition}` when exact deterministic metrics
+      are enough.
+    row_id: 'Narrative Nodes :: SECTION_SUMMARY -> templated_stats'
+  - node_name: SECTION_SUMMARY -> fact_pack_llm
+    mandatory_input: '`facts[]`, `llm_prompt_template`'
+    optional_input_dynamic_parameters: '`required_facts`, `strictness`, structured `count_where`, prompt context'
+    mandatory_output: Section object with fact-pack narrative
+    optional_output_dynamic_parameters: Verification/retry metadata
+    combination_when_to_use: Use when LLM prose is needed but facts must be computed first and cited exactly.
+    row_id: 'Narrative Nodes :: SECTION_SUMMARY -> fact_pack_llm'
+  - node_name: SECTION_SUMMARY -> event_narrative
+    mandatory_input: '`sort_by`, `event_fields` or `event_template`, `llm_prompt_template`'
+    optional_input_dynamic_parameters: '`max_events`, `empty_behavior`, prompt context'
+    mandatory_output: Section object with `row_count`, `event_count`
+    optional_output_dynamic_parameters: Event lines sent to LLM
+    combination_when_to_use: Use for comms timelines, lifecycle events, or ordered evidence rows.
+    row_id: 'Narrative Nodes :: SECTION_SUMMARY -> event_narrative'
+  - node_name: SECTION_SUMMARY -> dataset_llm
+    mandatory_input: '`columns`, `max_rows`, `format`, `llm_prompt_template`'
+    optional_input_dynamic_parameters: prompt context
+    mandatory_output: Section object with capped dataset narrative
+    optional_output_dynamic_parameters: '`rows_sent_to_llm`, `columns_sent_to_llm`'
+    combination_when_to_use: Use when the LLM must inspect a small capped table; never send uncapped full datasets.
+    row_id: 'Narrative Nodes :: SECTION_SUMMARY -> dataset_llm'
+  - node_name: CONSOLIDATED_SUMMARY
+    mandatory_input: '`mode`; implicit `ctx.sections`'
+    optional_input_dynamic_parameters: If `mode=llm_stitch` show `include_sections`, `section_order`, LLM prompt; if `template_stitch`
+      show template; if `none` hide summary body fields
+    mandatory_output: '`ctx.executive_summary`, `ctx.values.executive_summary`'
+    optional_output_dynamic_parameters: Prompt context, section filtering/order
+    combination_when_to_use: Use after section nodes to create one executive summary for report output.
+    row_id: 'Narrative Nodes :: CONSOLIDATED_SUMMARY'
+  - node_name: CONSOLIDATED_SUMMARY -> llm_stitch
+    mandatory_input: Upstream sections
+    optional_input_dynamic_parameters: '`include_sections`, `section_order`, `llm_prompt_template`, `prompt_context`'
+    mandatory_output: Executive summary text
+    optional_output_dynamic_parameters: Uses selected sections only
+    combination_when_to_use: Use for analyst-style final prose across sections.
+    row_id: 'Narrative Nodes :: CONSOLIDATED_SUMMARY -> llm_stitch'
+  - node_name: CONSOLIDATED_SUMMARY -> template_stitch
+    mandatory_input: Upstream sections, `template`
+    optional_input_dynamic_parameters: '`include_sections`, `section_order`'
+    mandatory_output: Executive summary text
+    optional_output_dynamic_parameters: Deterministic summary
+    combination_when_to_use: Use for regulated/static wording where LLM is not desired.
+    row_id: 'Narrative Nodes :: CONSOLIDATED_SUMMARY -> template_stitch'
+  - node_name: CONSOLIDATED_SUMMARY -> none
+    mandatory_input: None
+    optional_input_dynamic_parameters: None
+    mandatory_output: Empty or unchanged executive summary
+    optional_output_dynamic_parameters: Report may skip executive summary
+    combination_when_to_use: Use when final artifact only needs raw sections/tabs.
+    row_id: 'Narrative Nodes :: CONSOLIDATED_SUMMARY -> none'
+- section: Output Nodes
+  rows:
+  - node_name: REPORT_OUTPUT
+    mandatory_input: '`format`, `output_path`'
+    optional_input_dynamic_parameters: If `format=excel` show workbook/tabs; if `csv` show one dataset; if `zip_csv` show
+      files; if `pdf/html` show sections/evidence tables; if `json` show include toggles
+    mandatory_output: '`ctx.report_path`, `ctx.values.report_path`'
+    optional_output_dynamic_parameters: '`ctx.values.report_metadata`'
+    combination_when_to_use: Use as terminal artifact node; choose format based on audience and downstream system.
+    row_id: 'Output Nodes :: REPORT_OUTPUT'
+  - node_name: REPORT_OUTPUT -> excel
+    mandatory_input: '`tabs[]` or `auto_include_all_datasets`'
+    optional_input_dynamic_parameters: '`include_cover`, `include_executive_summary`, `include_section_summaries`, dynamic
+      tabs, highlights'
+    mandatory_output: '`.xlsx` report path'
+    optional_output_dynamic_parameters: Sheet count, tab metadata
+    combination_when_to_use: Use for analyst workbooks with multiple evidence tabs and highlights.
+    row_id: 'Output Nodes :: REPORT_OUTPUT -> excel'
+  - node_name: REPORT_OUTPUT -> excel -> static tab
+    mandatory_input: '`name`, `dataset`'
+    optional_input_dynamic_parameters: '`columns`, `sort_by`, `include_highlights`'
+    mandatory_output: Excel sheet
+    optional_output_dynamic_parameters: Highlighted sibling dataset if enabled
+    combination_when_to_use: Use for fixed tabs like Orders, Executions, Signals, Comms.
+    row_id: 'Output Nodes :: REPORT_OUTPUT -> excel -> static tab'
+  - node_name: REPORT_OUTPUT -> excel -> dynamic_from_ref
+    mandatory_input: '`expand_from`, `name_template`, `dataset_template`'
+    optional_input_dynamic_parameters: '`as`, `include_highlights`'
+    mandatory_output: One sheet per resolved item
+    optional_output_dynamic_parameters: Skips missing datasets
+    combination_when_to_use: Use for per-book/per-venue/per-trader tabs generated from a list/ref.
+    row_id: 'Output Nodes :: REPORT_OUTPUT -> excel -> dynamic_from_ref'
+  - node_name: REPORT_OUTPUT -> excel -> map_result
+    mandatory_input: '`map_value_key`, `dataset_template`, `name_template`'
+    optional_input_dynamic_parameters: '`include_highlights`'
+    mandatory_output: One sheet per map key
+    optional_output_dynamic_parameters: Uses `MAP` dynamic outputs
+    combination_when_to_use: Use after `MAP` to render one tab per iteration result.
+    row_id: 'Output Nodes :: REPORT_OUTPUT -> excel -> map_result'
+  - node_name: REPORT_OUTPUT -> csv
+    mandatory_input: '`dataset`, `output_path`'
+    optional_input_dynamic_parameters: '`columns`, `delimiter`, `include_highlight_columns`'
+    mandatory_output: '`.csv` report path'
+    optional_output_dynamic_parameters: Row/column metadata
+    combination_when_to_use: Use for one flat table export; if multiple datasets are needed use `zip_csv` or Excel.
+    row_id: 'Output Nodes :: REPORT_OUTPUT -> csv'
+  - node_name: REPORT_OUTPUT -> zip_csv
+    mandatory_input: '`files[]`, `output_path`'
+    optional_input_dynamic_parameters: Dynamic files from refs/map results
+    mandatory_output: '`.zip` report path'
+    optional_output_dynamic_parameters: File count metadata
+    combination_when_to_use: Use for multi-table machine export when Excel is not wanted.
+    row_id: 'Output Nodes :: REPORT_OUTPUT -> zip_csv'
+  - node_name: REPORT_OUTPUT -> pdf
+    mandatory_input: '`sections`, `output_path`'
+    optional_input_dynamic_parameters: '`include_cover`, `include_executive_summary`, `evidence_tables`, `page_size`, `orientation`'
+    mandatory_output: '`.pdf` report path'
+    optional_output_dynamic_parameters: Page/section metadata
+    combination_when_to_use: Use for human-readable narrative reports; cap evidence tables.
+    row_id: 'Output Nodes :: REPORT_OUTPUT -> pdf'
+  - node_name: REPORT_OUTPUT -> html
+    mandatory_input: '`sections`, `output_path`'
+    optional_input_dynamic_parameters: '`include_cover`, `include_executive_summary`, `evidence_tables`, styles'
+    mandatory_output: '`.html` report path'
+    optional_output_dynamic_parameters: Preview metadata
+    combination_when_to_use: Use for browser preview or shareable web artifact.
+    row_id: 'Output Nodes :: REPORT_OUTPUT -> html'
+  - node_name: REPORT_OUTPUT -> json
+    mandatory_input: '`output_path`'
+    optional_input_dynamic_parameters: '`include_context`, `include_sections`, `include_executive_summary`, `include_dataset_summaries`,
+      `include_full_datasets`'
+    mandatory_output: '`.json` report path'
+    optional_output_dynamic_parameters: Payload metadata
+    combination_when_to_use: Use for API/integration output; avoid full datasets unless explicitly needed.
+    row_id: 'Output Nodes :: REPORT_OUTPUT -> json'

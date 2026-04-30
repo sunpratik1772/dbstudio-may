@@ -27,4 +27,5 @@ jobs:
         run: |
           git diff --exit-code -- backend/engine/node_type_ids.py \
             backend/contracts/node_contracts.json \
-            frontend/src/nodes/generated.ts
+            frontend/src/nodes/generated.ts \
+            node_detail.md

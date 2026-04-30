@@ -6,6 +6,7 @@ import pytest
 
 from engine.context import RunContext
 from engine.refs import ResolveError, resolve_ref, resolve_template, resolve_vars
+from engine.prompt_context import build_dataset_block
 
 
 @pytest.fixture
@@ -94,3 +95,16 @@ def test_resolve_vars_native_types(ctx):
     assert vars_["rows"] == 3
     assert vars_["literal"] == 42
     assert vars_["narrative"] == "Total is 600.0 across 3 rows"
+
+
+def test_markdown_dataset_block_falls_back_without_tabulate(monkeypatch):
+    df = pd.DataFrame({"a": [1], "b": ["x"]})
+
+    def fail_to_markdown(*args, **kwargs):
+        raise ImportError("Missing optional dependency 'tabulate'")
+
+    monkeypatch.setattr(pd.DataFrame, "to_markdown", fail_to_markdown)
+
+    out = build_dataset_block(df, fmt="markdown")
+
+    assert out == "a,b\n1,x\n"

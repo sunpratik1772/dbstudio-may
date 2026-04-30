@@ -26,16 +26,35 @@ from ..node_spec import NodeSpec, _spec_from_yaml
 from ..prompt_context import build_slots, render_prompt
 
 
-def _llm_summary(prompt: str) -> str:
+def _llm_summary(
+    prompt: str,
+    *,
+    system_prompt: str | None = None,
+    model: str | None = None,
+    temperature: float = 0.2,
+    max_output_tokens: int = 1000,
+) -> str:
     """LLM seam — monkey-patched in tests to return deterministic text."""
     try:
         return get_default_adapter().single_shot(
             prompt,
-            temperature=0.2,
-            max_output_tokens=1000,
+            model=model,
+            temperature=temperature,
+            max_output_tokens=max_output_tokens,
+            system_prompt=system_prompt,
         )
     except Exception as e:
         return f"[LLM unavailable — {e}]"
+
+
+def _call_llm_summary(prompt: str, **kwargs) -> str:
+    """Call the LLM seam while preserving old one-arg test monkeypatches."""
+    try:
+        return _llm_summary(prompt, **kwargs)
+    except TypeError as exc:
+        if "unexpected keyword argument" not in str(exc):
+            raise
+        return _llm_summary(prompt)
 
 
 _DEFAULT_PROMPT = """You are a senior financial surveillance analyst at a global bank.
@@ -77,8 +96,24 @@ def handle_consolidated_summary(node: dict, ctx: RunContext) -> None:
     }
     slots.update(build_slots(cfg.get("prompt_context"), ctx))
 
+    system_prompt = render_prompt(
+        cfg.get("system_prompt")
+        or (
+            "You are a senior financial surveillance analyst. Write executive summaries "
+            "that are concise, factual, and tied to the supplied section findings. "
+            "Do not invent evidence."
+        ),
+        ctx,
+        **slots,
+    )
     prompt = render_prompt(template, ctx, **slots)
-    ctx.executive_summary = _llm_summary(prompt)
+    ctx.executive_summary = _call_llm_summary(
+        prompt,
+        system_prompt=system_prompt,
+        model=cfg.get("model"),
+        temperature=float(cfg.get("temperature", 0.2)),
+        max_output_tokens=int(cfg.get("max_output_tokens", 1000)),
+    )
     ctx.set("executive_summary", ctx.executive_summary)
 
 

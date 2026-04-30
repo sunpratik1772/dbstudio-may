@@ -35,6 +35,8 @@ Keep this file small. New modes only when a real scenario needs them.
 from __future__ import annotations
 
 import json
+import re
+import string
 from typing import Any
 
 import pandas as pd
@@ -48,8 +50,32 @@ class SafeMap(dict):
     `{key}` rather than raising KeyError. Lets multiple render passes
     cooperate without losing placeholders."""
 
+    def __getitem__(self, key: str) -> Any:
+        return _attr_view(super().__getitem__(key))
+
     def __missing__(self, key: str) -> str:
         return "{" + key + "}"
+
+
+class _AttrDict:
+    """Dict wrapper that lets format strings use `{slot.key}` safely."""
+
+    def __init__(self, value: dict[str, Any]) -> None:
+        self._value = value
+
+    def __getattr__(self, key: str) -> Any:
+        if key not in self._value:
+            return "{" + key + "}"
+        return _attr_view(self._value[key])
+
+    def __str__(self) -> str:
+        return json.dumps(self._value, default=str)
+
+
+def _attr_view(value: Any) -> Any:
+    if isinstance(value, dict):
+        return _AttrDict(value)
+    return value
 
 
 def render_prompt(template: str, ctx: RunContext, **slots: Any) -> str:
@@ -58,7 +84,50 @@ def render_prompt(template: str, ctx: RunContext, **slots: Any) -> str:
     they can produce values which then get fed into slots, not the
     other way around."""
     rendered = resolve_template(template, ctx)
-    return rendered.format_map(SafeMap(slots))
+    try:
+        return rendered.format_map(SafeMap(slots))
+    except ValueError as exc:
+        if (
+            "unmatched '{'" not in str(exc)
+            and "Single '}'" not in str(exc)
+            and "Invalid format specifier" not in str(exc)
+        ):
+            raise
+        return _render_prompt_lenient(rendered, slots)
+
+
+def validate_prompt_template(template: str) -> str | None:
+    """Return an issue string if a template has malformed literal braces.
+
+    Single refs/placeholders like ``{context.foo}`` are valid. Literal JSON
+    examples should escape braces as ``{{`` / ``}}`` or avoid raw braces.
+    """
+    try:
+        parsed = list(string.Formatter().parse(template))
+    except ValueError as exc:
+        if (
+            "unmatched '{'" in str(exc)
+            or "Single '}'" in str(exc)
+            or "Invalid format specifier" in str(exc)
+        ):
+            return str(exc)
+        raise
+    allowed_field = re.compile(r"^[a-zA-Z_][\w]*(?:\.[\w@]+)*$")
+    for _literal, field_name, format_spec, _conversion in parsed:
+        if field_name is None:
+            continue
+        if not allowed_field.fullmatch(field_name):
+            return f"invalid placeholder {{{field_name}}}"
+        if format_spec:
+            return f"unsupported format specifier on {{{field_name}}}: {format_spec!r}"
+    return None
+
+
+def _render_prompt_lenient(rendered: str, slots: dict[str, Any]) -> str:
+    """Render known placeholders while leaving malformed literal braces intact."""
+    for key, value in slots.items():
+        rendered = rendered.replace("{" + key + "}", str(value))
+    return rendered
 
 
 def build_dataset_block(
@@ -76,7 +145,10 @@ def build_dataset_block(
     if fmt == "json":
         return working.to_json(orient="records", date_format="iso")
     if fmt == "markdown":
-        return working.to_markdown(index=False)
+        try:
+            return working.to_markdown(index=False)
+        except ImportError:
+            return working.to_csv(index=False)
     return working.to_csv(index=False)
 
 

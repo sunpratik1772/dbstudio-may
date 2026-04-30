@@ -160,6 +160,7 @@ class AgentRunner:
             current_workflow=current_workflow,
             recent_errors=recent_errors,
             selected_node_id=selected_node_id,
+            matched_skills=matched,
         )
         try:
             plan = self.planner.generate(system_prompt, history, initial_turn)

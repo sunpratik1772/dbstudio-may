@@ -27,7 +27,9 @@ from typing import Any
 from .dag_runner import _edge_endpoints, topological_sort
 from .hard_rules import run_hard_rules
 from .ports import ParamType
+from .prompt_context import validate_prompt_template
 from .registry import NODE_SPECS, NodeSpec
+from .refs import AGG_FUNCS, REF_RE
 from .schema_version import SchemaVersionError, migrate_to_current
 from .signal_contract import get_signal_output_columns
 from .validation_codes import ValidationErrorCode
@@ -162,6 +164,7 @@ def validate_dag(dag: dict) -> ValidationResult:
 
     # --- Column names: field_bindings must reference real columns. ---
     _validate_field_bindings(nodes_by_id, result)
+    _validate_prompt_refs(nodes_by_id, result)
 
     # --- Node-specific hard rules we can enforce programmatically. ---
     # Rules register themselves via `@register_hard_rule` in
@@ -446,6 +449,16 @@ def _validate_node_config(node: dict, result: ValidationResult) -> None:
                 node_id=node_id,
                 field=f"config.{param.name}",
             )
+        if param.name in {"prompt_template", "llm_prompt_template", "system_prompt"} and isinstance(value, str):
+            issue = validate_prompt_template(value)
+            if issue:
+                result.add(
+                    _VC.BAD_PROMPT_TEMPLATE,
+                    f"Node '{node_id}' config '{param.name}' has malformed template braces: {issue}. "
+                    "Escape literal JSON braces as '{{' and '}}' or remove raw brace examples.",
+                    node_id=node_id,
+                    field=f"config.{param.name}",
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -726,6 +739,156 @@ def _validate_field_bindings(
                     node_id=nid,
                     field=f"config.field_bindings[{i}].field",
                 )
+
+
+def _validate_prompt_refs(
+    nodes_by_id: dict[str, dict],
+    result: ValidationResult,
+) -> None:
+    """Validate prompt refs that point at known datasets.
+
+    We intentionally allow bare slots like {client_orders_count}: those may be
+    supplied by prompt_context.vars. But when a ref head is a known dataset
+    output, the rest of the ref must match the dataset schema/lineage.
+    """
+    from data_sources import get_registry
+
+    reg = get_registry()
+    output_to_node = _build_output_to_node(nodes_by_id)
+    cache: dict[str, frozenset[str] | None] = {}
+
+    def validate_ref(node_id: str, node: dict, field_path: str, ref: str) -> None:
+        parts = ref.split(".")
+        head = parts[0]
+        if head == "context":
+            return
+        if head == "stats" and node.get("type") == "SECTION_SUMMARY":
+            _validate_section_summary_stats_ref(node_id, node, field_path, ref, result)
+            return
+        if head not in output_to_node:
+            return
+        if len(parts) == 1:
+            return
+
+        known_f = _known_columns_for_dataset_name(
+            head, output_to_node, reg, cache, set()
+        )
+        if known_f is None:
+            return
+        known = set(known_f)
+        semantics_ds = _trace_registry_ds(head, output_to_node, reg)
+        col = parts[1]
+
+        if col.startswith("@"):
+            if col != "@row_count":
+                result.add(
+                    _VC.BAD_PROMPT_REF,
+                    f"Node '{node_id}' prompt ref '{{{ref}}}' uses unknown special ref "
+                    f"'{col}' for dataset '{head}'. Supported special refs: @row_count.",
+                    node_id=node_id,
+                    field=field_path,
+                )
+            return
+
+        if not _field_binding_references_known_column(col, known, semantics_ds):
+            ds_id = semantics_ds.id if semantics_ds is not None else head
+            result.add(
+                _VC.BAD_PROMPT_REF,
+                f"Node '{node_id}' prompt ref '{{{ref}}}' references unknown column "
+                f"'{col}' for dataset '{head}' (traced source '{ds_id}'). "
+                f"Known: {sorted(known)}.",
+                node_id=node_id,
+                field=field_path,
+            )
+            return
+
+        if len(parts) >= 3:
+            agg = parts[2]
+            if agg not in AGG_FUNCS:
+                result.add(
+                    _VC.BAD_PROMPT_REF,
+                    f"Node '{node_id}' prompt ref '{{{ref}}}' uses unknown aggregation "
+                    f"'{agg}'. Known aggregations: {sorted(AGG_FUNCS)}.",
+                    node_id=node_id,
+                    field=field_path,
+                )
+
+    for nid, node in nodes_by_id.items():
+        cfg = node.get("config") or {}
+        if not isinstance(cfg, dict):
+            continue
+
+        for key in ("prompt_template", "llm_prompt_template", "system_prompt"):
+            value = cfg.get(key)
+            if not isinstance(value, str):
+                continue
+            for match in REF_RE.finditer(value):
+                validate_ref(nid, node, f"config.{key}", match.group(1))
+
+        prompt_context = cfg.get("prompt_context")
+        if not isinstance(prompt_context, dict):
+            continue
+        vars_cfg = prompt_context.get("vars") or {}
+        if not isinstance(vars_cfg, dict):
+            continue
+        for name, value in vars_cfg.items():
+            if not isinstance(value, str):
+                continue
+            for match in REF_RE.finditer(value):
+                validate_ref(
+                    nid,
+                    node,
+                    f"config.prompt_context.vars.{name}",
+                    match.group(1),
+                )
+
+
+def _validate_section_summary_stats_ref(
+    node_id: str,
+    node: dict,
+    field_path: str,
+    ref: str,
+    result: ValidationResult,
+) -> None:
+    parts = ref.split(".")
+    if len(parts) != 2:
+        result.add(
+            _VC.BAD_PROMPT_REF,
+            f"Node '{node_id}' prompt ref '{{{ref}}}' is not a supported SECTION_SUMMARY stats ref. "
+            "Use {stats} or {stats.<field>_<agg>}.",
+            node_id=node_id,
+            field=field_path,
+        )
+        return
+
+    cfg = node.get("config") or {}
+    mode = (cfg.get("mode") or "templated").lower()
+    stat_name = parts[1]
+    allowed = {"row_count", "signal_hits", "comm_keyword_hits"}
+
+    if mode == "templated":
+        for binding in cfg.get("field_bindings") or []:
+            if not isinstance(binding, dict):
+                continue
+            field = binding.get("field")
+            agg = binding.get("agg", "count")
+            if not field:
+                continue
+            allowed.add(str(field))
+            allowed.add(f"{field}_{agg}")
+    elif mode == "fact_pack_llm":
+        for fact in cfg.get("facts") or []:
+            if isinstance(fact, dict) and fact.get("name"):
+                allowed.add(str(fact["name"]))
+
+    if stat_name not in allowed:
+        result.add(
+            _VC.BAD_PROMPT_REF,
+            f"Node '{node_id}' prompt ref '{{{ref}}}' does not match computed SECTION_SUMMARY stats. "
+            f"Known stats for this config: {sorted(allowed)}.",
+            node_id=node_id,
+            field=field_path,
+        )
 
 
 # ---------------------------------------------------------------------------

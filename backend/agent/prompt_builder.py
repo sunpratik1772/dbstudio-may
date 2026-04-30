@@ -27,13 +27,16 @@ from data_sources import get_registry
 from .repair.feedback_builder import build_feedback
 
 
+ALWAYS_ON_SKILLS = ("skills-agentic-workflow-builder",)
+
+
 class PromptBuilder:
     def __init__(
         self,
         skills_dir: Path | str = "skills",
         contracts_path: Path | str = "contracts/node_contracts.json",
     ) -> None:
-        self.skills_dir = Path(skills_dir)
+        self.skills_dir = _resolve_backend_path(skills_dir)
         self.contracts_path = Path(contracts_path)
 
     # ── system ----------------------------------------------------------------
@@ -75,11 +78,16 @@ class PromptBuilder:
         library, so "matched" is a display hint rather than a filter.
         """
         lower = scenario.lower()
+        available = self.list_skills()
         matched = [
             s for s in self.list_skills()
             if any(tok and tok in lower for tok in s.lower().split("-"))
         ]
-        return matched or self.list_skills()
+        out = matched or available
+        for skill in ALWAYS_ON_SKILLS:
+            if skill in available and skill not in out:
+                out.insert(0, skill)
+        return out
 
     def system_prompt(self) -> str:
         skills = self._load_skills()
@@ -164,15 +172,16 @@ rest.
         current_workflow: dict[str, Any] | None = None,
         recent_errors: list[dict[str, Any]] | None = None,
         selected_node_id: str | None = None,
+        matched_skills: list[str] | None = None,
     ) -> str:
         """Build the first user turn.
 
         Two modes:
 
-        * **Greenfield** — no `current_workflow`. Returns the scenario
-          text unchanged (identity). This preserves the "describe a
-          scenario → generate from scratch" path the palette's example
-          prompts rely on.
+        * **Greenfield** — no `current_workflow`. Wraps the scenario with
+          a short creation brief so every generation turn explicitly points
+          back at the live node contracts, data-source schemas, and matched
+          skills from the system prompt.
 
         * **Edit-existing** — `current_workflow` is present. We embed
           the current DAG JSON and a normalised list of recent
@@ -187,8 +196,33 @@ rest.
           ("remove this", "change this threshold") resolve to a
           concrete node on the canvas rather than guessing.
         """
+        context_block = _render_generation_context(
+            matched_skills or self.match_skills(scenario)
+        )
+
         if current_workflow is None:
-            return scenario
+            user_request = scenario.strip()
+            return (
+                "Create a NEW workflow from the user request below.\n"
+                "\n"
+                f"{context_block}"
+                "## User request\n"
+                f"{user_request}\n"
+                "\n"
+                "## Creation rules\n"
+                "- Use the current Node I/O Contracts from the system prompt "
+                "as the source of truth.\n"
+                "- Use the current Data Source Column Schemas from the system "
+                "prompt; do not invent sources, concrete source names, or columns.\n"
+                "- Apply the matched skills listed above. If a needed capability "
+                "is unsupported by the current contracts or data schemas, generate "
+                "only the supported subset.\n"
+                "- For LLM prompt templates, reference dataset fields with exact "
+                "known refs such as `{dataset.column.agg}` or `{dataset.@row_count}`. "
+                "Escape literal JSON braces as `{{` and `}}`.\n"
+                "- Return the COMPLETE workflow JSON following the Output Format "
+                "in the system prompt.\n"
+            )
 
         # Compact the DAG so the prompt stays within token budget for
         # large workflows. We drop UI-only fields (position, disabled)
@@ -204,6 +238,7 @@ rest.
         return (
             "You are editing an EXISTING workflow that is already loaded in the canvas.\n"
             "\n"
+            f"{context_block}"
             "## Current workflow (source of truth — do not recreate from scratch)\n"
             "```json\n"
             f"{compact_json}\n"
@@ -242,7 +277,22 @@ rest.
         )
 
     def repair_prompt(self, errors: list[dict], attempt: int, total: int) -> str:
-        return build_feedback(errors, attempt, total)
+        context_block = (
+            "Before repairing, re-check the current Node I/O Contracts, Data "
+            "Source Column Schemas, and Surveillance Skills Library from the "
+            "system prompt. "
+            "Fix refs, config keys, node types, and columns against those current "
+            "inventories only.\n\n"
+        )
+        return context_block + build_feedback(errors, attempt, total)
+
+
+def _resolve_backend_path(path: Path | str) -> Path:
+    candidate = Path(path)
+    if candidate.is_absolute() or candidate.exists():
+        return candidate
+    backend_relative = Path(__file__).resolve().parents[1] / candidate
+    return backend_relative if backend_relative.exists() else candidate
 
 
 def _compact_workflow(wf: dict[str, Any]) -> dict[str, Any]:
@@ -264,6 +314,20 @@ def _compact_workflow(wf: dict[str, Any]) -> dict[str, Any]:
         {"from": e.get("from"), "to": e.get("to")} for e in wf.get("edges", [])
     ]
     return out
+
+
+def _render_generation_context(matched_skills: list[str] | None) -> str:
+    skills = matched_skills or []
+    skill_text = ", ".join(f"`{s}`" for s in skills) if skills else "(none)"
+    return (
+        "## Current generation context\n"
+        "- Node definitions: use the live registry-backed Node I/O Contracts "
+        "in the system prompt.\n"
+        "- Data sources: use the live data-source registry schemas in the "
+        "system prompt.\n"
+        f"- Matched/on-demand skills: {skill_text}.\n"
+        "\n"
+    )
 
 
 def _render_selection(

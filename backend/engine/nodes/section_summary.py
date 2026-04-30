@@ -34,15 +34,34 @@ from ..prompt_context import build_slots, render_prompt
 # ---------------------------------------------------------------------------
 # LLM seam — monkey-patched in tests
 # ---------------------------------------------------------------------------
-def _llm_narrative(prompt: str) -> str:
+def _llm_narrative(
+    prompt: str,
+    *,
+    system_prompt: str | None = None,
+    model: str | None = None,
+    temperature: float = 0.2,
+    max_output_tokens: int = 600,
+) -> str:
     try:
         return get_default_adapter().single_shot(
             prompt,
-            temperature=0.2,
-            max_output_tokens=600,
+            model=model,
+            temperature=temperature,
+            max_output_tokens=max_output_tokens,
+            system_prompt=system_prompt,
         )
     except Exception as e:
         return f"[LLM unavailable — {e}]"
+
+
+def _call_llm_narrative(prompt: str, **kwargs) -> str:
+    """Call the LLM seam while preserving old one-arg test monkeypatches."""
+    try:
+        return _llm_narrative(prompt, **kwargs)
+    except TypeError as exc:
+        if "unexpected keyword argument" not in str(exc):
+            raise
+        return _llm_narrative(prompt)
 
 
 # ---------------------------------------------------------------------------
@@ -58,18 +77,38 @@ def _templated_stats(df: pd.DataFrame | None, field_bindings: list[dict]) -> dic
         agg = binding.get("agg", "count")
         if field not in df.columns:
             continue
+        value = None
         match agg:
-            case "count":   stats[field] = int(df[field].count())
-            case "sum":     stats[field] = float(df[field].sum())
-            case "mean":    stats[field] = round(float(df[field].mean()), 4)
-            case "nunique": stats[field] = int(df[field].nunique())
-            case "max":     stats[field] = str(df[field].max())
-            case "min":     stats[field] = str(df[field].min())
+            case "count":   value = int(df[field].count())
+            case "sum":     value = float(df[field].sum())
+            case "mean":    value = round(float(df[field].mean()), 4)
+            case "nunique": value = int(df[field].nunique())
+            case "max":     value = str(df[field].max())
+            case "min":     value = str(df[field].min())
+        if value is None:
+            continue
+        stats[field] = value
+        stats[f"{field}_{agg}"] = value
     if "_signal_flag" in df.columns:
         stats["signal_hits"] = int(df["_signal_flag"].sum())
     if "_keyword_hit" in df.columns:
         stats["comm_keyword_hits"] = int(df["_keyword_hit"].sum())
     return stats
+
+
+class _StatsSlot:
+    """Prompt slot that supports both {stats} text and {stats.field_agg} refs."""
+
+    def __init__(self, stats: dict) -> None:
+        self._stats = stats
+
+    def __str__(self) -> str:
+        return "\n".join(f"  • {k}: {v}" for k, v in self._stats.items())
+
+    def __getattr__(self, name: str) -> object:
+        if name in self._stats:
+            return self._stats[name]
+        return "{" + f"stats.{name}" + "}"
 
 
 def _compute_fact(df: pd.DataFrame, column: str, agg: str) -> object:
@@ -160,6 +199,19 @@ def handle_section_summary(node: dict, ctx: RunContext) -> None:
         "llm_prompt_template",
         "Summarise this surveillance section for {section}:\n{stats}",
     )
+    system_prompt: str = render_prompt(
+        cfg.get("system_prompt")
+        or (
+            "You are a financial surveillance analyst. Write precise, evidence-grounded "
+            "section narratives. Do not invent facts. Reference only supplied stats, "
+            "facts, events, context, and dataset rows."
+        ),
+        ctx,
+        **build_slots(cfg.get("prompt_context"), ctx),
+    )
+    model = cfg.get("model")
+    temperature = float(cfg.get("temperature", 0.2))
+    max_output_tokens = int(cfg.get("max_output_tokens", 600))
 
     df = ctx.datasets.get(input_name)
 
@@ -181,7 +233,13 @@ def handle_section_summary(node: dict, ctx: RunContext) -> None:
         stats = {"row_count": int(len(df)) if df is not None else 0, **facts}
         prompt = render_prompt(prompt_template, ctx, **base_slots,
                                facts=json.dumps(facts, default=str, indent=2))
-        narrative = _llm_narrative(prompt)
+        narrative = _call_llm_narrative(
+            prompt,
+            system_prompt=system_prompt,
+            model=model,
+            temperature=temperature,
+            max_output_tokens=max_output_tokens,
+        )
 
         required = list(cfg.get("required_facts") or [])
         missing = _required_missing(facts, required, narrative)
@@ -192,7 +250,13 @@ def handle_section_summary(node: dict, ctx: RunContext) -> None:
                 + ". Rewrite the narrative so every required fact value "
                 "appears verbatim in the text."
             )
-            narrative = _llm_narrative(retry)
+            narrative = _call_llm_narrative(
+                retry,
+                system_prompt=system_prompt,
+                model=model,
+                temperature=temperature,
+                max_output_tokens=max_output_tokens,
+            )
 
     elif mode == "event_narrative":
         sort_by = cfg.get("sort_by") or ""
@@ -205,13 +269,24 @@ def handle_section_summary(node: dict, ctx: RunContext) -> None:
         }
         events_block = "\n".join(f"  • {ln}" for ln in lines)
         prompt = render_prompt(prompt_template, ctx, **base_slots, events=events_block)
-        narrative = _llm_narrative(prompt)
+        narrative = _call_llm_narrative(
+            prompt,
+            system_prompt=system_prompt,
+            model=model,
+            temperature=temperature,
+            max_output_tokens=max_output_tokens,
+        )
 
     else:  # templated
         stats = _templated_stats(df, cfg.get("field_bindings") or [])
-        stats_text = "\n".join(f"  • {k}: {v}" for k, v in stats.items())
-        prompt = render_prompt(prompt_template, ctx, **base_slots, stats=stats_text)
-        narrative = _llm_narrative(prompt)
+        prompt = render_prompt(prompt_template, ctx, **base_slots, stats=_StatsSlot(stats))
+        narrative = _call_llm_narrative(
+            prompt,
+            system_prompt=system_prompt,
+            model=model,
+            temperature=temperature,
+            max_output_tokens=max_output_tokens,
+        )
 
     ctx.sections[section_name] = {
         "name": section_name,

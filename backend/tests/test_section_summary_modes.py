@@ -54,6 +54,37 @@ def test_templated_mode_backwards_compat(monkeypatch):
     assert "qty: 60.0" in prompts[0]
 
 
+def test_templated_mode_supports_dotted_stats_aliases(monkeypatch):
+    prompts: list[str] = []
+    _install_llm(monkeypatch, ["narrative-B"], prompts)
+
+    ctx = RunContext()
+    ctx.datasets["orders"] = pd.DataFrame({
+        "order_id": ["o1", "o2", "o3"],
+        "quantity": [10, 20, 30],
+        "side": ["BUY", "SELL", "BUY"],
+    })
+    ss.handle_section_summary({"config": {
+        "section_name": "orders", "input_name": "orders",
+        "field_bindings": [
+            {"field": "order_id", "agg": "count"},
+            {"field": "quantity", "agg": "sum"},
+            {"field": "side", "agg": "nunique"},
+        ],
+        "llm_prompt_template": (
+            "Total orders: {stats.order_id_count}. "
+            "Total quantity: {stats.quantity_sum}. "
+            "Sides: {stats.side_nunique}."
+        ),
+    }}, ctx)
+
+    assert "Total orders: 3." in prompts[0]
+    assert "Total quantity: 60.0." in prompts[0]
+    assert "Sides: 2." in prompts[0]
+    assert ctx.sections["orders"]["stats"]["order_id_count"] == 3
+    assert ctx.sections["orders"]["stats"]["quantity_sum"] == 60.0
+
+
 # ---------------------------------------------------------------------------
 # fact_pack_llm mode
 # ---------------------------------------------------------------------------

@@ -43,8 +43,14 @@ def _discover_specs() -> tuple[NodeSpec, ...]:
         if module_info.name.startswith("_"):
             continue  # skip dunder / private helper modules
         module = importlib.import_module(f"{_nodes_pkg.__name__}.{module_info.name}")
+        specs = []
         spec = getattr(module, "NODE_SPEC", None)
         if isinstance(spec, NodeSpec):
+            specs.append(spec)
+        grouped_specs = getattr(module, "NODE_SPECS", ())
+        if isinstance(grouped_specs, (list, tuple)):
+            specs.extend(s for s in grouped_specs if isinstance(s, NodeSpec))
+        for spec in specs:
             if spec.type_id in found:
                 raise RuntimeError(
                     f"Duplicate NODE_SPEC type_id '{spec.type_id}' — "

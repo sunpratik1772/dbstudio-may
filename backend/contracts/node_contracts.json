@@ -2,6 +2,84 @@
   "version": "1.0",
   "description": "I/O contracts for all dbSherpa node types. All datasets are pandas DataFrames passed by name through the shared RunContext.",
   "nodes": {
+    "ACTION_VALIDATOR": {
+      "description": "Validate LLM-selected tool and args before execution",
+      "inputs": {
+        "state": "object from RunContext"
+      },
+      "outputs": {
+        "output": "object stored in ctx.values"
+      },
+      "config_schema": {
+        "output_name": "string \u2014 ctx.values key to write"
+      },
+      "ports": {
+        "inputs": [
+          {
+            "name": "state",
+            "type": "text",
+            "description": "object from RunContext",
+            "optional": false
+          }
+        ],
+        "outputs": [
+          {
+            "name": "output",
+            "type": "object",
+            "description": "object stored in ctx.values",
+            "optional": false
+          }
+        ]
+      },
+      "params": [
+        {
+          "name": "output_name",
+          "type": "string",
+          "description": "string \u2014 ctx.values key to write",
+          "required": false,
+          "widget": "text"
+        }
+      ]
+    },
+    "AGGREGATOR_NODE": {
+      "description": "Merge selected values and optionally concatenate datasets",
+      "inputs": {
+        "state": "object from RunContext"
+      },
+      "outputs": {
+        "output": "object stored in ctx.values"
+      },
+      "config_schema": {
+        "output_name": "string \u2014 ctx.values key to write"
+      },
+      "ports": {
+        "inputs": [
+          {
+            "name": "state",
+            "type": "text",
+            "description": "object from RunContext",
+            "optional": false
+          }
+        ],
+        "outputs": [
+          {
+            "name": "output",
+            "type": "object",
+            "description": "object stored in ctx.values",
+            "optional": false
+          }
+        ]
+      },
+      "params": [
+        {
+          "name": "output_name",
+          "type": "string",
+          "description": "string \u2014 ctx.values key to write",
+          "required": false,
+          "widget": "text"
+        }
+      ]
+    },
     "ALERT_TRIGGER": {
       "description": "Entry point \u2014 binds alert payload to context",
       "inputs": {
@@ -171,10 +249,14 @@
       },
       "config_schema": {
         "llm_prompt_template": "Custom prompt with {section_text}, {trader_id}, {currency_pair}, {disposition}, {flag_count} placeholders, plus any vars defined under prompt_context.vars and (when mode=dataset|mixed) {dataset}. Cross-dataset refs like {executions.notional.sum} resolve inline. Falls back to the built-in template when empty.",
-        "prompt_context": "Optional structured slot block: {mode: template|dataset|mixed, vars: {name: ref_expr, ...}, dataset: {ref, format, max_rows, columns}}. Same shape as SECTION_SUMMARY.prompt_context."
+        "system_prompt": "System instruction for the executive-summary LLM. Rendered with {section_text}, alert context, prompt_context vars, and context refs.",
+        "prompt_context": "Optional structured slot block: {mode: template|dataset|mixed, vars: {name: ref_expr, ...}, dataset: {ref, format, max_rows, columns}}. Same shape as SECTION_SUMMARY.prompt_context.",
+        "model": "Optional LLM model override.",
+        "temperature": "LLM temperature.",
+        "max_output_tokens": "Maximum response tokens."
       },
       "constraints": [
-        "LLM model: claude-sonnet-4-6, max_tokens: 1000.",
+        "Default max_output_tokens: 1000.",
         "Must run after all SECTION_SUMMARY nodes."
       ],
       "ports": {
@@ -205,12 +287,42 @@
           "widget": "textarea"
         },
         {
+          "name": "system_prompt",
+          "type": "string",
+          "description": "System instruction for the executive-summary LLM. Rendered with {section_text}, alert context, prompt_context vars, and context refs.",
+          "required": false,
+          "widget": "textarea"
+        },
+        {
           "name": "prompt_context",
           "type": "object",
           "description": "Optional structured slot block: {mode: template|dataset|mixed, vars: {name: ref_expr, ...}, dataset: {ref, format, max_rows, columns}}. Same shape as SECTION_SUMMARY.prompt_context.",
           "required": false,
           "widget": "json",
           "default": {}
+        },
+        {
+          "name": "model",
+          "type": "string",
+          "description": "Optional LLM model override.",
+          "required": false,
+          "widget": "text"
+        },
+        {
+          "name": "temperature",
+          "type": "number",
+          "description": "LLM temperature.",
+          "required": false,
+          "widget": "number",
+          "default": 0.2
+        },
+        {
+          "name": "max_output_tokens",
+          "type": "integer",
+          "description": "Maximum response tokens.",
+          "required": false,
+          "widget": "number",
+          "default": 1000
         }
       ]
     },
@@ -278,6 +390,45 @@
           "required": false,
           "widget": "json",
           "default": []
+        }
+      ]
+    },
+    "DATA_REDUCER": {
+      "description": "Reduce a dataset to a bounded preview and summary for downstream LLM nodes",
+      "inputs": {
+        "state": "object from RunContext"
+      },
+      "outputs": {
+        "reduced_data": "DataFrame stored in ctx.datasets[output_name]"
+      },
+      "config_schema": {
+        "output_name": "string \u2014 ctx.values key to write"
+      },
+      "ports": {
+        "inputs": [
+          {
+            "name": "state",
+            "type": "text",
+            "description": "object from RunContext",
+            "optional": false
+          }
+        ],
+        "outputs": [
+          {
+            "name": "reduced_data",
+            "type": "dataframe",
+            "description": "DataFrame stored in ctx.datasets[output_name]",
+            "optional": false
+          }
+        ]
+      },
+      "params": [
+        {
+          "name": "output_name",
+          "type": "string",
+          "description": "string \u2014 ctx.values key to write",
+          "required": false,
+          "widget": "text"
         }
       ]
     },
@@ -414,6 +565,45 @@
           "required": false,
           "widget": "json",
           "default": {}
+        }
+      ]
+    },
+    "ERROR_HANDLER": {
+      "description": "Classify failures and select retry, fallback, abort, or continue strategy",
+      "inputs": {
+        "state": "object from RunContext"
+      },
+      "outputs": {
+        "output": "object stored in ctx.values"
+      },
+      "config_schema": {
+        "output_name": "string \u2014 ctx.values key to write"
+      },
+      "ports": {
+        "inputs": [
+          {
+            "name": "state",
+            "type": "text",
+            "description": "object from RunContext",
+            "optional": false
+          }
+        ],
+        "outputs": [
+          {
+            "name": "output",
+            "type": "object",
+            "description": "object stored in ctx.values",
+            "optional": false
+          }
+        ]
+      },
+      "params": [
+        {
+          "name": "output_name",
+          "type": "string",
+          "description": "string \u2014 ctx.values key to write",
+          "required": false,
+          "widget": "text"
         }
       ]
     },
@@ -939,6 +1129,798 @@
         }
       ]
     },
+    "GUARDRAIL": {
+      "description": "Apply deterministic safety checks to action/result state",
+      "inputs": {
+        "state": "object from RunContext"
+      },
+      "outputs": {
+        "output": "object stored in ctx.values"
+      },
+      "config_schema": {
+        "output_name": "string \u2014 ctx.values key to write"
+      },
+      "ports": {
+        "inputs": [
+          {
+            "name": "state",
+            "type": "text",
+            "description": "object from RunContext",
+            "optional": false
+          }
+        ],
+        "outputs": [
+          {
+            "name": "output",
+            "type": "object",
+            "description": "object stored in ctx.values",
+            "optional": false
+          }
+        ]
+      },
+      "params": [
+        {
+          "name": "output_name",
+          "type": "string",
+          "description": "string \u2014 ctx.values key to write",
+          "required": false,
+          "widget": "text"
+        }
+      ]
+    },
+    "LLM_ACTION": {
+      "description": "llm.action \u2014 choose the next tool call using critic feedback and retry context",
+      "inputs": {
+        "state": "object from RunContext"
+      },
+      "outputs": {
+        "output": "object stored in ctx.values"
+      },
+      "config_schema": {
+        "use_llm": "boolean \u2014 call configured LLM when true; otherwise use deterministic fallback",
+        "system_prompt": "string \u2014 system instruction for this LLM role; rendered with prompt_context and state placeholders",
+        "prompt_template": "string \u2014 user prompt template; can reference {goal}, {state}, {datasets}, {alert_payload}, prompt_context vars, and node-specific slots",
+        "prompt_context": "object \u2014 optional structured slots: {mode, vars, dataset} using the shared prompt_context grammar",
+        "model": "string \u2014 optional model override",
+        "temperature": "number \u2014 model temperature",
+        "max_output_tokens": "integer \u2014 output token cap",
+        "output_name": "string \u2014 ctx.values key to write",
+        "plan_key": "string \u2014 ctx.values key for plan",
+        "validation_key": "string \u2014 ctx.values key for critic feedback",
+        "retry_context_key": "string \u2014 ctx.values key for retry history",
+        "args": "object \u2014 static tool args merged into action",
+        "tool": "string \u2014 fallback tool"
+      },
+      "ports": {
+        "inputs": [
+          {
+            "name": "state",
+            "type": "text",
+            "description": "object from RunContext",
+            "optional": false
+          }
+        ],
+        "outputs": [
+          {
+            "name": "output",
+            "type": "object",
+            "description": "object stored in ctx.values",
+            "optional": false
+          }
+        ]
+      },
+      "params": [
+        {
+          "name": "use_llm",
+          "type": "boolean",
+          "description": "boolean \u2014 call configured LLM when true; otherwise use deterministic fallback",
+          "required": false,
+          "widget": "checkbox"
+        },
+        {
+          "name": "system_prompt",
+          "type": "string",
+          "description": "string \u2014 system instruction for this LLM role; rendered with prompt_context and state placeholders",
+          "required": false,
+          "widget": "text"
+        },
+        {
+          "name": "prompt_template",
+          "type": "string",
+          "description": "string \u2014 user prompt template; can reference {goal}, {state}, {datasets}, {alert_payload}, prompt_context vars, and node-specific slots",
+          "required": false,
+          "widget": "text"
+        },
+        {
+          "name": "prompt_context",
+          "type": "object",
+          "description": "object \u2014 optional structured slots: {mode, vars, dataset} using the shared prompt_context grammar",
+          "required": false,
+          "widget": "json"
+        },
+        {
+          "name": "model",
+          "type": "string",
+          "description": "string \u2014 optional model override",
+          "required": false,
+          "widget": "text"
+        },
+        {
+          "name": "temperature",
+          "type": "number",
+          "description": "number \u2014 model temperature",
+          "required": false,
+          "widget": "number"
+        },
+        {
+          "name": "max_output_tokens",
+          "type": "integer",
+          "description": "integer \u2014 output token cap",
+          "required": false,
+          "widget": "number"
+        },
+        {
+          "name": "output_name",
+          "type": "string",
+          "description": "string \u2014 ctx.values key to write",
+          "required": false,
+          "widget": "text"
+        },
+        {
+          "name": "plan_key",
+          "type": "string",
+          "description": "string \u2014 ctx.values key for plan",
+          "required": false,
+          "widget": "text"
+        },
+        {
+          "name": "validation_key",
+          "type": "string",
+          "description": "string \u2014 ctx.values key for critic feedback",
+          "required": false,
+          "widget": "text"
+        },
+        {
+          "name": "retry_context_key",
+          "type": "string",
+          "description": "string \u2014 ctx.values key for retry history",
+          "required": false,
+          "widget": "text"
+        },
+        {
+          "name": "args",
+          "type": "object",
+          "description": "object \u2014 static tool args merged into action",
+          "required": false,
+          "widget": "json"
+        },
+        {
+          "name": "tool",
+          "type": "string",
+          "description": "string \u2014 fallback tool",
+          "required": false,
+          "widget": "text"
+        }
+      ]
+    },
+    "LLM_CONTEXTUALIZER": {
+      "description": "llm.contextualizer \u2014 combine query and retrieved docs into enriched context",
+      "inputs": {
+        "state": "object from RunContext"
+      },
+      "outputs": {
+        "output": "object stored in ctx.values"
+      },
+      "config_schema": {
+        "use_llm": "boolean \u2014 call configured LLM when true; otherwise use deterministic fallback",
+        "system_prompt": "string \u2014 system instruction for this LLM role; rendered with prompt_context and state placeholders",
+        "prompt_template": "string \u2014 user prompt template; can reference {goal}, {state}, {datasets}, {alert_payload}, prompt_context vars, and node-specific slots",
+        "prompt_context": "object \u2014 optional structured slots: {mode, vars, dataset} using the shared prompt_context grammar",
+        "model": "string \u2014 optional model override",
+        "temperature": "number \u2014 model temperature",
+        "max_output_tokens": "integer \u2014 output token cap",
+        "output_name": "string \u2014 ctx.values key to write",
+        "query": "string \u2014 query text",
+        "retrieved_docs": "array \u2014 documents to contextualize",
+        "docs_key": "string \u2014 ctx.values key containing retrieved docs"
+      },
+      "ports": {
+        "inputs": [
+          {
+            "name": "state",
+            "type": "text",
+            "description": "object from RunContext",
+            "optional": false
+          }
+        ],
+        "outputs": [
+          {
+            "name": "output",
+            "type": "object",
+            "description": "object stored in ctx.values",
+            "optional": false
+          }
+        ]
+      },
+      "params": [
+        {
+          "name": "use_llm",
+          "type": "boolean",
+          "description": "boolean \u2014 call configured LLM when true; otherwise use deterministic fallback",
+          "required": false,
+          "widget": "checkbox"
+        },
+        {
+          "name": "system_prompt",
+          "type": "string",
+          "description": "string \u2014 system instruction for this LLM role; rendered with prompt_context and state placeholders",
+          "required": false,
+          "widget": "text"
+        },
+        {
+          "name": "prompt_template",
+          "type": "string",
+          "description": "string \u2014 user prompt template; can reference {goal}, {state}, {datasets}, {alert_payload}, prompt_context vars, and node-specific slots",
+          "required": false,
+          "widget": "text"
+        },
+        {
+          "name": "prompt_context",
+          "type": "object",
+          "description": "object \u2014 optional structured slots: {mode, vars, dataset} using the shared prompt_context grammar",
+          "required": false,
+          "widget": "json"
+        },
+        {
+          "name": "model",
+          "type": "string",
+          "description": "string \u2014 optional model override",
+          "required": false,
+          "widget": "text"
+        },
+        {
+          "name": "temperature",
+          "type": "number",
+          "description": "number \u2014 model temperature",
+          "required": false,
+          "widget": "number"
+        },
+        {
+          "name": "max_output_tokens",
+          "type": "integer",
+          "description": "integer \u2014 output token cap",
+          "required": false,
+          "widget": "number"
+        },
+        {
+          "name": "output_name",
+          "type": "string",
+          "description": "string \u2014 ctx.values key to write",
+          "required": false,
+          "widget": "text"
+        },
+        {
+          "name": "query",
+          "type": "string",
+          "description": "string \u2014 query text",
+          "required": false,
+          "widget": "text"
+        },
+        {
+          "name": "retrieved_docs",
+          "type": "string",
+          "description": "array \u2014 documents to contextualize",
+          "required": false,
+          "widget": "text"
+        },
+        {
+          "name": "docs_key",
+          "type": "string",
+          "description": "string \u2014 ctx.values key containing retrieved docs",
+          "required": false,
+          "widget": "text"
+        }
+      ]
+    },
+    "LLM_CRITIC": {
+      "description": "llm.critic \u2014 validate the latest action result and emit actionable feedback",
+      "inputs": {
+        "state": "object from RunContext"
+      },
+      "outputs": {
+        "output": "object stored in ctx.values"
+      },
+      "config_schema": {
+        "use_llm": "boolean \u2014 call configured LLM when true; otherwise use deterministic fallback",
+        "system_prompt": "string \u2014 system instruction for this LLM role; rendered with prompt_context and state placeholders",
+        "prompt_template": "string \u2014 user prompt template; can reference {goal}, {state}, {datasets}, {alert_payload}, prompt_context vars, and node-specific slots",
+        "prompt_context": "object \u2014 optional structured slots: {mode, vars, dataset} using the shared prompt_context grammar",
+        "model": "string \u2014 optional model override",
+        "temperature": "number \u2014 model temperature",
+        "max_output_tokens": "integer \u2014 output token cap",
+        "output_name": "string \u2014 ctx.values key to write",
+        "action_key": "string \u2014 ctx.values key for last action",
+        "result_key": "string \u2014 ctx.values key for last result",
+        "expected_schema": "object \u2014 expected result/schema hints"
+      },
+      "ports": {
+        "inputs": [
+          {
+            "name": "state",
+            "type": "text",
+            "description": "object from RunContext",
+            "optional": false
+          }
+        ],
+        "outputs": [
+          {
+            "name": "output",
+            "type": "object",
+            "description": "object stored in ctx.values",
+            "optional": false
+          }
+        ]
+      },
+      "params": [
+        {
+          "name": "use_llm",
+          "type": "boolean",
+          "description": "boolean \u2014 call configured LLM when true; otherwise use deterministic fallback",
+          "required": false,
+          "widget": "checkbox"
+        },
+        {
+          "name": "system_prompt",
+          "type": "string",
+          "description": "string \u2014 system instruction for this LLM role; rendered with prompt_context and state placeholders",
+          "required": false,
+          "widget": "text"
+        },
+        {
+          "name": "prompt_template",
+          "type": "string",
+          "description": "string \u2014 user prompt template; can reference {goal}, {state}, {datasets}, {alert_payload}, prompt_context vars, and node-specific slots",
+          "required": false,
+          "widget": "text"
+        },
+        {
+          "name": "prompt_context",
+          "type": "object",
+          "description": "object \u2014 optional structured slots: {mode, vars, dataset} using the shared prompt_context grammar",
+          "required": false,
+          "widget": "json"
+        },
+        {
+          "name": "model",
+          "type": "string",
+          "description": "string \u2014 optional model override",
+          "required": false,
+          "widget": "text"
+        },
+        {
+          "name": "temperature",
+          "type": "number",
+          "description": "number \u2014 model temperature",
+          "required": false,
+          "widget": "number"
+        },
+        {
+          "name": "max_output_tokens",
+          "type": "integer",
+          "description": "integer \u2014 output token cap",
+          "required": false,
+          "widget": "number"
+        },
+        {
+          "name": "output_name",
+          "type": "string",
+          "description": "string \u2014 ctx.values key to write",
+          "required": false,
+          "widget": "text"
+        },
+        {
+          "name": "action_key",
+          "type": "string",
+          "description": "string \u2014 ctx.values key for last action",
+          "required": false,
+          "widget": "text"
+        },
+        {
+          "name": "result_key",
+          "type": "string",
+          "description": "string \u2014 ctx.values key for last result",
+          "required": false,
+          "widget": "text"
+        },
+        {
+          "name": "expected_schema",
+          "type": "object",
+          "description": "object \u2014 expected result/schema hints",
+          "required": false,
+          "widget": "json"
+        }
+      ]
+    },
+    "LLM_EVALUATOR": {
+      "description": "llm.evaluator \u2014 decide whether the current workflow goal is satisfied",
+      "inputs": {
+        "state": "object from RunContext"
+      },
+      "outputs": {
+        "output": "object stored in ctx.values"
+      },
+      "config_schema": {
+        "use_llm": "boolean \u2014 call configured LLM when true; otherwise use deterministic fallback",
+        "system_prompt": "string \u2014 system instruction for this LLM role; rendered with prompt_context and state placeholders",
+        "prompt_template": "string \u2014 user prompt template; can reference {goal}, {state}, {datasets}, {alert_payload}, prompt_context vars, and node-specific slots",
+        "prompt_context": "object \u2014 optional structured slots: {mode, vars, dataset} using the shared prompt_context grammar",
+        "model": "string \u2014 optional model override",
+        "temperature": "number \u2014 model temperature",
+        "max_output_tokens": "integer \u2014 output token cap",
+        "output_name": "string \u2014 ctx.values key to write",
+        "validation_key": "string \u2014 ctx.values key for critic validation",
+        "result_key": "string \u2014 ctx.values key for result to evaluate"
+      },
+      "ports": {
+        "inputs": [
+          {
+            "name": "state",
+            "type": "text",
+            "description": "object from RunContext",
+            "optional": false
+          }
+        ],
+        "outputs": [
+          {
+            "name": "output",
+            "type": "object",
+            "description": "object stored in ctx.values",
+            "optional": false
+          }
+        ]
+      },
+      "params": [
+        {
+          "name": "use_llm",
+          "type": "boolean",
+          "description": "boolean \u2014 call configured LLM when true; otherwise use deterministic fallback",
+          "required": false,
+          "widget": "checkbox"
+        },
+        {
+          "name": "system_prompt",
+          "type": "string",
+          "description": "string \u2014 system instruction for this LLM role; rendered with prompt_context and state placeholders",
+          "required": false,
+          "widget": "text"
+        },
+        {
+          "name": "prompt_template",
+          "type": "string",
+          "description": "string \u2014 user prompt template; can reference {goal}, {state}, {datasets}, {alert_payload}, prompt_context vars, and node-specific slots",
+          "required": false,
+          "widget": "text"
+        },
+        {
+          "name": "prompt_context",
+          "type": "object",
+          "description": "object \u2014 optional structured slots: {mode, vars, dataset} using the shared prompt_context grammar",
+          "required": false,
+          "widget": "json"
+        },
+        {
+          "name": "model",
+          "type": "string",
+          "description": "string \u2014 optional model override",
+          "required": false,
+          "widget": "text"
+        },
+        {
+          "name": "temperature",
+          "type": "number",
+          "description": "number \u2014 model temperature",
+          "required": false,
+          "widget": "number"
+        },
+        {
+          "name": "max_output_tokens",
+          "type": "integer",
+          "description": "integer \u2014 output token cap",
+          "required": false,
+          "widget": "number"
+        },
+        {
+          "name": "output_name",
+          "type": "string",
+          "description": "string \u2014 ctx.values key to write",
+          "required": false,
+          "widget": "text"
+        },
+        {
+          "name": "validation_key",
+          "type": "string",
+          "description": "string \u2014 ctx.values key for critic validation",
+          "required": false,
+          "widget": "text"
+        },
+        {
+          "name": "result_key",
+          "type": "string",
+          "description": "string \u2014 ctx.values key for result to evaluate",
+          "required": false,
+          "widget": "text"
+        }
+      ]
+    },
+    "LLM_PLANNER": {
+      "description": "llm.planner \u2014 create a step plan from goal and context",
+      "inputs": {
+        "state": "object from RunContext"
+      },
+      "outputs": {
+        "output": "object stored in ctx.values"
+      },
+      "config_schema": {
+        "use_llm": "boolean \u2014 call configured LLM when true; otherwise use deterministic fallback",
+        "system_prompt": "string \u2014 system instruction for this LLM role; rendered with prompt_context and state placeholders",
+        "prompt_template": "string \u2014 user prompt template; can reference {goal}, {state}, {datasets}, {alert_payload}, prompt_context vars, and node-specific slots",
+        "prompt_context": "object \u2014 optional structured slots: {mode, vars, dataset} using the shared prompt_context grammar",
+        "model": "string \u2014 optional model override",
+        "temperature": "number \u2014 model temperature",
+        "max_output_tokens": "integer \u2014 output token cap",
+        "output_name": "string \u2014 ctx.values key to write",
+        "goal": "string \u2014 user goal",
+        "plan": "array \u2014 optional deterministic plan override"
+      },
+      "ports": {
+        "inputs": [
+          {
+            "name": "state",
+            "type": "text",
+            "description": "object from RunContext",
+            "optional": false
+          }
+        ],
+        "outputs": [
+          {
+            "name": "output",
+            "type": "object",
+            "description": "object stored in ctx.values",
+            "optional": false
+          }
+        ]
+      },
+      "params": [
+        {
+          "name": "use_llm",
+          "type": "boolean",
+          "description": "boolean \u2014 call configured LLM when true; otherwise use deterministic fallback",
+          "required": false,
+          "widget": "checkbox"
+        },
+        {
+          "name": "system_prompt",
+          "type": "string",
+          "description": "string \u2014 system instruction for this LLM role; rendered with prompt_context and state placeholders",
+          "required": false,
+          "widget": "text"
+        },
+        {
+          "name": "prompt_template",
+          "type": "string",
+          "description": "string \u2014 user prompt template; can reference {goal}, {state}, {datasets}, {alert_payload}, prompt_context vars, and node-specific slots",
+          "required": false,
+          "widget": "text"
+        },
+        {
+          "name": "prompt_context",
+          "type": "object",
+          "description": "object \u2014 optional structured slots: {mode, vars, dataset} using the shared prompt_context grammar",
+          "required": false,
+          "widget": "json"
+        },
+        {
+          "name": "model",
+          "type": "string",
+          "description": "string \u2014 optional model override",
+          "required": false,
+          "widget": "text"
+        },
+        {
+          "name": "temperature",
+          "type": "number",
+          "description": "number \u2014 model temperature",
+          "required": false,
+          "widget": "number"
+        },
+        {
+          "name": "max_output_tokens",
+          "type": "integer",
+          "description": "integer \u2014 output token cap",
+          "required": false,
+          "widget": "number"
+        },
+        {
+          "name": "output_name",
+          "type": "string",
+          "description": "string \u2014 ctx.values key to write",
+          "required": false,
+          "widget": "text"
+        },
+        {
+          "name": "goal",
+          "type": "string",
+          "description": "string \u2014 user goal",
+          "required": false,
+          "widget": "text"
+        },
+        {
+          "name": "plan",
+          "type": "string",
+          "description": "array \u2014 optional deterministic plan override",
+          "required": false,
+          "widget": "text"
+        }
+      ]
+    },
+    "LLM_SYNTHESIZER": {
+      "description": "llm.synthesizer \u2014 produce final output and optional JSON/text artifact",
+      "inputs": {
+        "state": "object from RunContext"
+      },
+      "outputs": {
+        "output": "object stored in ctx.values"
+      },
+      "config_schema": {
+        "use_llm": "boolean \u2014 call configured LLM when true; otherwise use deterministic fallback",
+        "system_prompt": "string \u2014 system instruction for this LLM role; rendered with prompt_context and state placeholders",
+        "prompt_template": "string \u2014 user prompt template; can reference {goal}, {state}, {datasets}, {alert_payload}, prompt_context vars, and node-specific slots",
+        "prompt_context": "object \u2014 optional structured slots: {mode, vars, dataset} using the shared prompt_context grammar",
+        "model": "string \u2014 optional model override",
+        "temperature": "number \u2014 model temperature",
+        "max_output_tokens": "integer \u2014 output token cap",
+        "output_name": "string \u2014 ctx.values key to write",
+        "output_path": "string \u2014 optional artifact path",
+        "result_key": "string \u2014 ctx.values key to summarize",
+        "final_output": "object \u2014 optional deterministic final output override"
+      },
+      "ports": {
+        "inputs": [
+          {
+            "name": "state",
+            "type": "text",
+            "description": "object from RunContext",
+            "optional": false
+          }
+        ],
+        "outputs": [
+          {
+            "name": "output",
+            "type": "object",
+            "description": "object stored in ctx.values",
+            "optional": false
+          }
+        ]
+      },
+      "params": [
+        {
+          "name": "use_llm",
+          "type": "boolean",
+          "description": "boolean \u2014 call configured LLM when true; otherwise use deterministic fallback",
+          "required": false,
+          "widget": "checkbox"
+        },
+        {
+          "name": "system_prompt",
+          "type": "string",
+          "description": "string \u2014 system instruction for this LLM role; rendered with prompt_context and state placeholders",
+          "required": false,
+          "widget": "text"
+        },
+        {
+          "name": "prompt_template",
+          "type": "string",
+          "description": "string \u2014 user prompt template; can reference {goal}, {state}, {datasets}, {alert_payload}, prompt_context vars, and node-specific slots",
+          "required": false,
+          "widget": "text"
+        },
+        {
+          "name": "prompt_context",
+          "type": "object",
+          "description": "object \u2014 optional structured slots: {mode, vars, dataset} using the shared prompt_context grammar",
+          "required": false,
+          "widget": "json"
+        },
+        {
+          "name": "model",
+          "type": "string",
+          "description": "string \u2014 optional model override",
+          "required": false,
+          "widget": "text"
+        },
+        {
+          "name": "temperature",
+          "type": "number",
+          "description": "number \u2014 model temperature",
+          "required": false,
+          "widget": "number"
+        },
+        {
+          "name": "max_output_tokens",
+          "type": "integer",
+          "description": "integer \u2014 output token cap",
+          "required": false,
+          "widget": "number"
+        },
+        {
+          "name": "output_name",
+          "type": "string",
+          "description": "string \u2014 ctx.values key to write",
+          "required": false,
+          "widget": "text"
+        },
+        {
+          "name": "output_path",
+          "type": "string",
+          "description": "string \u2014 optional artifact path",
+          "required": false,
+          "widget": "text"
+        },
+        {
+          "name": "result_key",
+          "type": "string",
+          "description": "string \u2014 ctx.values key to summarize",
+          "required": false,
+          "widget": "text"
+        },
+        {
+          "name": "final_output",
+          "type": "object",
+          "description": "object \u2014 optional deterministic final output override",
+          "required": false,
+          "widget": "json"
+        }
+      ]
+    },
+    "LOOP_CONTROLLER": {
+      "description": "Compute retry-loop continuation from iteration, done, and confidence state",
+      "inputs": {
+        "state": "object from RunContext"
+      },
+      "outputs": {
+        "output": "object stored in ctx.values"
+      },
+      "config_schema": {
+        "output_name": "string \u2014 ctx.values key to write"
+      },
+      "ports": {
+        "inputs": [
+          {
+            "name": "state",
+            "type": "text",
+            "description": "object from RunContext",
+            "optional": false
+          }
+        ],
+        "outputs": [
+          {
+            "name": "output",
+            "type": "object",
+            "description": "object stored in ctx.values",
+            "optional": false
+          }
+        ]
+      },
+      "params": [
+        {
+          "name": "output_name",
+          "type": "string",
+          "description": "string \u2014 ctx.values key to write",
+          "required": false,
+          "widget": "text"
+        }
+      ]
+    },
     "MAP": {
       "description": "Fan out a sub-workflow over a list of keys; aggregate results",
       "inputs": {
@@ -1246,6 +2228,45 @@
         }
       ]
     },
+    "PLAN_VALIDATOR": {
+      "description": "Validate generated plan structure, dependencies, and tool names",
+      "inputs": {
+        "state": "object from RunContext"
+      },
+      "outputs": {
+        "output": "object stored in ctx.values"
+      },
+      "config_schema": {
+        "output_name": "string \u2014 ctx.values key to write"
+      },
+      "ports": {
+        "inputs": [
+          {
+            "name": "state",
+            "type": "text",
+            "description": "object from RunContext",
+            "optional": false
+          }
+        ],
+        "outputs": [
+          {
+            "name": "output",
+            "type": "object",
+            "description": "object stored in ctx.values",
+            "optional": false
+          }
+        ]
+      },
+      "params": [
+        {
+          "name": "output_name",
+          "type": "string",
+          "description": "string \u2014 ctx.values key to write",
+          "required": false,
+          "widget": "text"
+        }
+      ]
+    },
     "REPORT_OUTPUT": {
       "description": "Generate Excel report with tabs & highlights",
       "inputs": {
@@ -1343,10 +2364,14 @@
         "event_template": "Python format string used to render each event row in event_narrative mode. Row columns are passed as keyword args. Example: '{timestamp}  {side} {quantity} @ {limit_price}'.",
         "max_events": "Cap events passed to the LLM in event_narrative mode.",
         "llm_prompt_template": "Prompt with {stats}, {facts}, {events}, {section}, {disposition}, {trader_id}, {currency_pair} placeholders, plus any vars defined under prompt_context.vars and (when mode=dataset|mixed) {dataset}. Cross-dataset refs like {executions.notional.sum} resolve inline.",
-        "prompt_context": "Optional structured slot block: {mode: template|dataset|mixed, vars: {name: ref_expr, ...}, dataset: {ref, format, max_rows, columns}}. vars resolve cross-dataset refs into named slots; the serialized dataset (csv/json/markdown) is exposed as {dataset}."
+        "system_prompt": "System instruction for the section narrative LLM. Rendered with the same prompt_context vars and context refs as llm_prompt_template.",
+        "prompt_context": "Optional structured slot block: {mode: template|dataset|mixed, vars: {name: ref_expr, ...}, dataset: {ref, format, max_rows, columns}}. vars resolve cross-dataset refs into named slots; the serialized dataset (csv/json/markdown) is exposed as {dataset}.",
+        "model": "Optional LLM model override.",
+        "temperature": "LLM temperature.",
+        "max_output_tokens": "Maximum response tokens."
       },
       "constraints": [
-        "LLM model: claude-sonnet-4-6, max_tokens: 600.",
+        "Default max_output_tokens: 600.",
         "fact_pack_llm retries at most once when required facts are missing from the narrative."
       ],
       "ports": {
@@ -1464,12 +2489,42 @@
           "widget": "textarea"
         },
         {
+          "name": "system_prompt",
+          "type": "string",
+          "description": "System instruction for the section narrative LLM. Rendered with the same prompt_context vars and context refs as llm_prompt_template.",
+          "required": false,
+          "widget": "textarea"
+        },
+        {
           "name": "prompt_context",
           "type": "object",
           "description": "Optional structured slot block: {mode: template|dataset|mixed, vars: {name: ref_expr, ...}, dataset: {ref, format, max_rows, columns}}. vars resolve cross-dataset refs into named slots; the serialized dataset (csv/json/markdown) is exposed as {dataset}.",
           "required": false,
           "widget": "json",
           "default": {}
+        },
+        {
+          "name": "model",
+          "type": "string",
+          "description": "Optional LLM model override.",
+          "required": false,
+          "widget": "text"
+        },
+        {
+          "name": "temperature",
+          "type": "number",
+          "description": "LLM temperature.",
+          "required": false,
+          "widget": "number",
+          "default": 0.2
+        },
+        {
+          "name": "max_output_tokens",
+          "type": "integer",
+          "description": "Maximum response tokens.",
+          "required": false,
+          "widget": "number",
+          "default": 600
         }
       ]
     },
@@ -1616,6 +2671,45 @@
         }
       ]
     },
+    "STATE_MANAGER": {
+      "description": "Track retry history and iteration state",
+      "inputs": {
+        "state": "object from RunContext"
+      },
+      "outputs": {
+        "output": "object stored in ctx.values"
+      },
+      "config_schema": {
+        "output_name": "string \u2014 ctx.values key to write"
+      },
+      "ports": {
+        "inputs": [
+          {
+            "name": "state",
+            "type": "text",
+            "description": "object from RunContext",
+            "optional": false
+          }
+        ],
+        "outputs": [
+          {
+            "name": "output",
+            "type": "object",
+            "description": "object stored in ctx.values",
+            "optional": false
+          }
+        ]
+      },
+      "params": [
+        {
+          "name": "output_name",
+          "type": "string",
+          "description": "string \u2014 ctx.values key to write",
+          "required": false,
+          "widget": "text"
+        }
+      ]
+    },
     "TIME_WINDOW": {
       "description": "Expand an event time into a [start_time, end_time] window for downstream filtering.",
       "inputs": {
@@ -1711,6 +2805,69 @@
           "required": true,
           "widget": "text",
           "default": "window"
+        }
+      ]
+    },
+    "TOOL_EXECUTOR": {
+      "description": "Bridge an LLM action into deterministic built-in or registered node execution",
+      "inputs": {
+        "state": "object from RunContext"
+      },
+      "outputs": {
+        "output": "object stored in ctx.values"
+      },
+      "config_schema": {
+        "action_key": "string \u2014 ctx.values action key",
+        "tool": "string \u2014 optional static tool override",
+        "args": "object \u2014 static args merged into action args",
+        "output_name": "string \u2014 defaults to last_result"
+      },
+      "ports": {
+        "inputs": [
+          {
+            "name": "state",
+            "type": "text",
+            "description": "object from RunContext",
+            "optional": false
+          }
+        ],
+        "outputs": [
+          {
+            "name": "output",
+            "type": "object",
+            "description": "object stored in ctx.values",
+            "optional": false
+          }
+        ]
+      },
+      "params": [
+        {
+          "name": "action_key",
+          "type": "string",
+          "description": "string \u2014 ctx.values action key",
+          "required": false,
+          "widget": "text"
+        },
+        {
+          "name": "tool",
+          "type": "string",
+          "description": "string \u2014 optional static tool override",
+          "required": false,
+          "widget": "text"
+        },
+        {
+          "name": "args",
+          "type": "object",
+          "description": "object \u2014 static args merged into action args",
+          "required": false,
+          "widget": "json"
+        },
+        {
+          "name": "output_name",
+          "type": "string",
+          "description": "string \u2014 defaults to last_result",
+          "required": false,
+          "widget": "text"
         }
       ]
     }

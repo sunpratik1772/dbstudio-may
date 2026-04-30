@@ -76,6 +76,12 @@ class ValidationErrorCode(str, Enum):
     BAD_PARAM_TYPE = "BAD_PARAM_TYPE"
     """Config value doesn't match its ParamSpec type / is uncoercible."""
 
+    BAD_PROMPT_TEMPLATE = "BAD_PROMPT_TEMPLATE"
+    """Prompt template has malformed braces and cannot be rendered safely."""
+
+    BAD_PROMPT_REF = "BAD_PROMPT_REF"
+    """Prompt template references an unknown dataset column/ref."""
+
     BAD_ENUM_VALUE = "BAD_ENUM_VALUE"
     """Config value not in the ParamSpec's enum."""
 
