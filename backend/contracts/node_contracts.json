@@ -2363,7 +2363,7 @@
         "sort_by": "Column used to order rows for event_narrative mode.",
         "event_template": "Python format string used to render each event row in event_narrative mode. Row columns are passed as keyword args. Example: '{timestamp}  {side} {quantity} @ {limit_price}'.",
         "max_events": "Cap events passed to the LLM in event_narrative mode.",
-        "llm_prompt_template": "Prompt with {stats}, {facts}, {events}, {section}, {disposition}, {trader_id}, {currency_pair} placeholders, plus any vars defined under prompt_context.vars and (when mode=dataset|mixed) {dataset}. Cross-dataset refs like {executions.notional.sum} resolve inline.",
+        "llm_prompt_template": "Prompt with {stats}, {facts}, {events}, {section}, {disposition}, {trader_id}, {currency_pair} placeholders, plus any vars defined under prompt_context.vars and (when mode=dataset|mixed) {dataset}. In templated mode, {stats} renders a text block and {stats.<field>_<agg>} can reference a computed field_binding stat. Cross-dataset refs like {executions.notional.sum} resolve inline.",
         "system_prompt": "System instruction for the section narrative LLM. Rendered with the same prompt_context vars and context refs as llm_prompt_template.",
         "prompt_context": "Optional structured slot block: {mode: template|dataset|mixed, vars: {name: ref_expr, ...}, dataset: {ref, format, max_rows, columns}}. vars resolve cross-dataset refs into named slots; the serialized dataset (csv/json/markdown) is exposed as {dataset}.",
         "model": "Optional LLM model override.",
@@ -2484,7 +2484,7 @@
         {
           "name": "llm_prompt_template",
           "type": "string",
-          "description": "Prompt with {stats}, {facts}, {events}, {section}, {disposition}, {trader_id}, {currency_pair} placeholders, plus any vars defined under prompt_context.vars and (when mode=dataset|mixed) {dataset}. Cross-dataset refs like {executions.notional.sum} resolve inline.",
+          "description": "Prompt with {stats}, {facts}, {events}, {section}, {disposition}, {trader_id}, {currency_pair} placeholders, plus any vars defined under prompt_context.vars and (when mode=dataset|mixed) {dataset}. In templated mode, {stats} renders a text block and {stats.<field>_<agg>} can reference a computed field_binding stat. Cross-dataset refs like {executions.notional.sum} resolve inline.",
           "required": false,
           "widget": "textarea"
         },
