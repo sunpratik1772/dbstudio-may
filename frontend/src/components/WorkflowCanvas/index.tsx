@@ -219,7 +219,7 @@ function EmptyCanvas({ onDragOver, onDrop }: { onDragOver: (e: DragEvent<HTMLDiv
       onDrop={onDrop}
     >
       <div className="text-center relative z-10 max-w-md px-6" style={{ display: 'grid', gap: 18, justifyItems: 'center' }}>
-        <h2 style={{ fontFamily: 'Chivo, system-ui, sans-serif', color: 'var(--text-0)', fontSize: 32, fontWeight: 600, letterSpacing: '-0.025em', lineHeight: 1.1 }}>
+        <h2 style={{ color: 'var(--text-0)', fontSize: 28, fontWeight: 650, letterSpacing: 0, lineHeight: 1.1 }}>
           Compose a workflow
         </h2>
         <p style={{ color: 'var(--text-2)', fontSize: 13.5, lineHeight: 1.55, maxWidth: 440 }}>
@@ -231,8 +231,8 @@ function EmptyCanvas({ onDragOver, onDrop }: { onDragOver: (e: DragEvent<HTMLDiv
             onClick={() => setDrawerOpen(true)}
             style={{
               height: 40, padding: '0 18px', borderRadius: 8,
-              background: 'var(--text-0)', color: 'var(--bg-0)',
-              border: 'none', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+              background: 'linear-gradient(180deg, var(--accent-hi), var(--accent-lo))', color: '#fff',
+              border: '1px solid color-mix(in srgb, var(--accent-hi) 35%, var(--accent-lo))', fontSize: 13, fontWeight: 600, cursor: 'pointer',
             }}
           >
             Load a template
@@ -241,8 +241,8 @@ function EmptyCanvas({ onDragOver, onDrop }: { onDragOver: (e: DragEvent<HTMLDiv
             onClick={() => setRightPanelMode('copilot')}
             style={{
               height: 40, padding: '0 18px', borderRadius: 8,
-              background: 'transparent', color: 'var(--text-0)',
-              border: '1px solid var(--border-strong)',
+              background: 'var(--bg-hover)', color: 'var(--text-0)',
+              border: '1px solid var(--border)',
               fontSize: 13, fontWeight: 500, cursor: 'pointer',
             }}
           >
@@ -415,24 +415,26 @@ function WorkflowCanvasInner() {
       >
         <Background
           variant={BackgroundVariant.Dots}
-          gap={26}
-          size={1.6}
+          gap={28}
+          size={1.25}
           color="var(--dots-color)"
         />
         <Controls
           style={{
-            background: 'var(--bg-1)',
+            background: 'var(--bg-toolbar)',
             border: '1px solid var(--border)',
             borderRadius: 8,
             overflow: 'hidden',
+            backdropFilter: 'blur(14px)',
           }}
           showInteractive={false}
         />
         <MiniMap
           style={{
-            background: 'var(--bg-1)',
+            background: 'var(--bg-toolbar)',
             border: '1px solid var(--border)',
-            borderRadius: 6,
+            borderRadius: 8,
+            backdropFilter: 'blur(14px)',
           }}
           nodeColor={(n) => {
             const nodeType = (n.data as { nodeType: string })?.nodeType

@@ -4,56 +4,61 @@
 
 /* =========================================================================
    dbSherpa — design tokens
-   Dark (default): Cursor-style terminal (deep navy / amber accent).
-   Light: Claude Code editorial (warm cream / ink / terracotta).
+   Dark (default): Linear / Railway style low-chrome workspace.
+   Light: quiet admin surface with the same product geometry.
    ========================================================================= */
 :root {
   color-scheme: dark;
 
-  /* Depth — Workflow Forge dark */
-  --bg-0: #050505;
-  --bg-1: #0B0B0C;
-  --bg-2: #131316;
-  --bg-3: #1A1A1C;
-  --bg-node: #1A1A1C;
-  --bg-node-elev: #212124;
+  /* Depth */
+  --bg-0: #080808;
+  --bg-1: #0D0D0E;
+  --bg-2: #141416;
+  --bg-3: #1A1B1E;
+  --bg-node: #111113;
+  --bg-node-elev: #151518;
+  --bg-toolbar: rgba(13, 13, 14, 0.9);
+  --bg-hover: rgba(255, 255, 255, 0.045);
 
   /* Dividers */
-  --border: #27272A;
-  --border-strong: #3F3F46;
-  --border-soft: #1F1F22;
+  --border: #222326;
+  --border-strong: #33343A;
+  --border-soft: #191A1D;
+  --ring: rgba(94, 106, 210, 0.28);
 
   /* Text */
-  --text-0: #FAFAFA;
+  --text-0: #F4F4F5;
   --text-1: #D4D4D8;
-  --text-2: #A1A1AA;
-  --text-3: #71717A;
+  --text-2: #8C8F98;
+  --text-3: #5F636D;
 
   /* Semantic */
-  --accent: #F5A623;
-  --accent-hi: #FBBF24;
-  --accent-lo: #B45309;
+  --accent: #5E6AD2;
+  --accent-hi: #6F7AEC;
+  --accent-lo: #4B55B8;
 
-  --running: #00E5FF;
+  --running: #45D4FF;
   --running-lo: #0891B2;
   --success: #10B981;
   --success-lo: #047857;
-  --danger: #EF4444;
+  --danger: #F87171;
   --danger-lo: #B91C1C;
-  --info: #60A5FA;
+  --info: #7C8BFF;
 
   /* Port-type colours */
-  --port-dataframe: #F5A623;
-  --port-object: #00E5FF;
+  --port-dataframe: #EAB308;
+  --port-object: #45D4FF;
   --port-scalar: #10B981;
   --port-string-list: #A78BFA;
-  --port-workflow: #F472B6;
+  --port-workflow: #FB7185;
 
   /* Atmosphere knobs per theme */
-  --atmo-gradient: none;
+  --atmo-gradient:
+    radial-gradient(circle at 52% 0%, rgba(94, 106, 210, 0.055), transparent 34%),
+    linear-gradient(180deg, rgba(255,255,255,0.012), transparent 34%);
   --grain-blend: overlay;
-  --grain-opacity: 0;
-  --dots-color: #52525B;
+  --grain-opacity: 0.035;
+  --dots-color: #323640;
 
   /* Type scale */
   --fs-micro: 10px;
@@ -72,25 +77,28 @@
 [data-theme="light"] {
   color-scheme: light;
 
-  --bg-0: #FAFAFA;
+  --bg-0: #F7F7F5;
   --bg-1: #FFFFFF;
-  --bg-2: #F4F4F5;
-  --bg-3: #E4E4E7;
+  --bg-2: #F1F1EF;
+  --bg-3: #E7E7E4;
   --bg-node: #FFFFFF;
-  --bg-node-elev: #FAFAFA;
+  --bg-node-elev: #FBFBFA;
+  --bg-toolbar: rgba(255, 255, 255, 0.86);
+  --bg-hover: rgba(24, 24, 27, 0.055);
 
-  --border: #D4D4D8;
-  --border-strong: #A1A1AA;
-  --border-soft: #E4E4E7;
+  --border: #D8D8D4;
+  --border-strong: #B8B8B2;
+  --border-soft: #E8E8E4;
+  --ring: rgba(79, 87, 216, 0.24);
 
   --text-0: #18181B;
   --text-1: #27272A;
-  --text-2: #52525B;
-  --text-3: #A1A1AA;
+  --text-2: #64666F;
+  --text-3: #9A9CA3;
 
-  --accent: #B45309;
-  --accent-hi: #D97706;
-  --accent-lo: #92400E;
+  --accent: #4F57D8;
+  --accent-hi: #6E78FF;
+  --accent-lo: #353BAA;
 
   --running: #0891B2;
   --running-lo: #0E7490;
@@ -100,16 +108,18 @@
   --danger-lo: #991B1B;
   --info: #1D4ED8;
 
-  --port-dataframe: #B45309;
+  --port-dataframe: #B7791F;
   --port-object: #0891B2;
   --port-scalar: #047857;
   --port-string-list: #6D28D9;
   --port-workflow: #BE185D;
 
-  --atmo-gradient: none;
+  --atmo-gradient:
+    radial-gradient(circle at 52% 0%, rgba(79, 87, 216, 0.08), transparent 34%),
+    linear-gradient(180deg, rgba(24,24,27,0.018), transparent 34%);
   --grain-blend: multiply;
-  --grain-opacity: 0;
-  --dots-color: #A1A1AA;
+  --grain-opacity: 0.02;
+  --dots-color: #C4C4BE;
 }
 
 /* -------------------------------------------------------------------------
@@ -121,9 +131,34 @@ body {
   transition: background-color 200ms var(--ease-out);
 }
 
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  transition:
+    background-color 140ms var(--ease-out),
+    border-color 140ms var(--ease-out),
+    color 140ms var(--ease-out),
+    opacity 140ms var(--ease-out),
+    transform 140ms var(--ease-out);
+}
+
+button:not(:disabled):hover {
+  transform: none;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-3);
+}
+
 .display {
   font-family: 'Chivo', system-ui, sans-serif;
-  letter-spacing: -0.015em;
+  letter-spacing: 0;
 }
 
 .eyebrow {
@@ -137,7 +172,7 @@ body {
 .num {
   font-family: 'IBM Plex Mono', ui-monospace, monospace;
   font-variant-numeric: tabular-nums;
-  letter-spacing: -0.01em;
+  letter-spacing: 0;
 }
 
 /* =========================================================================
@@ -169,7 +204,7 @@ body {
   background: var(--bg-3) !important;
   color: var(--text-0) !important;
 }
-.react-flow__minimap { border-radius: 6px; overflow: hidden; }
+.react-flow__minimap { border-radius: 8px; overflow: hidden; }
 .react-flow__attribution { display: none !important; }
 
 /* =========================================================================
@@ -239,6 +274,21 @@ body {
 
 .lift { transition: transform 160ms var(--ease-out), box-shadow 160ms var(--ease-out), border-color 160ms var(--ease-out), background-color 160ms var(--ease-out); }
 .lift:hover { transform: translateY(-1px); }
+
+@media (max-width: 860px) {
+  .topbar-center {
+    display: none;
+  }
+  .topbar-actions {
+    margin-left: auto;
+  }
+}
+
+@media (max-width: 620px) {
+  .topbar-action-text {
+    display: none;
+  }
+}
 
 /* =========================================================================
    Atmosphere — grain + vignette overlay for the canvas

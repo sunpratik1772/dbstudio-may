@@ -85,10 +85,10 @@ export const CustomNode = memo(({ id, data }: NodeProps<NodeData>) => {
       }}
       className={`relative cursor-pointer lift ${isRunning ? 'run-ring' : ''}`}
       style={{
-        width: 260,
-        borderRadius: 10,
+        width: 252,
+        borderRadius: 8,
         background: isRunning
-          ? 'linear-gradient(180deg, color-mix(in srgb, var(--running) 8%, var(--bg-node-elev)) 0%, var(--bg-node) 100%)'
+          ? 'linear-gradient(180deg, color-mix(in srgb, var(--running) 7%, var(--bg-node-elev)) 0%, var(--bg-node) 100%)'
           : 'linear-gradient(180deg, var(--bg-node-elev) 0%, var(--bg-node) 100%)',
         border: `${isRunning ? 2 : 1}px solid ${borderColor}`,
         boxShadow: shadow,
@@ -102,25 +102,25 @@ export const CustomNode = memo(({ id, data }: NodeProps<NodeData>) => {
       <div
         className={`relative overflow-hidden ${isRunning ? 'scan-sweep' : ''}`}
         style={{
-          height: 3,
+          height: 2,
           background: isOk
             ? 'var(--success)'
             : isError
             ? 'var(--danger)'
             : meta.color,
-          borderTopLeftRadius: 9,
-          borderTopRightRadius: 9,
+          borderTopLeftRadius: 7,
+          borderTopRightRadius: 7,
         }}
       />
 
       {/* Header row */}
-      <div className="flex items-start gap-2.5 px-3 pt-2.5 pb-1.5">
+      <div className="flex items-start gap-2.5 px-3 pt-2.5 pb-2">
         <div
           className="flex items-center justify-center rounded-md shrink-0"
           style={{
-            width: 28, height: 28,
-            background: `${meta.color}14`,
-            border: `1px solid ${meta.color}40`,
+            width: 26, height: 26,
+            background: `color-mix(in srgb, ${meta.color} 10%, transparent)`,
+            border: `1px solid color-mix(in srgb, ${meta.color} 28%, transparent)`,
             color: meta.color,
           }}
         >
@@ -129,13 +129,13 @@ export const CustomNode = memo(({ id, data }: NodeProps<NodeData>) => {
         <div className="flex-1 min-w-0">
           <div
             className="eyebrow truncate"
-            style={{ color: meta.color, letterSpacing: '0.14em', fontSize: 9.5 }}
+            style={{ color: 'var(--text-3)', letterSpacing: '0.08em', fontSize: 9.5 }}
           >
             {getNodeDisplayName(data.nodeType)}
           </div>
           <div
             className="truncate"
-            style={{ color: 'var(--text-0)', fontSize: 12.5, fontWeight: 500, lineHeight: 1.3, marginTop: 1 }}
+            style={{ color: 'var(--text-0)', fontSize: 12.5, fontWeight: 560, lineHeight: 1.3, marginTop: 2 }}
             title={data.label}
           >
             {data.label}
@@ -152,7 +152,7 @@ export const CustomNode = memo(({ id, data }: NodeProps<NodeData>) => {
           <StatusDot status={run.status} />
           <span
             className="eyebrow"
-            style={{ color: ringColor, fontSize: 9.5, letterSpacing: '0.16em' }}
+            style={{ color: ringColor, fontSize: 9.5, letterSpacing: '0.08em' }}
           >
             {statusLabel(run.status)}
           </span>
@@ -198,7 +198,7 @@ export const CustomNode = memo(({ id, data }: NodeProps<NodeData>) => {
           right: 8, bottom: 6,
           fontSize: 9,
           color: 'var(--text-3)',
-          letterSpacing: '0.04em',
+          letterSpacing: 0,
         }}
       >
         {id}
@@ -211,7 +211,7 @@ export const CustomNode = memo(({ id, data }: NodeProps<NodeData>) => {
         style={{
           background: isRunning ? 'var(--running)' : meta.color,
           border: '2px solid var(--bg-0)',
-          width: 10, height: 10,
+          width: 9, height: 9,
           boxShadow: isRunning
             ? '0 0 0 3px color-mix(in srgb, var(--running) 30%, transparent)'
             : undefined,
@@ -223,7 +223,7 @@ export const CustomNode = memo(({ id, data }: NodeProps<NodeData>) => {
         style={{
           background: isOk ? 'var(--success)' : isRunning ? 'var(--running)' : meta.color,
           border: '2px solid var(--bg-0)',
-          width: 10, height: 10,
+          width: 9, height: 9,
           boxShadow: isRunning
             ? '0 0 0 3px color-mix(in srgb, var(--running) 30%, transparent)'
             : undefined,
@@ -273,8 +273,8 @@ function StatusDot({ status }: { status: string }) {
 
 function Tag({ label, tone = 'default' }: { label: string; tone?: 'default' | 'danger' | 'muted' }) {
   const styles = {
-    default: { bg: 'rgba(96, 165, 250, 0.08)', fg: '#A5C1E0', br: 'rgba(96, 165, 250, 0.2)' },
-    danger:  { bg: 'rgba(244, 63, 94, 0.10)',   fg: '#FDA4AF', br: 'rgba(244, 63, 94, 0.25)' },
+    default: { bg: 'rgba(124, 139, 255, 0.08)', fg: '#B7BEFF', br: 'rgba(124, 139, 255, 0.2)' },
+    danger:  { bg: 'rgba(248, 113, 113, 0.10)', fg: '#FCA5A5', br: 'rgba(248, 113, 113, 0.25)' },
     muted:   { bg: 'rgba(111, 129, 154, 0.08)', fg: 'var(--text-2)', br: 'var(--border)' },
   }[tone]
   return (
@@ -283,7 +283,7 @@ function Tag({ label, tone = 'default' }: { label: string; tone?: 'default' | 'd
       style={{
         fontSize: 10,
         padding: '2px 6px',
-        borderRadius: 3,
+        borderRadius: 4,
         background: styles.bg,
         color: styles.fg,
         border: `1px solid ${styles.br}`,

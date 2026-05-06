@@ -106,7 +106,7 @@ function Group({
         {open ? <ChevronDown size={12} style={{ color: 'var(--text-3)' }} /> : <ChevronRight size={12} style={{ color: 'var(--text-3)' }} />}
         <span
           className="font-mono"
-          style={{ fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: 'var(--text-2)' }}
+          style={{ fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--text-2)' }}
         >
           {title}
         </span>
@@ -176,7 +176,7 @@ const inputStyle: React.CSSProperties = {
   color: 'var(--text-0)',
   background: 'var(--bg-0)',
   border: '1px solid var(--border)',
-  borderRadius: 6,
+  borderRadius: 7,
   padding: '6px 8px',
   fontFamily: 'var(--font-mono, ui-monospace, monospace)',
 }
@@ -192,12 +192,12 @@ function ParamRow({
   return (
     <div className="mb-2.5">
       <div className="flex items-center justify-between mb-1">
-        <span className="num" style={{ fontSize: 10.5, color: 'var(--text-1)', fontWeight: 600, letterSpacing: '0.02em' }}>
+        <span className="num" style={{ fontSize: 10.5, color: 'var(--text-1)', fontWeight: 600, letterSpacing: 0 }}>
           {field.key}
         </span>
         <span
           className="font-mono"
-          style={{ fontSize: 9, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'var(--text-3)' }}
+          style={{ fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-3)' }}
         >
           {field.kind === 'input-ref' ? 'wire' : field.kind}
         </span>

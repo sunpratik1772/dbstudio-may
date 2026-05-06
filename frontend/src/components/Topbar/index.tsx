@@ -13,6 +13,7 @@
 import { useMemo, useRef, useState } from 'react'
 import {
   Sun, Moon, LayoutTemplate, Upload, Download, ShieldCheck, Save, Play, Loader2, Trash2,
+  DatabaseZap, ChevronRight, Circle,
 } from 'lucide-react'
 import { useWorkflowStore } from '../../store/workflowStore'
 import { useThemeStore } from '../../store/themeStore'
@@ -180,64 +181,59 @@ export default function Topbar() {
 
   return (
     <div
-      className="flex items-center px-4 shrink-0"
+      className="flex items-center px-3 shrink-0"
       style={{
-        height: 56,
-        background: 'var(--bg-1)',
+        height: 48,
+        background: 'var(--bg-toolbar)',
+        backdropFilter: 'blur(18px)',
         borderBottom: '1px solid var(--border)',
       }}
     >
       {/* Left: dbSherpa logo + brand */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2.5">
         <div
           className="flex items-center justify-center overflow-hidden"
           style={{
-            width: 32, height: 32,
-            borderRadius: 8,
-            background: theme === 'dark' ? '#17181d' : '#ffffff',
-            border: '1px solid var(--border-soft)',
+            width: 28, height: 28,
+            borderRadius: 7,
+            background: 'transparent',
+            border: '1px solid var(--border)',
           }}
           aria-label="dbSherpa"
         >
-          <img
-            src={theme === 'dark' ? '/brand/dbsherpa-logo-dark.png' : '/brand/dbsherpa-logo-light.png'}
-            alt=""
-            style={{
-              width: 28,
-              height: 28,
-              objectFit: 'contain',
-              display: 'block',
-            }}
-          />
+          <DatabaseZap size={15} strokeWidth={2.2} style={{ color: 'var(--accent-hi)' }} />
         </div>
-        <div className="flex flex-col justify-center leading-tight gap-0.5">
+        <div className="flex items-center gap-2 leading-tight">
           <span
             style={{
-              fontFamily: 'Chivo, system-ui, sans-serif',
               fontWeight: 600,
-              fontSize: 16,
+              fontSize: 13.5,
               color: 'var(--text-0)',
-              letterSpacing: '-0.01em',
+              letterSpacing: 0,
             }}
           >
-            dbSherpa Studio
+            dbSherpa
           </span>
-          <span style={{ color: 'var(--text-2)', fontSize: 10, fontWeight: 500, letterSpacing: '0.02em' }}>
-            AI workflow builder
+          <ChevronRight size={13} strokeWidth={2} style={{ color: 'var(--text-3)' }} />
+          <span style={{ color: 'var(--text-2)', fontSize: 12.5, fontWeight: 500 }}>
+            Studio
           </span>
         </div>
       </div>
 
       {/* Center: title + counts */}
-      <div className="flex-1 flex items-center justify-center gap-6">
-        <span style={{ color: 'var(--text-1)', fontSize: 14, fontWeight: 500 }}>{title}</span>
-        <span className="font-mono" style={{ color: 'var(--text-3)', fontSize: 11.5 }}>
+      <div className="topbar-center flex-1 flex items-center justify-center gap-2.5 min-w-0 px-6">
+        <span className="truncate" style={{ color: 'var(--text-1)', fontSize: 13, fontWeight: 560 }}>{title}</span>
+        <span style={{ color: 'var(--text-3)', display: 'inline-flex' }}>
+          <Circle size={4} fill="currentColor" strokeWidth={0} />
+        </span>
+        <span className="font-mono" style={{ color: 'var(--text-3)', fontSize: 10.5 }}>
           {nodeCount} nodes · {edgeCount} edges
         </span>
       </div>
 
       {/* Right: action buttons */}
-      <div className="flex items-center gap-2">
+      <div className="topbar-actions flex items-center gap-1.5">
         <IconButton onClick={toggleTheme} title="Toggle theme">
           {theme === 'dark' ? <Sun size={15} strokeWidth={2} /> : <Moon size={15} strokeWidth={2} />}
         </IconButton>
@@ -293,11 +289,11 @@ function IconButton({ children, onClick, title }: { children: React.ReactNode; o
       title={title}
       className="flex items-center justify-center"
       style={{
-        width: 36, height: 36,
-        borderRadius: 8,
+        width: 32, height: 32,
+        borderRadius: 6,
         background: 'transparent',
         color: 'var(--text-1)',
-        border: '1px solid var(--border)',
+        border: '1px solid transparent',
         cursor: 'pointer',
       }}
     >
@@ -395,21 +391,21 @@ function BarButton({
       disabled={disabled}
       className="flex items-center gap-2"
       style={{
-        height: 36,
-        padding: '0 12px',
-        borderRadius: 8,
-        fontSize: 12.5,
+        height: 32,
+        padding: '0 9px',
+        borderRadius: 6,
+        fontSize: 12,
         fontWeight: 500,
         background: 'transparent',
         color: danger ? 'var(--danger)' : disabled ? 'var(--text-3)' : 'var(--text-1)',
-        border: `1px solid ${danger ? 'color-mix(in srgb, var(--danger) 50%, var(--border))' : 'var(--border)'}`,
+        border: `1px solid ${danger ? 'color-mix(in srgb, var(--danger) 50%, var(--border))' : 'transparent'}`,
         opacity: disabled ? 0.55 : 1,
         cursor: disabled ? 'not-allowed' : 'pointer',
         whiteSpace: 'nowrap',
       }}
     >
       {icon}
-      <span>{children}</span>
+      <span className="topbar-action-text">{children}</span>
     </button>
   )
 }
@@ -421,20 +417,21 @@ function RunButton({ onClick, disabled, running }: { onClick: () => void; disabl
       disabled={disabled}
       className="flex items-center gap-2"
       style={{
-        height: 36,
-        padding: '0 16px',
-        borderRadius: 8,
-        fontSize: 13,
+        height: 32,
+        padding: '0 12px',
+        borderRadius: 6,
+        fontSize: 12.5,
         fontWeight: 600,
-        background: 'var(--text-0)',
-        color: 'var(--bg-0)',
-        border: 'none',
+        background: 'var(--bg-2)',
+        color: disabled && !running ? 'var(--text-3)' : 'var(--accent-hi)',
+        border: '1px solid var(--border)',
+        boxShadow: 'none',
         opacity: disabled && !running ? 0.55 : 1,
         cursor: disabled ? (running ? 'progress' : 'not-allowed') : 'pointer',
       }}
     >
       {running ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} strokeWidth={2.5} />}
-      <span>{running ? 'Running…' : 'Run'}</span>
+      <span className="topbar-action-text">{running ? 'Running…' : 'Run'}</span>
     </button>
   )
 }

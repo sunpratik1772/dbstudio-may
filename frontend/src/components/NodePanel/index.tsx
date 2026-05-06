@@ -76,13 +76,13 @@ export default function NodePanel() {
       style={{ width: paletteWidth, background: 'var(--bg-1)', borderRight: '1px solid var(--border)' }}
     >
       {/* Header */}
-      <div className="px-4 pt-4 pb-3 shrink-0">
+      <div className="px-3.5 pt-3.5 pb-3 shrink-0">
         <div className="flex items-center gap-2">
           <div className="flex items-baseline gap-2 min-w-0">
-            <span className="font-mono" style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-1)', textTransform: 'uppercase', letterSpacing: '0.18em' }}>
+            <span style={{ fontSize: 13, fontWeight: 650, color: 'var(--text-0)', letterSpacing: 0 }}>
               NODES
             </span>
-            <span className="font-mono" style={{ fontSize: 11, color: 'var(--text-3)' }}>
+            <span className="font-mono" style={{ fontSize: 10.5, color: 'var(--text-3)' }}>
               {nodeTypes.length}
             </span>
           </div>
@@ -123,22 +123,22 @@ export default function NodePanel() {
           </button>
         </div>
         {manifestError && (
-          <div className="mt-2" style={{ fontSize: 10.5, color: 'var(--danger)' }}>
-            Live manifest failed; using generated fallback.
+          <div className="mt-2" style={{ fontSize: 10, color: 'var(--text-3)' }}>
+            Using generated node catalog.
           </div>
         )}
       </div>
 
       {/* Search */}
-      <div className="px-4 pb-3 shrink-0">
+      <div className="px-3.5 pb-3 shrink-0">
         <div
           className="flex items-center gap-2"
           style={{
-            height: 36,
+            height: 32,
             padding: '0 10px',
-            borderRadius: 8,
-            background: 'var(--bg-2)',
-            border: '1px solid var(--border)',
+            borderRadius: 6,
+            background: 'var(--bg-0)',
+            border: '1px solid var(--border-soft)',
           }}
         >
           <Search size={13} strokeWidth={2} style={{ color: 'var(--text-3)' }} />
@@ -153,13 +153,13 @@ export default function NodePanel() {
       </div>
 
       {/* Categories — labels/colors deduped from NodeSpec ui.palette */}
-      <div className="flex-1 overflow-y-auto px-3 pb-3">
+      <div className="flex-1 overflow-y-auto px-2.5 pb-3">
         {filtered.map((cat) => (
-          <div key={cat.key} className="mb-4">
-            <div className="flex items-center justify-between px-1 mb-1.5">
+          <div key={cat.key} className="mb-3.5">
+            <div className="flex items-center justify-between px-1.5 mb-1.5">
               <span
                 className="font-mono"
-                style={{ fontSize: 10.5, fontWeight: 700, color: cat.color, textTransform: 'uppercase', letterSpacing: '0.22em' }}
+                style={{ fontSize: 10, fontWeight: 650, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.16em' }}
               >
                 {cat.label}
               </span>
@@ -177,10 +177,10 @@ export default function NodePanel() {
       </div>
 
       {/* Footer */}
-      <div className="px-4 py-3 shrink-0" style={{ borderTop: '1px solid var(--border)' }}>
+      <div className="px-3.5 py-3 shrink-0" style={{ borderTop: '1px solid var(--border)' }}>
         <div className="font-mono" style={{ fontSize: 10, color: 'var(--text-3)', lineHeight: 1.5 }}>
-          drag or double-click to add ·<br />
-          palette from backend NodeSpec
+          drag or double-click to add<br />
+          synced from backend NodeSpec
         </div>
       </div>
 
@@ -214,27 +214,39 @@ function NodeCard({ type, accent }: { type: NodeType; accent: string }) {
       title={meta.description}
       className="flex items-center gap-3 cursor-grab active:cursor-grabbing"
       style={{
-        padding: '10px 12px',
-        borderRadius: 10,
-        background: 'var(--bg-node)',
-        border: '1px solid var(--border)',
+        padding: '7px 8px',
+        borderRadius: 6,
+        background: 'transparent',
+        border: '1px solid transparent',
         transition: 'border-color 140ms, background 140ms',
       }}
       onMouseEnter={(e) => {
-        ;(e.currentTarget as HTMLDivElement).style.borderColor = `color-mix(in srgb, ${accent} 50%, var(--border))`
+        ;(e.currentTarget as HTMLDivElement).style.borderColor = 'var(--border-soft)'
+        ;(e.currentTarget as HTMLDivElement).style.background = 'var(--bg-hover)'
       }}
       onMouseLeave={(e) => {
-        ;(e.currentTarget as HTMLDivElement).style.borderColor = 'var(--border)'
+        ;(e.currentTarget as HTMLDivElement).style.borderColor = 'transparent'
+        ;(e.currentTarget as HTMLDivElement).style.background = 'transparent'
       }}
     >
-      <span style={{ color: accent, display: 'inline-flex' }}>
-        <Icon size={16} strokeWidth={2} />
+      <span
+        className="items-center justify-center shrink-0"
+        style={{
+          color: 'var(--text-2)',
+          display: 'inline-flex',
+          width: 20,
+          height: 20,
+          borderRadius: 5,
+          background: 'transparent',
+        }}
+      >
+        <Icon size={14} strokeWidth={1.9} />
       </span>
       <div className="flex-1 min-w-0">
-        <div style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--text-0)', lineHeight: 1.25 }}>
+        <div style={{ fontSize: 12, fontWeight: 540, color: 'var(--text-1)', lineHeight: 1.25 }}>
           {title}
         </div>
-        <div className="font-mono truncate" style={{ fontSize: 10, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginTop: 2 }}>
+        <div className="font-mono truncate" style={{ fontSize: 9, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.04em', marginTop: 1 }}>
           {type}
         </div>
       </div>

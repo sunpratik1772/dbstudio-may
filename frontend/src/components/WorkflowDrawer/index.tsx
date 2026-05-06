@@ -193,12 +193,12 @@ export default function WorkflowDrawer() {
               padding: '8px 12px',
               borderRadius: 7,
               background: 'linear-gradient(180deg, var(--accent-hi) 0%, var(--accent-lo) 100%)',
-              color: '#0A0A0A',
-              border: '1px solid color-mix(in srgb, var(--accent-lo) 60%, black)',
+              color: '#fff',
+              border: '1px solid color-mix(in srgb, var(--accent-hi) 35%, var(--accent-lo))',
               boxShadow: '0 1px 0 rgba(255,255,255,0.25) inset, 0 8px 18px -8px color-mix(in srgb, var(--accent) 55%, transparent)',
               fontSize: 12.5,
               fontWeight: 600,
-              letterSpacing: '0.01em',
+              letterSpacing: 0,
             }}
           >
             <FilePlus2 size={13} strokeWidth={2.2} />
@@ -361,7 +361,7 @@ function TabButton({
         borderBottom: active ? '2px solid var(--accent)' : '2px solid transparent',
         fontSize: 11,
         fontWeight: 600,
-        letterSpacing: '0.1em',
+        letterSpacing: '0.08em',
         textTransform: 'uppercase',
         borderRight: '1px solid var(--border-soft)',
       }}
@@ -463,7 +463,7 @@ function DrawerItem({
               fontSize: 12.5,
               fontWeight: 600,
               color: active ? accent : 'var(--text-0)',
-              letterSpacing: '-0.005em',
+              letterSpacing: 0,
             }}
           >
             {w.name || w.filename}
@@ -507,7 +507,7 @@ function DrawerItem({
             style={{
               fontSize: 10,
               color: 'var(--text-3)',
-              letterSpacing: '0.02em',
+              letterSpacing: 0,
               flex: 1,
               minWidth: 0,
             }}
