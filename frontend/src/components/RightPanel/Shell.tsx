@@ -30,10 +30,9 @@ export default function Shell({ icon: Icon, title, eyebrow, subtitle, accent, ri
   return (
     <div
       ref={rootRef}
-      className="flex flex-col relative shrink-0"
+      className="panel-glass flex flex-col relative shrink-0"
       style={{
         width: copilotWidth,
-        background: 'var(--bg-1)',
         borderLeft: '1px solid var(--border)',
         height: '100%',
       }}
@@ -47,12 +46,12 @@ export default function Shell({ icon: Icon, title, eyebrow, subtitle, accent, ri
         }}
       />
       <div
-        className="px-4 pt-3.5 pb-3 shrink-0"
+        className="px-4 pt-4 pb-3 shrink-0"
         style={{ borderBottom: '1px solid var(--border)' }}
       >
         <div className="flex items-center gap-2">
           <Icon size={16} strokeWidth={2} style={{ color: tone }} />
-          <span style={{ fontSize: 13.5, fontWeight: 650, color: 'var(--text-0)' }}>
+          <span style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-0)' }}>
             {title}
           </span>
           {eyebrow && (
@@ -68,7 +67,7 @@ export default function Shell({ icon: Icon, title, eyebrow, subtitle, accent, ri
             className="flex items-center justify-center"
             style={{
               width: 24, height: 24, borderRadius: 6,
-              background: 'var(--bg-hover)', color: 'var(--text-3)',
+              background: 'transparent', color: 'var(--text-3)',
               border: '1px solid var(--border-soft)',
               cursor: 'pointer',
             }}
@@ -98,7 +97,7 @@ export function SectionHeader({ children, accent }: { children: React.ReactNode;
       className="font-mono"
       style={{
         fontSize: 10,
-        letterSpacing: '0.12em',
+        letterSpacing: '0.18em',
         textTransform: 'uppercase',
         color: accent ?? 'var(--text-3)',
         marginBottom: 8,

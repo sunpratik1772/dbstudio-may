@@ -72,8 +72,8 @@ export default function NodePanel() {
   return (
     <div
       ref={rootRef}
-      className="flex flex-col h-full overflow-hidden relative shrink-0"
-      style={{ width: paletteWidth, background: 'var(--bg-1)', borderRight: '1px solid var(--border)' }}
+      className="panel-glass flex flex-col h-full overflow-hidden relative shrink-0"
+      style={{ width: paletteWidth, borderRight: '1px solid var(--border)' }}
     >
       {/* Header */}
       <div className="px-3.5 pt-3.5 pb-3 shrink-0">

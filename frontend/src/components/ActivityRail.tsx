@@ -15,10 +15,9 @@ export default function ActivityRail() {
 
   return (
     <div
-      className="flex flex-col items-center py-3 gap-1 shrink-0"
+      className="panel-glass flex flex-col items-center py-3 gap-1 shrink-0"
       style={{
-        width: 46,
-        background: 'var(--bg-1)',
+        width: 48,
         borderLeft: '1px solid var(--border)',
       }}
     >
@@ -57,11 +56,13 @@ function RailButton({ icon, active, onClick, title }: { icon: React.ReactNode; a
       title={title}
       className="flex items-center justify-center"
       style={{
-        width: 34, height: 34,
-        borderRadius: 7,
-        background: active ? 'var(--bg-hover)' : 'transparent',
-        color: active ? 'var(--accent-hi)' : 'var(--text-3)',
-        border: active ? '1px solid var(--border)' : '1px solid transparent',
+        width: 36, height: 36,
+        borderRadius: 8,
+        background: active
+          ? 'color-mix(in srgb, var(--accent) 22%, transparent)'
+          : 'transparent',
+        color: active ? 'var(--accent)' : 'var(--text-3)',
+        border: 'none',
         cursor: 'pointer',
       }}
     >
