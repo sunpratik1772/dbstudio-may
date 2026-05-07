@@ -138,12 +138,11 @@ export default function WorkflowDrawer() {
     <>
       <div className="drawer-backdrop" onClick={() => setOpen(false)} />
       <aside
-        className="drawer"
+        className="drawer panel-glass"
         role="dialog"
         aria-label="Stored workflows"
         style={{
           width: 360,
-          background: 'var(--bg-1)',
           borderRight: '1px solid var(--border-strong)',
           boxShadow: '12px 0 32px -16px rgba(0,0,0,.35)',
           display: 'flex',

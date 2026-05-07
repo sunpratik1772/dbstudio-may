@@ -672,10 +672,9 @@ export default function Copilot() {
   return (
     <div
       ref={rootRef}
-      className="flex flex-col relative shrink-0"
+      className="panel-glass flex flex-col relative shrink-0"
       style={{
         width: copilotWidth,
-        background: 'var(--bg-1)',
         borderLeft: '1px solid var(--border)',
         height: '100%',
       }}
@@ -693,7 +692,7 @@ export default function Copilot() {
       <div className="px-4 pt-4 pb-3 shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
         <div className="flex items-center gap-2">
           <Sparkles size={16} strokeWidth={2} style={{ color: 'var(--accent)' }} />
-          <span style={{ fontFamily: 'Chivo, system-ui, sans-serif', fontSize: 15, fontWeight: 600, color: 'var(--text-0)' }}>Copilot</span>
+          <span style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-0)' }}>Copilot</span>
           <span className="font-mono" style={{ fontSize: 10, color: 'var(--text-3)', letterSpacing: '0.18em', textTransform: 'uppercase' }}>
             GEMINI
           </span>

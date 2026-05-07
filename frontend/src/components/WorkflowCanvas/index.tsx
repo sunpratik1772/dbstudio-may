@@ -214,12 +214,12 @@ function EmptyCanvas({ onDragOver, onDrop }: { onDragOver: (e: DragEvent<HTMLDiv
   return (
     <div
       className="flex-1 relative flex items-center justify-center"
-      style={{ background: 'var(--bg-0)' }}
+      style={{ background: 'transparent' }}
       onDragOver={onDragOver}
       onDrop={onDrop}
     >
       <div className="text-center relative z-10 max-w-md px-6" style={{ display: 'grid', gap: 18, justifyItems: 'center' }}>
-        <h2 style={{ fontFamily: 'Chivo, system-ui, sans-serif', color: 'var(--text-0)', fontSize: 32, fontWeight: 600, letterSpacing: '-0.025em', lineHeight: 1.1 }}>
+        <h2 style={{ color: 'var(--text-0)', fontSize: 30, fontWeight: 600, letterSpacing: '-0.03em', lineHeight: 1.1 }}>
           Compose a workflow
         </h2>
         <p style={{ color: 'var(--text-2)', fontSize: 13.5, lineHeight: 1.55, maxWidth: 440 }}>
@@ -231,8 +231,11 @@ function EmptyCanvas({ onDragOver, onDrop }: { onDragOver: (e: DragEvent<HTMLDiv
             onClick={() => setDrawerOpen(true)}
             style={{
               height: 40, padding: '0 18px', borderRadius: 8,
-              background: 'var(--text-0)', color: 'var(--bg-0)',
-              border: 'none', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+              background: 'linear-gradient(135deg, var(--accent-hi) 0%, var(--accent-lo) 100%)',
+              color: '#fff',
+              border: '1px solid color-mix(in srgb, var(--accent-lo) 45%, transparent)',
+              fontSize: 13, fontWeight: 600, cursor: 'pointer',
+              boxShadow: '0 4px 14px color-mix(in srgb, var(--accent) 28%, transparent)',
             }}
           >
             Load a template
@@ -378,7 +381,7 @@ function WorkflowCanvasInner() {
     <div
       ref={wrapperRef}
       className="flex-1 relative"
-      style={{ background: 'var(--bg-0)' }}
+      style={{ background: 'transparent' }}
       onDragOver={onDragOver}
       onDrop={onDrop}
     >
@@ -420,8 +423,8 @@ function WorkflowCanvasInner() {
           color="var(--dots-color)"
         />
         <Controls
+          className="panel-glass !bg-[var(--panel-glass-bg)]"
           style={{
-            background: 'var(--bg-1)',
             border: '1px solid var(--border)',
             borderRadius: 8,
             overflow: 'hidden',
@@ -429,8 +432,8 @@ function WorkflowCanvasInner() {
           showInteractive={false}
         />
         <MiniMap
+          className="panel-glass !bg-[var(--panel-glass-bg)]"
           style={{
-            background: 'var(--bg-1)',
             border: '1px solid var(--border)',
             borderRadius: 6,
           }}
@@ -438,7 +441,7 @@ function WorkflowCanvasInner() {
             const nodeType = (n.data as { nodeType: string })?.nodeType
             return useNodeRegistryStore.getState().nodeUI[nodeType]?.color ?? 'var(--text-3)'
           }}
-          maskColor="rgba(5, 5, 5, 0.75)"
+          maskColor="var(--minimap-mask)"
           pannable
           zoomable
         />

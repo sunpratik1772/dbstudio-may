@@ -3,126 +3,219 @@
 @tailwind utilities;
 
 /* =========================================================================
-   dbSherpa — design tokens
-   Dark (default): Cursor-style terminal (deep navy / amber accent).
-   Light: Claude Code editorial (warm cream / ink / terracotta).
+   dbSherpa Studio — cosmic / glass (matches dbSherpa Studio v5 reference)
    ========================================================================= */
 :root {
   color-scheme: dark;
 
-  /* Depth — Workflow Forge dark */
-  --bg-0: #050505;
-  --bg-1: #0B0B0C;
-  --bg-2: #131316;
-  --bg-3: #1A1A1C;
-  --bg-node: #1A1A1C;
-  --bg-node-elev: #212124;
+  --studio-wash: radial-gradient(ellipse 120% 80% at 50% 0%, #15131f 0%, #0a0a0f 55%, #07070d 100%);
+  --glow-1: rgba(120, 90, 200, 0.2);
+  --glow-2: rgba(60, 90, 180, 0.16);
+  --glow-3: rgba(180, 80, 140, 0.12);
 
-  /* Dividers */
-  --border: #27272A;
-  --border-strong: #3F3F46;
-  --border-soft: #1F1F22;
+  /* Foundation */
+  --bg-base: #0a0a0f;
+  --bg-deep: #070710;
 
-  /* Text */
-  --text-0: #FAFAFA;
-  --text-1: #D4D4D8;
-  --text-2: #A1A1AA;
-  --text-3: #71717A;
+  /* Solid surfaces (cards, inputs) */
+  --bg-0: #0a0a0f;
+  --bg-1: rgba(20, 20, 28, 0.78);
+  --bg-2: #15151f;
+  --bg-3: #1a1a25;
+  --bg-node: #15151f;
+  --bg-node-elev: #1a1a25;
 
-  /* Semantic */
-  --accent: #F5A623;
-  --accent-hi: #FBBF24;
-  --accent-lo: #B45309;
+  --panel-glass-bg: rgba(20, 20, 28, 0.72);
 
-  --running: #00E5FF;
-  --running-lo: #0891B2;
-  --success: #10B981;
-  --success-lo: #047857;
-  --danger: #EF4444;
-  --danger-lo: #B91C1C;
-  --info: #60A5FA;
+  --border: rgba(255, 255, 255, 0.06);
+  --border-strong: rgba(255, 255, 255, 0.12);
+  --border-soft: rgba(255, 255, 255, 0.04);
+  --border-solid: #26262f;
 
-  /* Port-type colours */
-  --port-dataframe: #F5A623;
-  --port-object: #00E5FF;
-  --port-scalar: #10B981;
-  --port-string-list: #A78BFA;
-  --port-workflow: #F472B6;
+  --text-0: #f1f1f4;
+  --text-1: #c8c8d4;
+  --text-2: #9696a6;
+  --text-3: #5d5d6c;
 
-  /* Atmosphere knobs per theme */
+  --accent: #9b8cff;
+  --accent-soft: rgba(155, 140, 255, 0.14);
+  --accent-hi: #b4a9ff;
+  --accent-lo: #7c6ad4;
+  --accent-cyan: #22d3ee;
+
+  --running: #22d3ee;
+  --running-lo: #06b6d4;
+  --success: #4ade80;
+  --success-lo: #22c55e;
+  --danger: #f87171;
+  --danger-lo: #ef4444;
+  --info: #60a5fa;
+  --warning: #fbbf24;
+
+  --port-dataframe: #fbbf24;
+  --port-object: #22d3ee;
+  --port-scalar: #4ade80;
+  --port-string-list: #9b8cff;
+  --port-workflow: #f472b6;
+
+  --minimap-mask: rgba(7, 7, 16, 0.72);
+
   --atmo-gradient: none;
   --grain-blend: overlay;
   --grain-opacity: 0;
-  --dots-color: #52525B;
+  --dots-color: rgba(150, 150, 166, 0.22);
 
-  /* Type scale */
   --fs-micro: 10px;
   --fs-caption: 11px;
   --fs-body: 12.5px;
   --fs-h: 13.5px;
 
-  /* Motion */
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-in-out: cubic-bezier(0.83, 0, 0.17, 1);
 }
 
-/* -------------------------------------------------------------------------
-   Light theme — Claude Code editorial
-   ------------------------------------------------------------------------- */
 [data-theme="light"] {
   color-scheme: light;
 
-  --bg-0: #FAFAFA;
-  --bg-1: #FFFFFF;
-  --bg-2: #F4F4F5;
-  --bg-3: #E4E4E7;
-  --bg-node: #FFFFFF;
-  --bg-node-elev: #FAFAFA;
+  --studio-wash: radial-gradient(ellipse 120% 80% at 50% 0%, #f7f5ee 0%, #faf9f4 60%, #f0eee5 100%);
+  --glow-1: rgba(180, 160, 240, 0.3);
+  --glow-2: rgba(140, 180, 240, 0.25);
+  --glow-3: rgba(240, 170, 200, 0.22);
 
-  --border: #D4D4D8;
-  --border-strong: #A1A1AA;
-  --border-soft: #E4E4E7;
+  --bg-base: #fafaf7;
+  --bg-deep: #f3f2ed;
 
-  --text-0: #18181B;
-  --text-1: #27272A;
-  --text-2: #52525B;
-  --text-3: #A1A1AA;
+  --bg-0: #fafaf7;
+  --bg-1: rgba(255, 255, 255, 0.82);
+  --bg-2: #ffffff;
+  --bg-3: #fbfaf6;
+  --bg-node: #ffffff;
+  --bg-node-elev: #fbfaf6;
 
-  --accent: #B45309;
-  --accent-hi: #D97706;
-  --accent-lo: #92400E;
+  --panel-glass-bg: rgba(255, 255, 255, 0.78);
 
-  --running: #0891B2;
-  --running-lo: #0E7490;
-  --success: #047857;
-  --success-lo: #065F46;
-  --danger: #B91C1C;
-  --danger-lo: #991B1B;
-  --info: #1D4ED8;
+  --border: rgba(20, 20, 30, 0.07);
+  --border-strong: rgba(20, 20, 30, 0.14);
+  --border-soft: rgba(20, 20, 30, 0.05);
+  --border-solid: #e5e3dc;
 
-  --port-dataframe: #B45309;
-  --port-object: #0891B2;
-  --port-scalar: #047857;
-  --port-string-list: #6D28D9;
-  --port-workflow: #BE185D;
+  --text-0: #1a1a22;
+  --text-1: #3a3a48;
+  --text-2: #5a5a68;
+  --text-3: #9a9aa8;
+
+  --accent: #6b46f0;
+  --accent-soft: rgba(107, 70, 240, 0.1);
+  --accent-hi: #8b5cf6;
+  --accent-lo: #5b21b6;
+  --accent-cyan: #0891b2;
+
+  --running: #0891b2;
+  --running-lo: #0e7490;
+  --success: #16a34a;
+  --success-lo: #15803d;
+  --danger: #dc2626;
+  --danger-lo: #b91c1c;
+  --info: #2563eb;
+  --warning: #d97706;
+
+  --port-dataframe: #d97706;
+  --port-object: #0891b2;
+  --port-scalar: #16a34a;
+  --port-string-list: #6b46f0;
+  --port-workflow: #be185d;
+
+  --minimap-mask: rgba(243, 242, 237, 0.82);
 
   --atmo-gradient: none;
   --grain-blend: multiply;
   --grain-opacity: 0;
-  --dots-color: #A1A1AA;
+  --dots-color: rgba(90, 90, 104, 0.2);
+}
+
+/* -------------------------------------------------------------------------
+   Studio backdrop (aurora) — fixed behind app chrome
+   ------------------------------------------------------------------------- */
+.studio-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.studio-backdrop__wash {
+  position: absolute;
+  inset: 0;
+  background: var(--studio-wash);
+}
+
+.studio-backdrop__blob {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.studio-backdrop__blob--1 {
+  top: -15%;
+  left: -10%;
+  width: 70%;
+  height: 70%;
+  background: radial-gradient(circle, var(--glow-1) 0%, transparent 60%);
+  filter: blur(60px);
+  animation: studio-drift-1 18s ease-in-out infinite;
+}
+
+.studio-backdrop__blob--2 {
+  top: 40%;
+  right: -15%;
+  width: 65%;
+  height: 65%;
+  background: radial-gradient(circle, var(--glow-2) 0%, transparent 60%);
+  filter: blur(70px);
+  animation: studio-drift-2 22s ease-in-out infinite;
+}
+
+.studio-backdrop__blob--3 {
+  bottom: -10%;
+  left: 25%;
+  width: 55%;
+  height: 55%;
+  background: radial-gradient(circle, var(--glow-3) 0%, transparent 60%);
+  filter: blur(80px);
+  animation: studio-drift-3 26s ease-in-out infinite;
+}
+
+@keyframes studio-drift-1 {
+  0%, 100% { transform: translate(0, 0); }
+  50% { transform: translate(20px, -10px); }
+}
+@keyframes studio-drift-2 {
+  0%, 100% { transform: translate(0, 0); }
+  50% { transform: translate(-15px, 12px); }
+}
+@keyframes studio-drift-3 {
+  0%, 100% { transform: translate(0, 0); }
+  50% { transform: translate(8px, 18px); }
+}
+
+.panel-glass {
+  background: var(--panel-glass-bg);
+  -webkit-backdrop-filter: saturate(140%) blur(20px);
+  backdrop-filter: saturate(140%) blur(20px);
 }
 
 /* -------------------------------------------------------------------------
    Body + utility classes
    ------------------------------------------------------------------------- */
 body {
-  background: var(--bg-0);
+  background: var(--bg-base);
   color: var(--text-0);
   transition: background-color 200ms var(--ease-out);
 }
 
 .display {
-  font-family: 'Chivo', system-ui, sans-serif;
+  font-family: 'Inter', system-ui, sans-serif;
   letter-spacing: -0.015em;
 }
 
@@ -161,9 +254,11 @@ body {
   stroke-dasharray: none;
 }
 .react-flow__controls button {
-  background: var(--bg-1) !important;
+  background: var(--panel-glass-bg) !important;
   border-color: var(--border) !important;
   color: var(--text-2) !important;
+  -webkit-backdrop-filter: saturate(140%) blur(12px) !important;
+  backdrop-filter: saturate(140%) blur(12px) !important;
 }
 .react-flow__controls button:hover {
   background: var(--bg-3) !important;
@@ -173,12 +268,15 @@ body {
 .react-flow__attribution { display: none !important; }
 
 /* =========================================================================
-   Scrollbar
+   Scrollbar (Studio v5)
    ========================================================================= */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
+::-webkit-scrollbar-thumb {
+  border-radius: 99px;
+  background: rgba(127, 127, 140, 0.3);
+}
+::-webkit-scrollbar-thumb:hover { background: rgba(127, 127, 140, 0.5); }
 
 /* =========================================================================
    Motion
@@ -189,8 +287,6 @@ body {
 }
 .animate-pulse-border { animation: pulse-border 2s ease-in-out infinite; }
 
-/* Running-node ring; pulls colour from --running via color-mix so it
-   adapts to both themes automatically. */
 @keyframes run-ring {
   0% {
     box-shadow:
@@ -260,9 +356,6 @@ body {
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.5 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
 }
 
-/* =========================================================================
-   Chip primitives (use color-mix for theme-adaptive tints)
-   ========================================================================= */
 .chip {
   display: inline-flex; align-items: center; gap: 4px;
   padding: 2px 6px;
@@ -279,19 +372,11 @@ body {
 .chip--ok      { background: color-mix(in srgb, var(--success) 14%, transparent); color: var(--success); border: 1px solid color-mix(in srgb, var(--success) 40%, transparent); }
 .chip--error   { background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--danger); border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent); }
 
-/* =========================================================================
-   Focus
-   ========================================================================= */
 button:focus-visible, [role="button"]:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--running) 55%, transparent);
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
   outline-offset: 2px;
 }
 
-/* =========================================================================
-   Stored-workflows drawer
-   - Slides in from the left, overlays the main row.
-   - Backdrop fades in beside it.
-   ========================================================================= */
 @keyframes drawer-in {
   from { transform: translateX(-100%); opacity: 0.6; }
   to   { transform: translateX(0);     opacity: 1; }
@@ -311,24 +396,17 @@ button:focus-visible, [role="button"]:focus-visible {
   position: absolute;
   inset: 0;
   z-index: 35;
-  background: color-mix(in srgb, var(--bg-0) 55%, transparent);
+  background: color-mix(in srgb, var(--bg-base) 55%, transparent);
   backdrop-filter: blur(2px);
   -webkit-backdrop-filter: blur(2px);
   animation: backdrop-in 180ms var(--ease-out);
 }
 
-/* =========================================================================
-   Run console (bottom bar)
-   ========================================================================= */
 .run-console {
-  /* Most styling is inline for clarity; keep this hook for future polish. */
   backdrop-filter: saturate(140%);
   -webkit-backdrop-filter: saturate(140%);
 }
 
-/* =========================================================================
-   Document chip — visual edit vs create distinction
-   ========================================================================= */
 .doc-chip {
   transition: background-color 160ms var(--ease-out),
               border-color 160ms var(--ease-out);
@@ -337,27 +415,18 @@ button:focus-visible, [role="button"]:focus-visible {
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 10%, transparent) inset;
 }
 .doc-chip--new {
-  /* Slightly reduced emphasis — draws the eye less than edit mode. */
   opacity: 0.95;
 }
 
-/* Tailwind's `animate-spin` is fine, but guarantee it exists for bundles
-   where Tailwind's utilities haven't been generated yet. */
 @keyframes drawer-spin { to { transform: rotate(360deg); } }
 .animate-spin { animation: drawer-spin 0.9s linear infinite; }
 
-/* =========================================================================
-   Port-type colour classes (Workflow Forge convention)
-   ========================================================================= */
 .port-dataframe   { background: var(--port-dataframe);   border-color: var(--port-dataframe); }
 .port-object      { background: var(--port-object);      border-color: var(--port-object); }
 .port-scalar      { background: var(--port-scalar);      border-color: var(--port-scalar); }
 .port-string-list { background: var(--port-string-list); border-color: var(--port-string-list); }
 .port-workflow    { background: var(--port-workflow);    border-color: var(--port-workflow); }
 
-/* =========================================================================
-   Workflow Forge motion primitives
-   ========================================================================= */
 @keyframes blink-soft {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }

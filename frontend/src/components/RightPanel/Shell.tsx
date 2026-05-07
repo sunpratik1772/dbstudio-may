@@ -30,10 +30,9 @@ export default function Shell({ icon: Icon, title, eyebrow, subtitle, accent, ri
   return (
     <div
       ref={rootRef}
-      className="flex flex-col relative shrink-0"
+      className="panel-glass flex flex-col relative shrink-0"
       style={{
         width: copilotWidth,
-        background: 'var(--bg-1)',
         borderLeft: '1px solid var(--border)',
         height: '100%',
       }}
@@ -52,7 +51,7 @@ export default function Shell({ icon: Icon, title, eyebrow, subtitle, accent, ri
       >
         <div className="flex items-center gap-2">
           <Icon size={16} strokeWidth={2} style={{ color: tone }} />
-          <span style={{ fontFamily: 'Chivo, system-ui, sans-serif', fontSize: 15, fontWeight: 600, color: 'var(--text-0)' }}>
+          <span style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-0)' }}>
             {title}
           </span>
           {eyebrow && (

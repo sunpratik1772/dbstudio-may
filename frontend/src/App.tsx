@@ -39,17 +39,22 @@ export default function App() {
   }, [])
 
   return (
-    <div
-      className="flex flex-col h-screen overflow-hidden"
-      style={{ background: 'var(--bg-0)', color: 'var(--text-0)' }}
-    >
-      <Topbar />
-      <div className="flex flex-1 overflow-hidden relative">
-        <NodePanel />
-        <WorkflowCanvas />
-        <ActivityRail />
-        <RightPanel />
-        <WorkflowDrawer />
+    <div className="relative h-screen overflow-hidden text-[var(--text-0)]">
+      <div className="studio-backdrop" aria-hidden>
+        <div className="studio-backdrop__wash" />
+        <div className="studio-backdrop__blob studio-backdrop__blob--1" />
+        <div className="studio-backdrop__blob studio-backdrop__blob--2" />
+        <div className="studio-backdrop__blob studio-backdrop__blob--3" />
+      </div>
+      <div className="relative z-10 flex flex-col h-full">
+        <Topbar />
+        <div className="flex flex-1 overflow-hidden relative min-h-0">
+          <NodePanel />
+          <WorkflowCanvas />
+          <ActivityRail />
+          <RightPanel />
+          <WorkflowDrawer />
+        </div>
       </div>
     </div>
   )
